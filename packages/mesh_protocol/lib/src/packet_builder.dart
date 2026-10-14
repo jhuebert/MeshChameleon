@@ -273,6 +273,27 @@ class PacketBuilder {
     ..pathLenByte = 0
     ..payload = Uint8List.fromList(data);
 
+  /// Build a trace packet (`PAYLOAD_TYPE_TRACE`, route direct). The payload is
+  /// `tag(4) + auth_code(4) + flags(1) + path bytes`; the path is *appended to
+  /// the payload* (the routing path field stays empty), matching the firmware's
+  /// `Mesh::sendDirect` trace special-case and openhop's `create_trace`.
+  static Packet createTrace({
+    required int tag,
+    required int authCode,
+    required int flags,
+    List<int> path = const [],
+  }) {
+    final w = BufferWriter()
+      ..writeUInt32Le(tag)
+      ..writeUInt32Le(authCode)
+      ..writeByte(flags & 0xFF)
+      ..writeBytes(path);
+    return Packet()
+      ..header = Packet.createHeader(payloadTypeTrace, routeTypeDirect)
+      ..pathLenByte = 0
+      ..payload = w.toBytes();
+  }
+
   /// Build a protocol request (repeater status/telemetry/etc.).
   static Future<Packet> createProtocolRequest({
     required Contact contact,

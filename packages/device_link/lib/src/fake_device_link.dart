@@ -52,6 +52,7 @@ class FakeDeviceLink implements RadioLink {
     this.rssi = -70,
     this.bus,
     this.echoSelf = false,
+    this.connectFailures = 0,
   });
 
   final DeviceInfo deviceInfo_;
@@ -63,6 +64,9 @@ class FakeDeviceLink implements RadioLink {
 
   /// When true, the simulator also loops the transmitted frame back to itself.
   final bool echoSelf;
+
+  /// Number of initial [connect] calls that should fail (for backoff tests).
+  int connectFailures;
 
   final _stateController = StreamController<LinkState>.broadcast();
   LinkState _state = LinkState.disconnected;
@@ -82,6 +86,10 @@ class FakeDeviceLink implements RadioLink {
   @override
   Future<void> connect() async {
     if (_state == LinkState.connected) return;
+    if (connectFailures > 0) {
+      connectFailures--;
+      throw StateError('simulated connect failure');
+    }
     _state = LinkState.connected;
     _stateController.add(_state);
     bus?.attach(this);
@@ -123,6 +131,32 @@ class FakeDeviceLink implements RadioLink {
 
   @override
   Future<void> setTxPower(int dbm) async {}
+
+  @override
+  Future<TuningParams> tuningParams() async => _tuning;
+
+  @override
+  Future<void> setTuningParams(TuningParams params) async {
+    _tuning = params;
+  }
+
+  @override
+  Future<void> setPathHashMode(int mode) async {
+    pathHashMode = mode;
+  }
+
+  @override
+  Future<void> runCliCommand(String command) async {
+    cliCommands.add(command);
+  }
+
+  TuningParams _tuning = const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
+
+  /// Last path-hash mode set via [setPathHashMode].
+  int pathHashMode = 0;
+
+  /// Every CLI command received (for test assertions).
+  final List<String> cliCommands = [];
 
   @override
   Future<BatteryReading?> battery() async => batteryReading_;

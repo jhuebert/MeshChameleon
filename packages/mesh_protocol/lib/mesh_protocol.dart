@@ -4,6 +4,7 @@
 /// on any Dart VM and usable from desktop variants of the proxy.
 library;
 
+export 'src/airtime.dart';
 export 'src/buffer.dart';
 export 'src/constants.dart';
 export 'src/crypto.dart';

@@ -67,6 +67,40 @@ class TestBridge extends CompanionBridge {
   @override
   bool setRadioParams(int freqHz, int bwHz, int sf, int cr) => true;
 
+  int pathHash = 0;
+  TuningParams tuning =
+      const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
+
+  @override
+  int getPathHashMode() => pathHash;
+
+  @override
+  void setPathHashMode(int mode) => pathHash = mode;
+
+  @override
+  Future<TuningParams> getTuningParams() async => tuning;
+
+  @override
+  void setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) {
+    tuning = TuningParams(
+      rxDelayBaseMs: rxDelayBaseMs,
+      airtimeFactorMs: airtimeFactorMs,
+    );
+  }
+
+  @override
+  Future<SentResult> sendTelemetryRequest(Uint8List pubkey,
+          {bool wantBase = true,
+          bool wantLocation = true,
+          bool wantEnvironment = true}) async =>
+      const SentResult(
+          success: true, isFlood: false, expectedAck: 0x99, timeoutMs: 10000);
+
+  @override
+  Future<bool> sendTracePathRaw(
+          int tag, int authCode, int flags, Uint8List pathBytes) async =>
+      true;
+
   @override
   Future<SentResult> sendTextMessage(Uint8List pubkey, String text,
           {int txtType = txtTypePlain, int attempt = 0, bool waitForAck = false}) async =>
@@ -265,6 +299,96 @@ void main() {
     final sig = await client.frames.next();
     expect(sig[0], respCodeSignature);
     expect(sig.length, 65);
+  });
+
+  test('SET_PATH_HASH_MODE stores and DEVICE_QUERY reflects it', () async {
+    client.send([cmdSetPathHashMode, 0, 1]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.pathHash, 1);
+
+    client.send([cmdDeviceQuery, appProtocolVersion]);
+    final resp = await client.frames.next();
+    expect(resp[81] & 0xFF, 1);
+
+    client.send([cmdSetPathHashMode, 0, 3]);
+    final err = await client.frames.next();
+    expect(err[0], respCodeErr);
+    expect(err[1], errCodeIllegalArg);
+  });
+
+  test('GET/SET_TUNING_PARAMS round trip', () async {
+    final set = BufferWriter()
+      ..writeByte(cmdSetTuningParams)
+      ..writeUInt32Le(777)
+      ..writeUInt32Le(42);
+    client.send(set.toBytes());
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.tuning.rxDelayBaseMs, 777);
+    expect(bridge.tuning.airtimeFactorMs, 42);
+
+    client.send([cmdGetTuningParams]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeTuningParams);
+    final r = BufferReader(resp)..skipBytes(1);
+    expect(r.readUInt32Le(), 777);
+    expect(r.readUInt32Le(), 42);
+  });
+
+  test('SEND_TELEMETRY_REQ returns SENT and later pushes the response', () async {
+    final pubkey = Uint8List(32)..[0] = 7;
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'sensor'));
+    final w = BufferWriter()
+      ..writeByte(cmdSendTelemetryReq)
+      ..writeBytes([0, 0, 0])
+      ..writeBytes(pubkey);
+    client.send(w.toBytes());
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeSent);
+    final r = BufferReader(resp)..skipBytes(2);
+    expect(r.readUInt32Le(), 0x99);
+  });
+
+  test('RUN_CLI_COMMAND forwards to the bridge', () async {
+    client.send([cmdRunCliCommand, ...'adv_int 0'.codeUnits, 0]);
+    expect((await client.frames.next())[0], respCodeOk);
+  });
+
+  test('SEND_TRACE_PATH returns SENT', () async {
+    final w = BufferWriter()
+      ..writeByte(cmdSendTracePath)
+      ..writeUInt32Le(0x1234)
+      ..writeUInt32Le(0)
+      ..writeByte(0)
+      ..writeBytes([1, 2, 3]);
+    client.send(w.toBytes());
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeSent);
+    final r = BufferReader(resp)..skipBytes(2);
+    expect(r.readUInt32Le(), 0x1234);
+  });
+
+  test('pushTraceData emits PUSH_CODE_TRACE_DATA matching the firmware',
+      () async {
+    server.pushTraceData(
+      2,
+      0,
+      0x1111,
+      0,
+      Uint8List.fromList([1, 2]),
+      Uint8List.fromList([0x20, 0x30]),
+      24,
+    );
+    final resp = await client.frames.next();
+    expect(resp[0], pushCodeTraceData);
+    expect(resp[1], 0);
+    expect(resp[2], 2); // path_len
+    expect(resp[3], 0); // flags
+    final r = BufferReader(resp)..skipBytes(4);
+    expect(r.readUInt32Le(), 0x1111);
+    expect(r.readUInt32Le(), 0);
+    expect(r.readBytes(2), [1, 2]);
+    expect(r.readBytes(2), [0x20, 0x30]);
+    expect(r.readByte(), 24);
   });
 
   test('unsupported command returns ERR', () async {

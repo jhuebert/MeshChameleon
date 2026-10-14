@@ -27,6 +27,18 @@ abstract class RadioLink {
   Future<void> setRadioParams(RadioParams params);
   Future<void> setTxPower(int dbm);
   Future<BatteryReading?> battery();
+
+  /// Read the device's radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
+  Future<TuningParams> tuningParams();
+
+  /// Write the device's radio tuning parameters (`CMD_SET_TUNING_PARAMS`).
+  Future<void> setTuningParams(TuningParams params);
+
+  /// Set the device's path-hash mode (`CMD_SET_PATH_HASH_MODE`, fw v10+).
+  Future<void> setPathHashMode(int mode);
+
+  /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
+  Future<void> runCliCommand(String command);
 }
 
 /// Frames the proxy sends to the device (the device-facing subset).
@@ -78,6 +90,18 @@ class DeviceFrames {
 
   static Uint8List setTxPower(int dbm) =>
       Uint8List.fromList([cmdSetRadioTxPower, dbm & 0xFF]);
+
+  static Uint8List getTuningParams() =>
+      Uint8List.fromList([cmdGetTuningParams]);
+
+  static Uint8List setTuningParams(TuningParams params) => (BufferWriter()
+        ..writeByte(cmdSetTuningParams)
+        ..writeUInt32Le(params.rxDelayBaseMs)
+        ..writeUInt32Le(params.airtimeFactorMs))
+      .toBytes();
+
+  static Uint8List setPathHashMode(int mode) =>
+      Uint8List.fromList([cmdSetPathHashMode, 0, mode & 0xFF]);
 
   static Uint8List runCliCommand(String command) => Uint8List.fromList([
         cmdRunCliCommand,

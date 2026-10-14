@@ -85,6 +85,8 @@ class NodePrefs {
     this.clientRepeat = 0,
     this.pathHashMode = 0,
     this.exportPrivateKeyEnabled = false,
+    this.rxDelayBaseMs = 0,
+    this.airtimeFactorMs = 0,
   });
 
   String nodeName;
@@ -107,6 +109,11 @@ class NodePrefs {
   int clientRepeat;
   int pathHashMode;
   bool exportPrivateKeyEnabled;
+
+  /// Device radio tuning (`CMD_GET/SET_TUNING_PARAMS`): the receive-delay base
+  /// and airtime factor, both in milliseconds ×1000 on the wire.
+  int rxDelayBaseMs;
+  int airtimeFactorMs;
 
   /// `SELF_INFO` telemetry byte: base | location<<2 | environment<<4.
   int get telemetryModes =>
@@ -137,6 +144,8 @@ class NodePrefs {
     clientRepeat = other.clientRepeat;
     pathHashMode = other.pathHashMode;
     exportPrivateKeyEnabled = other.exportPrivateKeyEnabled;
+    rxDelayBaseMs = other.rxDelayBaseMs;
+    airtimeFactorMs = other.airtimeFactorMs;
   }
 }
 
@@ -180,6 +189,28 @@ class RadioParams {
   final int spreadingFactor;
   final int codingRate;
   final int txPowerDbm;
+}
+
+/// Device radio tuning parameters (`RESP_CODE_TUNING_PARAMS`). Both values are
+/// milliseconds ×1000 on the wire (`rx_delay_base`, `airtime_factor`).
+class TuningParams {
+  const TuningParams({
+    required this.rxDelayBaseMs,
+    required this.airtimeFactorMs,
+  });
+
+  final int rxDelayBaseMs;
+  final int airtimeFactorMs;
+
+  /// Parse `[RESP_CODE_TUNING_PARAMS][rx u32 le][af u32 le]`.
+  static TuningParams? parse(Uint8List frame) {
+    if (frame.length < 9 || frame[0] != respCodeTuningParams) return null;
+    final r = BufferReader(frame)..skipBytes(1);
+    return TuningParams(
+      rxDelayBaseMs: r.readUInt32Le(),
+      airtimeFactorMs: r.readUInt32Le(),
+    );
+  }
 }
 
 /// Battery + storage reading.

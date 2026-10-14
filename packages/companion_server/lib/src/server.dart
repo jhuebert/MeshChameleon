@@ -261,6 +261,29 @@ class CompanionServer implements CompanionPushSink {
     ]));
   }
 
+  @override
+  void pushTraceData(
+    int pathLen,
+    int flags,
+    int tag,
+    int authCode,
+    Uint8List pathHashes,
+    Uint8List pathSnrs,
+    int finalSnrByte,
+  ) {
+    final w = BufferWriter()
+      ..writeByte(pushCodeTraceData)
+      ..writeByte(0) // reserved
+      ..writeByte(pathLen & 0xFF)
+      ..writeByte(flags & 0xFF)
+      ..writeUInt32Le(tag & 0xFFFFFFFF)
+      ..writeUInt32Le(authCode & 0xFFFFFFFF)
+      ..writeBytes(pathHashes)
+      ..writeBytes(pathSnrs)
+      ..writeByte(finalSnrByte & 0xFF);
+    _sendFrame(w.toBytes());
+  }
+
   // -------------------------------------------------------------------------
   // Command dispatch
   // -------------------------------------------------------------------------
@@ -313,6 +336,14 @@ class CompanionServer implements CompanionPushSink {
         _cmdSetRadioParams(data);
       case cmdSetRadioTxPower:
         _cmdSetTxPower(data);
+      case cmdGetTuningParams:
+        await _cmdGetTuningParams();
+      case cmdSetTuningParams:
+        _cmdSetTuningParams(data);
+      case cmdSetPathHashMode:
+        _cmdSetPathHashMode(data);
+      case cmdRunCliCommand:
+        await _cmdRunCliCommand(data);
       case cmdGetContacts:
         _cmdGetContacts(data);
       case cmdGetContactByKey:
@@ -396,7 +427,7 @@ class CompanionServer implements CompanionPushSink {
     _writeFixedString(w, info.manufacturer, 40);
     _writeFixedString(w, info.version, 20);
     w.writeByte(info.clientRepeat & 0xFF);
-    w.writeByte(info.pathHashMode & 0xFF);
+    w.writeByte(bridge.getPathHashMode() & 0xFF);
     _sendFrame(w.toBytes());
   }
 
@@ -489,6 +520,40 @@ class CompanionServer implements CompanionPushSink {
     final power = data[0] >= 0x80 ? data[0] - 0x100 : data[0];
     if (power < -9 || power >= 30) return sendErr(errCodeIllegalArg);
     bridge.setTxPower(power);
+    sendOk();
+  }
+
+  Future<void> _cmdGetTuningParams() async {
+    final params = await bridge.getTuningParams();
+    final w = BufferWriter()
+      ..writeByte(respCodeTuningParams)
+      ..writeUInt32Le(params.rxDelayBaseMs)
+      ..writeUInt32Le(params.airtimeFactorMs);
+    _sendFrame(w.toBytes());
+  }
+
+  void _cmdSetTuningParams(Uint8List data) {
+    if (data.length < 8) return sendErr(errCodeIllegalArg);
+    final r = BufferReader(data);
+    final rx = r.readUInt32Le();
+    final af = r.readUInt32Le();
+    bridge.setTuningParams(rx, af);
+    sendOk();
+  }
+
+  void _cmdSetPathHashMode(Uint8List data) {
+    // [cmd][reserved=0][mode]
+    if (data.length < 2 || data[0] != 0) return sendErr(errCodeIllegalArg);
+    final mode = data[1];
+    if (mode >= 3) return sendErr(errCodeIllegalArg);
+    bridge.setPathHashMode(mode);
+    sendOk();
+  }
+
+  Future<void> _cmdRunCliCommand(Uint8List data) async {
+    if (data.isEmpty) return sendErr(errCodeIllegalArg);
+    final command = String.fromCharCodes(data.where((b) => b != 0));
+    await bridge.runCliCommand(command);
     sendOk();
   }
 
@@ -952,19 +1017,11 @@ class CompanionServer implements CompanionPushSink {
 
   Future<void> _cmdSendTelemetryReq(Uint8List data) async {
     if (data.length < 3 + pubKeySize) return sendErr(errCodeIllegalArg);
-    final pubkey = data.sublist(3, 3 + pubKeySize);
-    final sent = BufferWriter()
-      ..writeByte(respCodeSent)
-      ..writeByte(0)
-      ..writeUInt32Le(0)
-      ..writeUInt32Le(15000);
-    _sendFrame(sent.toBytes());
+    final pubkey = Uint8List.fromList(data.sublist(3, 3 + pubKeySize));
     final result = await bridge.sendTelemetryRequest(pubkey);
-    if (result['success'] != true) return;
-    final raw = result['raw_bytes'];
-    if (raw is Uint8List && raw.isNotEmpty) {
-      pushTelemetryResponse(pubkey.sublist(0, 6), raw);
-    }
+    if (!result.success) return sendErr(errCodeNotFound);
+    // The telemetry payload itself arrives later via PUSH_CODE_TELEMETRY_RESPONSE.
+    _sendSent(result);
   }
 
   Future<void> _cmdSendTracePath(Uint8List data) async {

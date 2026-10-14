@@ -25,6 +25,36 @@ void main() {
     });
   });
 
+  group('loraTimeOnAirMicros', () {
+    test('grows with payload size and is positive', () {
+      final small = loraTimeOnAirMicros(
+        payloadBytes: 16,
+        spreadingFactor: 10,
+        bandwidthHz: 250000,
+        codingRate: 5,
+      );
+      final large = loraTimeOnAirMicros(
+        payloadBytes: 200,
+        spreadingFactor: 10,
+        bandwidthHz: 250000,
+        codingRate: 5,
+      );
+      expect(small, greaterThan(0));
+      expect(large, greaterThan(small));
+    });
+
+    test('low-data-rate optimisation applies to slow long symbols', () {
+      // SF12 / BW125 => Tsym = 32.768 ms (> 16 ms), so DE is enabled.
+      final airtime = loraTimeOnAirMicros(
+        payloadBytes: 32,
+        spreadingFactor: 12,
+        bandwidthHz: 125000,
+        codingRate: 8,
+      );
+      expect(airtime, greaterThan(0));
+    });
+  });
+
   group('PathUtils', () {
     test('1-byte hashes encode as hop count', () {
       expect(PathUtils.encodePathLen(1, 3), 3);
@@ -184,6 +214,29 @@ void main() {
         ..skipBytes(1); // flags
       expect(r.readCString(), 'hello bob');
       expect(ackCrc, isNot(0));
+    });
+
+    test('createTrace appends the path to the payload, direct route', () {
+      final pkt = PacketBuilder.createTrace(
+        tag: 0x11223344,
+        authCode: 0x55667788,
+        flags: 1,
+        path: [0xAA, 0xBB, 0xCC],
+      );
+      expect(pkt.payloadType, payloadTypeTrace);
+      expect(pkt.routeType, routeTypeDirect);
+      expect(pkt.pathLenByte, 0);
+      expect(pkt.path, isEmpty);
+      final r = BufferReader(pkt.payload);
+      expect(r.readUInt32Le(), 0x11223344);
+      expect(r.readUInt32Le(), 0x55667788);
+      expect(r.readByte(), 1);
+      expect(r.readBytes(3), [0xAA, 0xBB, 0xCC]);
+
+      // Round-trips through the wire codec.
+      final reparsed = Packet.readFrom(pkt.writeTo())!;
+      expect(reparsed.payloadType, payloadTypeTrace);
+      expect(reparsed.payload, pkt.payload);
     });
   });
 }

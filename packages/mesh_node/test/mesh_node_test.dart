@@ -29,7 +29,11 @@ class RecordingSink implements CompanionPushSink {
   void pushPathUpdated(Uint8List pubkey) => pathUpdated.add(pubkey);
 
   @override
-  void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
+  void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data) {
+    telemetry.add([...pubkeyPrefix6, ...data]);
+  }
+
+  final List<List<int>> telemetry = [];
 
   @override
   void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
@@ -69,6 +73,14 @@ class RecordingSink implements CompanionPushSink {
   @override
   void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
       statuses.add([...pubkeyPrefix6, ...data]);
+
+  final List<List<int>> traces = [];
+
+  @override
+  void pushTraceData(int pathLen, int flags, int tag, int authCode,
+      Uint8List pathHashes, Uint8List pathSnrs, int finalSnrByte) {
+    traces.add([pathLen, flags, tag, authCode, ...pathHashes, ...pathSnrs, finalSnrByte]);
+  }
 }
 
 Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 20));
@@ -530,6 +542,135 @@ void main() {
       await LocalIdentity.verify(message, sig, alice.identity.publicKey),
       isTrue,
     );
+  });
+
+  test('telemetry request encodes the inverse permission mask', () async {
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendTelemetryRequest(
+      bob.identity.publicKey,
+      wantEnvironment: false,
+    );
+    expect(result.success, isTrue);
+    expect(result.expectedAck, isNotNull);
+
+    final sent = (alice.link as FakeDeviceLink).transmitted.last;
+    final packet = Packet.readFrom(sent)!;
+    expect(packet.payloadType, payloadTypeReq);
+    final secret = await alice.identity.sharedSecret(bob.identity.publicKey);
+    final plaintext = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16), secret, packet.payload.sublist(2));
+    final r = BufferReader(plaintext);
+    r.readUInt32Le(); // tag
+    expect(r.readByte(), reqTypeGetTelemetryData);
+    expect(r.readByte(), telemPermEnvironment);
+  });
+
+  test('telemetry request pushes a matching telemetry response', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendTelemetryRequest(bob.identity.publicKey);
+    expect(result.success, isTrue);
+    final tag = result.expectedAck!;
+    final lpp = Uint8List.fromList([1, 0x67, 0x00, 0x01, 0x02]);
+    final body = Uint8List.fromList([
+      ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
+      ...lpp,
+    ]);
+    (alice.link as FakeDeviceLink)
+        .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
+    await pump();
+
+    expect(aliceSink.telemetry.length, 1);
+    expect(aliceSink.telemetry.first.sublist(6, 11), lpp);
+  });
+
+  test('setPathHashMode forwards to the device on fw>=10', () async {
+    alice.setPathHashMode(2);
+    await pump();
+    expect(alice.getPathHashMode(), 2);
+    expect((alice.link as FakeDeviceLink).pathHashMode, 2);
+  });
+
+  test('zeroAdvertIntervals zeroes device advert intervals on fw>=14', () async {
+    final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 5);
+    const info = DeviceInfo(firmwareVerCode: 14);
+    final link = FakeDeviceLink(deviceInfo_: info);
+    await link.connect();
+    final node = MeshNode(identity: id, link: link, deviceInfo: info)..start();
+    await node.zeroAdvertIntervals();
+    expect(link.cliCommands, ['adv_int 0', 'f_adv_int 0']);
+    node.stop();
+  });
+
+  test('zeroAdvertIntervals is a no-op on older firmware', () async {
+    final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 6);
+    const info = DeviceInfo(firmwareVerCode: 11);
+    final link = FakeDeviceLink(deviceInfo_: info);
+    await link.connect();
+    final node = MeshNode(identity: id, link: link, deviceInfo: info)..start();
+    await node.zeroAdvertIntervals();
+    expect(link.cliCommands, isEmpty);
+    node.stop();
+  });
+
+  test('core stats report uptime and radio stats track the last frame',
+      () async {
+    await alice.advertise();
+    await pump();
+
+    final core = alice.getStats(statsTypeCore);
+    expect(core['uptime_secs'], isA<int>());
+
+    final radio = bob.getStats(statsTypeRadio);
+    expect(radio['last_rssi'], -70);
+    expect(radio['last_snr_scaled'], 24);
+    expect(radio['tx_air_secs'], isA<int>());
+    expect(radio['rx_air_secs'], isA<int>());
+  });
+
+  test('sendTracePathRaw transmits a trace packet', () async {
+    final ok = await alice.sendTracePathRaw(0x1234, 0, 0, Uint8List.fromList([1, 2]));
+    expect(ok, isTrue);
+    final sent = (alice.link as FakeDeviceLink).transmitted.last;
+    final packet = Packet.readFrom(sent)!;
+    expect(packet.payloadType, payloadTypeTrace);
+    expect(packet.routeType, routeTypeDirect);
+    final r = BufferReader(packet.payload);
+    expect(r.readUInt32Le(), 0x1234);
+    expect(r.readUInt32Le(), 0);
+    expect(r.readByte(), 0);
+    expect(r.readBytes(2), [1, 2]);
+  });
+
+  test('a returned trace packet pushes TRACE_DATA', () async {
+    final pkt = PacketBuilder.createTrace(
+      tag: 0x1111,
+      authCode: 0,
+      flags: 0,
+      path: [0x01, 0x02],
+    )..setPath([0x20, 0x30]);
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, pkt.writeTo());
+    await pump();
+
+    expect(aliceSink.traces.length, 1);
+    expect(aliceSink.traces.first, [2, 0, 0x1111, 0, 0x01, 0x02, 0x20, 0x30, 24]);
+  });
+
+  test('a partial trace packet is ignored (proxy does not forward traces)',
+      () async {
+    final pkt = PacketBuilder.createTrace(
+      tag: 0x2222,
+      authCode: 0,
+      flags: 0,
+      path: [0x01, 0x02, 0x03],
+    )..setPath([0x11]);
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, pkt.writeTo());
+    await pump();
+    expect(aliceSink.traces, isEmpty);
   });
 }
 

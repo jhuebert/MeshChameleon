@@ -195,6 +195,41 @@ class BleDeviceLink implements RadioLink {
   }
 
   @override
+  Future<TuningParams> tuningParams() async {
+    final frame = await _request(
+      DeviceFrames.getTuningParams(),
+      {respCodeTuningParams, respCodeErr},
+    );
+    final params = TuningParams.parse(frame);
+    if (params == null) throw StateError('invalid TUNING_PARAMS from device');
+    return params;
+  }
+
+  @override
+  Future<void> setTuningParams(TuningParams params) async {
+    await _request(
+      DeviceFrames.setTuningParams(params),
+      {respCodeOk, respCodeErr},
+    );
+  }
+
+  @override
+  Future<void> setPathHashMode(int mode) async {
+    await _request(
+      DeviceFrames.setPathHashMode(mode),
+      {respCodeOk, respCodeErr},
+    );
+  }
+
+  @override
+  Future<void> runCliCommand(String command) async {
+    await _request(
+      DeviceFrames.runCliCommand(command),
+      {respCodeOk, respCodeErr},
+    );
+  }
+
+  @override
   Future<BatteryReading?> battery() async {
     try {
       final frame = await _request(

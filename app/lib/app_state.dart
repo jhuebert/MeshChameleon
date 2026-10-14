@@ -114,7 +114,7 @@ class AppState extends ChangeNotifier {
     try {
       await disconnectDevice();
       log('Connecting to $label ...');
-      await link.connect();
+      await connectWithBackoff(link, onLog: log);
       this.link = link;
       deviceLabel = label;
       deviceConnected = true;
@@ -134,8 +134,16 @@ class AppState extends ChangeNotifier {
       // The device is the source of truth for the radio at connect time.
       node.syncRadioParams(params);
       node.start();
+      // Best-effort housekeeping: stop the stock device advertising under its
+      // own identity (firmware v14+ only; a no-op otherwise).
+      try {
+        await node.zeroAdvertIntervals();
+      } catch (e) {
+        log('Device housekeeping skipped: $e');
+      }
       this.node = node;
       log('Device link ready; mesh node started');
+      _watchLink(link);
       await _startForegroundService();
     } catch (e) {
       log('Device connection failed: $e');
@@ -146,7 +154,54 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  StreamSubscription<LinkState>? _linkStateSub;
+  Timer? _reconnectTimer;
+  bool _disconnecting = false;
+
+  /// Watch [link] for unexpected drops so the session can be restored.
+  void _watchLink(RadioLink link) {
+    _linkStateSub?.cancel();
+    _linkStateSub = link.state.listen((state) {
+      if (state == LinkState.disconnected && !_disconnecting && deviceConnected) {
+        log('Device link dropped; scheduling reconnect');
+        _scheduleReconnect();
+      }
+    });
+  }
+
+  void _scheduleReconnect() {
+    _reconnectTimer?.cancel();
+    _reconnectTimer = Timer(const Duration(seconds: 3), () {
+      unawaited(_reconnect());
+    });
+  }
+
+  /// Reconnect the device link and re-arm the mesh node without disturbing the
+  /// app-facing proxy server or its client. Retries again on failure.
+  Future<void> _reconnect() async {
+    final curLink = link;
+    final curNode = node;
+    if (curLink == null || curNode == null || _disconnecting) return;
+    try {
+      log('Reconnecting device ...');
+      await connectWithBackoff(curLink, onLog: log);
+      final params = await curLink.radioParams();
+      curNode.syncRadioParams(params);
+      curNode.start();
+      log('Device link reconnected');
+      notifyListeners();
+    } catch (e) {
+      log('Reconnect failed: $e');
+      _scheduleReconnect();
+    }
+  }
+
   Future<void> disconnectDevice() async {
+    _disconnecting = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    await _linkStateSub?.cancel();
+    _linkStateSub = null;
     node?.stop();
     node = null;
     await link?.disconnect();
@@ -158,6 +213,7 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       // The service may already be stopped.
     }
+    _disconnecting = false;
     notifyListeners();
   }
 
@@ -228,6 +284,8 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _reconnectTimer?.cancel();
+    unawaited(_linkStateSub?.cancel());
     unawaited(server?.stop());
     node?.stop();
     unawaited(link?.disconnect());

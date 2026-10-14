@@ -30,6 +30,73 @@ void main() {
     expect(r.readUInt32Le(), 250000); // Hz
   });
 
+  test('DeviceFrames.setTuningParams encodes ms values little-endian', () {
+    final frame = DeviceFrames.setTuningParams(
+      const TuningParams(rxDelayBaseMs: 500, airtimeFactorMs: 333),
+    );
+    expect(frame[0], cmdSetTuningParams);
+    final r = BufferReader(frame)..skipBytes(1);
+    expect(r.readUInt32Le(), 500);
+    expect(r.readUInt32Le(), 333);
+  });
+
+  test('TuningParams.parse reads a TUNING_PARAMS frame', () {
+    final w = BufferWriter()
+      ..writeByte(respCodeTuningParams)
+      ..writeUInt32Le(1000)
+      ..writeUInt32Le(2000);
+    final parsed = TuningParams.parse(w.toBytes());
+    expect(parsed, isNotNull);
+    expect(parsed!.rxDelayBaseMs, 1000);
+    expect(parsed.airtimeFactorMs, 2000);
+  });
+
+  test('DeviceFrames.setPathHashMode encodes the reserved byte', () {
+    final frame = DeviceFrames.setPathHashMode(2);
+    expect(frame, [cmdSetPathHashMode, 0, 2]);
+  });
+
+  test('FakeDeviceLink records tuning, path-hash mode, and CLI commands',
+      () async {
+    final link = FakeDeviceLink();
+    await link.connect();
+    await link.setTuningParams(
+      const TuningParams(rxDelayBaseMs: 12, airtimeFactorMs: 34),
+    );
+    final tuning = await link.tuningParams();
+    expect(tuning.rxDelayBaseMs, 12);
+    expect(tuning.airtimeFactorMs, 34);
+
+    await link.setPathHashMode(2);
+    expect(link.pathHashMode, 2);
+
+    await link.runCliCommand('adv_int 0');
+    expect(link.cliCommands, ['adv_int 0']);
+  });
+
+  test('connectWithBackoff retries transient failures', () async {
+    final link = FakeDeviceLink(connectFailures: 2);
+    await connectWithBackoff(
+      link,
+      initialDelay: const Duration(milliseconds: 1),
+      maxDelay: const Duration(milliseconds: 2),
+    );
+    expect(link.currentState, LinkState.connected);
+  });
+
+  test('connectWithBackoff gives up after maxAttempts', () async {
+    final link = FakeDeviceLink(connectFailures: 5);
+    await expectLater(
+      connectWithBackoff(
+        link,
+        maxAttempts: 2,
+        initialDelay: const Duration(milliseconds: 1),
+      ),
+      throwsA(isA<StateError>()),
+    );
+    expect(link.currentState, LinkState.disconnected);
+  });
+
   test('ParsedSelfInfo normalises frequency to Hz', () {
     final w = BufferWriter()
       ..writeByte(respCodeSelfInfo)

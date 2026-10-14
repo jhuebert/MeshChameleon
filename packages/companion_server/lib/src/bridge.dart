@@ -57,6 +57,20 @@ abstract class CompanionPushSink {
 
   /// Status response: 6-byte pubkey prefix + raw status payload.
   void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data);
+
+  /// Trace result (`PUSH_CODE_TRACE_DATA`). [pathLen] is the raw byte length of
+  /// the requested path, [flags]'s low two bits give the hash width,
+  /// [pathHashes] is the requested path, [pathSnrs] the per-hop SNRs, and
+  /// [finalSnrByte] the scaled SNR of the returning frame.
+  void pushTraceData(
+    int pathLen,
+    int flags,
+    int tag,
+    int authCode,
+    Uint8List pathHashes,
+    Uint8List pathSnrs,
+    int finalSnrByte,
+  );
 }
 
 /// Logic backing the companion server: contacts, channels, messaging, adverts,
@@ -137,6 +151,22 @@ class CompanionBridge {
 
   void setTxPower(int dbm) {}
 
+  /// Current path-hash mode reported to the client in `DEVICE_INFO`.
+  int getPathHashMode() => getDeviceInfo().pathHashMode;
+
+  /// Set the path-hash mode (`CMD_SET_PATH_HASH_MODE`, fw v10+).
+  void setPathHashMode(int mode) {}
+
+  /// Current device radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
+  Future<TuningParams> getTuningParams() async =>
+      const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
+
+  /// Set the device radio tuning parameters (`CMD_SET_TUNING_PARAMS`).
+  void setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) {}
+
+  /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
+  Future<void> runCliCommand(String command) async {}
+
   Map<String, String> getCustomVars() => const {};
 
   bool setCustomVar(String name, String value) => false;
@@ -163,13 +193,13 @@ class CompanionBridge {
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async =>
       const SentResult.failure();
 
-  Future<Map<String, Object?>> sendTelemetryRequest(
+  Future<SentResult> sendTelemetryRequest(
     Uint8List pubkey, {
     bool wantBase = true,
     bool wantLocation = true,
     bool wantEnvironment = true,
   }) async =>
-      const {'success': false};
+      const SentResult.failure();
 
   Future<bool> sendTracePathRaw(
     int tag,

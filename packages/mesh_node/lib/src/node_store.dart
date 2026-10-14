@@ -196,6 +196,8 @@ Map<String, Object?> _prefsToJson(NodePrefs p) => <String, Object?>{
       'client_repeat': p.clientRepeat,
       'path_hash_mode': p.pathHashMode,
       'export_private_key_enabled': p.exportPrivateKeyEnabled,
+      'rx_delay_base_ms': p.rxDelayBaseMs,
+      'airtime_factor_ms': p.airtimeFactorMs,
     };
 
 NodePrefs _prefsFromJson(Map<String, Object?> j) {
@@ -225,6 +227,8 @@ NodePrefs _prefsFromJson(Map<String, Object?> j) {
     clientRepeat: _int(j['client_repeat'], defaults.clientRepeat),
     pathHashMode: _int(j['path_hash_mode'], defaults.pathHashMode),
     exportPrivateKeyEnabled: j['export_private_key_enabled'] == true,
+    rxDelayBaseMs: _int(j['rx_delay_base_ms'], defaults.rxDelayBaseMs),
+    airtimeFactorMs: _int(j['airtime_factor_ms'], defaults.airtimeFactorMs),
   );
 }
 

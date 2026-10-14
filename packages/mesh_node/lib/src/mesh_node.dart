@@ -91,6 +91,11 @@ class MeshNode extends CompanionBridge {
   Uint8List? _pendingLogin;
   Uint8List? _pendingStatus;
 
+  /// Pending telemetry requests, matched by the reflected request tag. The
+  /// response (when it arrives) is pushed via
+  /// `PUSH_CODE_TELEMETRY_RESPONSE`.
+  final Map<int, Uint8List> _pendingTelemetry = {};
+
   /// Active login keep-alive sessions, keyed by server public key hex.
   final Map<String, _Connection> _connections = {};
 
@@ -160,10 +165,41 @@ class MeshNode extends CompanionBridge {
     'recv_errors': 0,
   };
 
+  /// Wall-clock time of the last [start], used for the uptime stat.
+  int _startedAtMillis = DateTime.now().millisecondsSinceEpoch;
+
+  /// Most recent received-frame radio metrics, reported in the radio stats.
+  int _lastRxRssi = 0;
+  int _lastRxSnrScaled = 0;
+
+  /// Accumulated on-air time (microseconds) for the radio stats counters.
+  int _txAirMicros = 0;
+  int _rxAirMicros = 0;
+
+  /// Estimated airtime of an [bytes]-byte frame under the current radio
+  /// settings, or 0 when the parameters are not usable.
+  int _airtimeMicrosFor(int bytes) {
+    final cr = prefs.codingRate <= 4 ? prefs.codingRate + 4 : prefs.codingRate;
+    if (prefs.spreadingFactor < 5 ||
+        prefs.spreadingFactor > 12 ||
+        prefs.bandwidthHz <= 0 ||
+        cr < 5 ||
+        cr > 8) {
+      return 0;
+    }
+    return loraTimeOnAirMicros(
+      payloadBytes: bytes,
+      spreadingFactor: prefs.spreadingFactor,
+      bandwidthHz: prefs.bandwidthHz,
+      codingRate: cr,
+    );
+  }
+
   int get _selfHash => identity.publicKey[0];
 
   /// Attach the raw RX listener. Call once the device link is connected.
   void start() {
+    _startedAtMillis = DateTime.now().millisecondsSinceEpoch;
     link.setRawRxListener(_onRawFrame);
     unawaited(_readBattery());
   }
@@ -493,6 +529,62 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
+  Future<SentResult> sendTelemetryRequest(
+    Uint8List pubkey, {
+    bool wantBase = true,
+    bool wantLocation = true,
+    bool wantEnvironment = true,
+  }) async {
+    final contact = getContactByKey(pubkey);
+    if (contact == null) return const SentResult.failure();
+    var tag = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    while (_pendingTelemetry.containsKey(tag) ||
+        _pendingDiscovery.containsKey(tag)) {
+      tag++;
+    }
+    // The first payload byte is an inverse permissions mask: set the bits for
+    // the telemetry classes we do *not* want.
+    var inverse = 0;
+    if (!wantBase) inverse |= telemPermBase;
+    if (!wantLocation) inverse |= telemPermLocation;
+    if (!wantEnvironment) inverse |= telemPermEnvironment;
+    final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final packet = await PacketBuilder.createProtocolRequest(
+      contact: contact,
+      identity: identity,
+      protocolCode: reqTypeGetTelemetryData,
+      data: [inverse & 0xFF],
+      timestamp: tag,
+      flood: flood,
+    );
+    await _transmit(packet, flood: flood);
+    _pendingTelemetry[tag] = Uint8List.fromList(pubkey);
+    return SentResult(
+      success: true,
+      isFlood: flood,
+      expectedAck: tag,
+      timeoutMs: 10000,
+    );
+  }
+
+  @override
+  Future<bool> sendTracePathRaw(
+    int tag,
+    int authCode,
+    int flags,
+    Uint8List pathBytes,
+  ) async {
+    final packet = PacketBuilder.createTrace(
+      tag: tag,
+      authCode: authCode,
+      flags: flags,
+      path: pathBytes,
+    );
+    await _transmit(packet, flood: false);
+    return true;
+  }
+
+  @override
   Future<SentResult> sendLogin(Uint8List pubkey, String password) async {
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -698,26 +790,89 @@ class MeshNode extends CompanionBridge {
     prefs.spreadingFactor = params.spreadingFactor;
     prefs.codingRate = params.codingRate;
     prefs.txPowerDbm = params.txPowerDbm;
+    // Path-hash mode is a device capability reported in DEVICE_INFO.
+    prefs.pathHashMode = deviceInfo_.pathHashMode;
     _persist();
+  }
+
+  @override
+  int getPathHashMode() => prefs.pathHashMode;
+
+  @override
+  void setPathHashMode(int mode) {
+    final clamped = mode.clamp(0, 3);
+    prefs.pathHashMode = clamped;
+    _persist();
+    // Path-hash mode is a firmware v10+ feature; older devices ignore it.
+    if (deviceInfo_.firmwareVerCode >= 10) {
+      unawaited(link.setPathHashMode(clamped));
+    }
+  }
+
+  @override
+  Future<TuningParams> getTuningParams() async {
+    try {
+      final params = await link.tuningParams();
+      prefs.rxDelayBaseMs = params.rxDelayBaseMs;
+      prefs.airtimeFactorMs = params.airtimeFactorMs;
+      _persist();
+      return params;
+    } catch (_) {
+      // Fall back to the last known values if the device link is unavailable.
+      return TuningParams(
+        rxDelayBaseMs: prefs.rxDelayBaseMs,
+        airtimeFactorMs: prefs.airtimeFactorMs,
+      );
+    }
+  }
+
+  @override
+  void setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) {
+    prefs.rxDelayBaseMs = rxDelayBaseMs;
+    prefs.airtimeFactorMs = airtimeFactorMs;
+    _persist();
+    unawaited(link.setTuningParams(TuningParams(
+      rxDelayBaseMs: rxDelayBaseMs,
+      airtimeFactorMs: airtimeFactorMs,
+    )));
+  }
+
+  @override
+  Future<void> runCliCommand(String command) async {
+    // CLI commands are a firmware v14+ feature.
+    if (deviceInfo_.firmwareVerCode < 14) return;
+    await link.runCliCommand(command);
+  }
+
+  /// Device housekeeping: zero the device's autonomous advert intervals so the
+  /// stock firmware never advertises under its own identity while proxied.
+  /// A no-op on firmware older than v14.
+  Future<void> zeroAdvertIntervals() async {
+    if (deviceInfo_.firmwareVerCode < 14) return;
+    await link.runCliCommand('adv_int 0');
+    await link.runCliCommand('f_adv_int 0');
   }
 
   @override
   Map<String, Object?> getStats(int statsType) {
     switch (statsType) {
       case statsTypeCore:
+        final uptime = (DateTime.now().millisecondsSinceEpoch - _startedAtMillis)
+            .clamp(0, 0xFFFFFFFF) ~/
+            1000;
         return {
           'battery_mv': _battery.millivolts,
-          'uptime_secs': 0,
+          'uptime_secs': uptime,
           'errors': _packetStats['recv_errors'] ?? 0,
           'queue_len': _messageQueue.length,
         };
       case statsTypeRadio:
         return {
           'noise_floor': 0,
-          'last_rssi': 0,
-          'last_snr_scaled': 0,
-          'tx_air_secs': 0,
-          'rx_air_secs': 0,
+          'last_rssi': _lastRxRssi,
+          'last_snr_scaled': _lastRxSnrScaled,
+          'tx_air_secs': _txAirMicros ~/ 1000000,
+          'rx_air_secs': _rxAirMicros ~/ 1000000,
         };
       default:
         return Map<String, Object?>.from(_packetStats);
@@ -732,10 +887,13 @@ class MeshNode extends CompanionBridge {
     _packetStats['sent'] = (_packetStats['sent'] ?? 0) + 1;
     _packetStats[flood ? 'flood_tx' : 'direct_tx'] =
         (_packetStats[flood ? 'flood_tx' : 'direct_tx'] ?? 0) + 1;
-    await link.sendRawPacket(packet.writeTo());
+    final bytes = packet.writeTo();
+    _txAirMicros += _airtimeMicrosFor(bytes.length);
+    await link.sendRawPacket(bytes);
   }
 
   Future<void> _onRawFrame(double snr, int rssi, Uint8List raw) async {
+    _rxAirMicros += _airtimeMicrosFor(raw.length);
     final packet = Packet.readFrom(raw);
     if (packet == null) {
       _packetStats['recv_errors'] = (_packetStats['recv_errors'] ?? 0) + 1;
@@ -746,6 +904,8 @@ class MeshNode extends CompanionBridge {
         (_packetStats[packet.isRouteFlood ? 'flood_rx' : 'direct_rx'] ?? 0) + 1;
     packet.snr = snr;
     packet.rssi = rssi;
+    _lastRxRssi = rssi;
+    _lastRxSnrScaled = (snr * 4).round();
 
     switch (packet.payloadType) {
       case payloadTypeAdvert:
@@ -758,6 +918,8 @@ class MeshNode extends CompanionBridge {
         _onGroupData(packet);
       case payloadTypeControl:
         _onControlData(packet);
+      case payloadTypeTrace:
+        _onTrace(packet);
       case payloadTypeAck:
         _onAck(packet);
       case payloadTypeMultipart:
@@ -1011,6 +1173,42 @@ class MeshNode extends CompanionBridge {
     );
   }
 
+  /// Handle a returned trace packet (`PAYLOAD_TYPE_TRACE`, route direct). The
+  /// payload is `tag(4) + auth(4) + flags(1) + requested path hashes`; the
+  /// routing path holds one accumulated SNR byte per hop. The proxy does not
+  /// forward traces, so it only reports the result once the requested path has
+  /// been fully consumed (the trace has returned to us).
+  void _onTrace(Packet packet) {
+    if (!packet.isRouteDirect) return;
+    final payload = packet.payload;
+    if (payload.length < 9) return;
+    final r = BufferReader(payload);
+    final tag = r.readUInt32Le();
+    final authCode = r.readUInt32Le();
+    final flags = r.readByte();
+    final pathSz = flags & 0x03;
+    final pathHashes = Uint8List.fromList(payload.sublist(9));
+    final pathLen = pathHashes.length;
+
+    final hopCount = packet.path.length;
+    if ((hopCount << pathSz) < pathLen) return; // not the terminus
+
+    final snrCount = pathLen >> pathSz;
+    final pathSnrs = Uint8List.fromList(
+      packet.path.sublist(0, snrCount.clamp(0, packet.path.length)),
+    );
+    final finalSnrByte = (packet.snr * 4).round().clamp(-128, 127) & 0xFF;
+    pushSink?.pushTraceData(
+      pathLen,
+      flags,
+      tag,
+      authCode,
+      pathHashes,
+      pathSnrs,
+      finalSnrByte,
+    );
+  }
+
   void _onAck(Packet packet) {
     if (packet.payload.length < 4) return;
     final crc = packet.payload[0] |
@@ -1165,6 +1363,14 @@ class MeshNode extends CompanionBridge {
         outPath,
         inPathLen,
         inPath,
+      );
+      return;
+    }
+
+    if (_pendingTelemetry.remove(tag) != null && data.length > 4) {
+      pushSink?.pushTelemetryResponse(
+        Uint8List.fromList(senderPubkey.sublist(0, 6)),
+        Uint8List.fromList(data.sublist(4)),
       );
       return;
     }
