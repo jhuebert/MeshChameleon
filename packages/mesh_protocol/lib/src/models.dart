@@ -201,6 +201,8 @@ class QueuedMessage {
     this.pathLen = 0,
     this.snr = 0.0,
     this.rssi = 0,
+    this.channelDataType = 0,
+    this.channelDataPayload,
   });
 
   final Uint8List senderKey;
@@ -212,6 +214,11 @@ class QueuedMessage {
   final int pathLen;
   final double snr;
   final int rssi;
+
+  /// Non-zero for group *data* (binary) channel messages; [channelDataPayload]
+  /// then holds the raw payload and [text] is unused.
+  final int channelDataType;
+  final Uint8List? channelDataPayload;
 }
 
 /// Recently heard advertiser path information.

@@ -333,6 +333,24 @@ void main() {
     expect(aliceSink.statuses.first.sublist(6, 10), [9, 8, 7, 6]);
   });
 
+  test('channel data is delivered, queued once, and deduplicated', () async {
+    final payload = Uint8List.fromList([1, 2, 3, 4]);
+    final ok = await alice.sendChannelData(0, 0x1234, payload);
+    expect(ok, isTrue);
+    await pump();
+    final msg = bob.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.isChannel, isTrue);
+    expect(msg.channelDataType, 0x1234);
+    expect(msg.channelDataPayload, payload);
+
+    // A duplicate transmission is not queued again.
+    final raw = (alice.link as FakeDeviceLink).transmitted.last;
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, raw);
+    await pump();
+    expect(bob.syncNextMessage(), isNull);
+  });
+
   test('setRadioParams updates prefs and forwards to the device link', () async {
     alice.setRadioParams(869000000, 125000, 11, 5);
     await pump();

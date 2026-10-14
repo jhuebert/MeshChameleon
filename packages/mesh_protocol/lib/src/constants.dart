@@ -233,6 +233,12 @@ const int cipherMacSize = 2;
 const int cipherBlockSize = 16;
 const int timestampSize = 4;
 
+/// App-facing maximum channel-data payload (`MAX_CHANNEL_DATA_LENGTH`).
+const int maxChannelDataLength = maxFrameSize - 9;
+
+/// Channel-data type 0 is reserved/invalid (`DATA_TYPE_RESERVED`).
+const int dataTypeReserved = 0x0000;
+
 /// Firmware version code reported to the client in `RESP_CODE_DEVICE_INFO`.
 const int defaultFirmwareVerCode = 11;
 

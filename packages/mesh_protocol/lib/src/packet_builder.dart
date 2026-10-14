@@ -222,6 +222,37 @@ class PacketBuilder {
     return _packet(Packet.createHeader(payloadTypeGrpTxt, routeTypeFlood), payload);
   }
 
+  /// Build a group *data* packet (`PAYLOAD_TYPE_GRP_DATA`) for [channel].
+  ///
+  /// When [pathLenEncoded] is `0xFF` (unknown) the packet is flooded; otherwise
+  /// it is routed directly via [path].
+  static Packet createGroupData({
+    required Channel channel,
+    required int dataType,
+    required List<int> data,
+    List<int> path = const [],
+    int pathLenEncoded = 0xFF,
+  }) {
+    final secret = Uint8List(32);
+    secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
+    final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
+    final plaintext = BufferWriter()
+      ..writeUInt16Le(dataType)
+      ..writeByte(data.length)
+      ..writeBytes(data);
+    final cipher = CryptoUtils.encryptThenMac(
+        secret.sublist(0, 16), secret, plaintext.toBytes());
+    final payload = Uint8List.fromList([channelHash, ...cipher]);
+    final flood = pathLenEncoded == 0xFF || path.isEmpty;
+    final pkt = _packet(
+      Packet.createHeader(
+          payloadTypeGrpData, flood ? routeTypeFlood : routeTypeDirect),
+      payload,
+    );
+    if (!flood) pkt.setPath(path, pathLenEncoded);
+    return pkt;
+  }
+
   /// Build a protocol request (repeater status/telemetry/etc.).
   static Future<Packet> createProtocolRequest({
     required Contact contact,

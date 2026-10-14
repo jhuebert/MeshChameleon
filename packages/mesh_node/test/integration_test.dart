@@ -182,6 +182,37 @@ void main() {
       expect(chanMsg!.isChannel, isTrue);
       expect(chanMsg.text, 'alice: channel hi');
 
+      // Binary channel data sent by the client reaches the peer.
+      final dw = BufferWriter()
+        ..writeByte(cmdSendChannelData)
+        ..writeByte(0) // channel 0
+        ..writeByte(0xFF) // flood
+        ..writeUInt16Le(0x1234)
+        ..writeBytes([9, 9, 9]);
+      client.send(dw.toBytes());
+      expect((await client.next())[0], respCodeOk);
+      await pump();
+      final dataMsg = bob.syncNextMessage();
+      expect(dataMsg, isNotNull);
+      expect(dataMsg!.channelDataType, 0x1234);
+      expect(dataMsg.channelDataPayload, [9, 9, 9]);
+
+      // Conversely, channel data from the peer is served to the client as
+      // RESP_CODE_CHANNEL_DATA_RECV.
+      expect(await bob.sendChannelData(0, 0x00AB, Uint8List.fromList([7, 7])),
+          isTrue);
+      await pump();
+      expect((await client.next())[0], pushCodeMsgWaiting);
+      client.send([cmdSyncNextMessage]);
+      final dataRecv = await client.next();
+      expect(dataRecv[0], respCodeChannelDataRecv);
+      final dr = BufferReader(dataRecv)..skipBytes(4); // code + snr + 2 reserved
+      expect(dr.readByte(), 0); // channel index
+      dr.skipBytes(1); // path len
+      expect(dr.readUInt16Le(), 0x00AB);
+      expect(dr.readByte(), 2);
+      expect(dr.readBytes(2), [7, 7]);
+
       // Signing round trip.
       client.send([cmdSignStart]);
       expect((await client.next())[0], respCodeSignStart);

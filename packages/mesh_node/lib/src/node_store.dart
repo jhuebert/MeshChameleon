@@ -278,6 +278,9 @@ Map<String, Object?> _queuedMessageToJson(QueuedMessage m) => <String, Object?>{
       'path_len': m.pathLen,
       'snr': m.snr,
       'rssi': m.rssi,
+      'channel_data_type': m.channelDataType,
+      if (m.channelDataPayload != null)
+        'channel_data_payload': bytesToHex(m.channelDataPayload!),
     };
 
 QueuedMessage _queuedMessageFromJson(Map<String, Object?> j) => QueuedMessage(
@@ -290,6 +293,10 @@ QueuedMessage _queuedMessageFromJson(Map<String, Object?> j) => QueuedMessage(
       pathLen: _int(j['path_len']),
       snr: _double(j['snr']),
       rssi: _int(j['rssi']),
+      channelDataType: _int(j['channel_data_type']),
+      channelDataPayload: j['channel_data_payload'] == null
+          ? null
+          : _bytes(j['channel_data_payload']),
     );
 
 Map<String, Object?> _advertPathToJson(AdvertPath p) => <String, Object?>{

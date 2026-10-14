@@ -324,6 +324,8 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendTxt(data);
       case cmdSendChannelTxtMsg:
         await _cmdSendChannelTxt(data);
+      case cmdSendChannelData:
+        await _cmdSendChannelData(data);
       case cmdSyncNextMessage:
         _cmdSyncNextMessage();
       case cmdSignStart:
@@ -701,6 +703,39 @@ class CompanionServer implements CompanionPushSink {
     if (!ok) _log('channel message send failed for channel $channelIdx');
   }
 
+  Future<void> _cmdSendChannelData(Uint8List data) async {
+    // [channel_idx][path_len][path?][data_type u16 LE][payload...]
+    if (data.length < 4) return sendErr(errCodeIllegalArg);
+    final r = BufferReader(data);
+    final channelIdx = r.readByte();
+    final pathLen = r.readByte();
+    if (pathLen != 0xFF && !PathUtils.isValidPathLen(pathLen)) {
+      return sendErr(errCodeIllegalArg);
+    }
+    var pathBytes = const <int>[];
+    if (pathLen != 0xFF) {
+      final byteLen = PathUtils.getByteLength(pathLen);
+      if (r.remaining < byteLen + 2) return sendErr(errCodeIllegalArg);
+      pathBytes = r.readBytes(byteLen);
+    }
+    if (r.remaining < 2) return sendErr(errCodeIllegalArg);
+    final dataType = r.readUInt16Le();
+    final payload = r.readRemainingBytes();
+    if (dataType == dataTypeReserved) return sendErr(errCodeIllegalArg);
+    if (payload.length > maxChannelDataLength) {
+      return sendErr(errCodeIllegalArg);
+    }
+    if (bridge.getChannel(channelIdx) == null) return sendErr(errCodeNotFound);
+    final ok = await bridge.sendChannelData(
+      channelIdx,
+      dataType,
+      Uint8List.fromList(payload),
+      path: pathBytes,
+      pathLenEncoded: pathLen,
+    );
+    ok ? sendOk() : sendErr(errCodeTableFull);
+  }
+
   void _cmdSyncNextMessage() {
     final msg = bridge.syncNextMessage();
     if (msg == null) {
@@ -715,6 +750,22 @@ class CompanionServer implements CompanionPushSink {
     if (snrByte < 0) snrByte += 256;
     final pathLenByte = msg.pathLen < 256 ? msg.pathLen : 0xFF;
     if (msg.isChannel) {
+      if (msg.channelDataType != 0) {
+        final raw = msg.channelDataPayload ?? Uint8List(0);
+        final payload =
+            raw.length > maxChannelDataLength ? raw.sublist(0, maxChannelDataLength) : raw;
+        final w = BufferWriter()
+          ..writeByte(respCodeChannelDataRecv)
+          ..writeByte(snrByte & 0xFF)
+          ..writeByte(0)
+          ..writeByte(0)
+          ..writeByte(msg.channelIdx)
+          ..writeByte(pathLenByte)
+          ..writeUInt16Le(msg.channelDataType & 0xFFFF)
+          ..writeByte(payload.length)
+          ..writeBytes(payload);
+        return w.toBytes();
+      }
       if (_appTargetVer >= 3) {
         final w = BufferWriter()
           ..writeByte(respCodeChannelMsgRecvV3)

@@ -113,6 +113,17 @@ class CompanionBridge {
 
   Future<bool> sendChannelMessage(int channelIndex, String text) async => false;
 
+  /// Send a binary group-data packet on [channelIndex]. When [path] is given the
+  /// packet is routed directly instead of flooded.
+  Future<bool> sendChannelData(
+    int channelIndex,
+    int dataType,
+    Uint8List payload, {
+    List<int>? path,
+    int? pathLenEncoded,
+  }) async =>
+      false;
+
   Future<bool> advertise({bool flood = true}) async => false;
 
   void setAdvertName(String name) {}

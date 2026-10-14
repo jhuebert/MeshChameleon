@@ -367,6 +367,30 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
+  Future<bool> sendChannelData(
+    int channelIndex,
+    int dataType,
+    Uint8List payload, {
+    List<int>? path,
+    int? pathLenEncoded,
+  }) async {
+    final channel = channels[channelIndex];
+    if (channel == null) return false;
+    final pathLen = pathLenEncoded ?? 0xFF;
+    final pathBytes = path ?? const <int>[];
+    final packet = PacketBuilder.createGroupData(
+      channel: channel,
+      dataType: dataType,
+      data: payload,
+      path: pathBytes,
+      pathLenEncoded: pathLen,
+    );
+    final flood = pathLen == 0xFF || pathBytes.isEmpty;
+    await _transmit(packet, flood: flood);
+    return true;
+  }
+
+  @override
   QueuedMessage? syncNextMessage() {
     if (_messageQueue.isEmpty) return null;
     final msg = _messageQueue.removeAt(0);
@@ -681,6 +705,8 @@ class MeshNode extends CompanionBridge {
         await _onDirectText(packet);
       case payloadTypeGrpTxt:
         _onGroupText(packet);
+      case payloadTypeGrpData:
+        _onGroupData(packet);
       case payloadTypeAck:
         _onAck(packet);
       case payloadTypePath:
@@ -849,6 +875,48 @@ class MeshNode extends CompanionBridge {
       channelIdx: channelIdx ?? 0,
       snr: packet.snr,
       rssi: packet.rssi,
+    ));
+  }
+
+  void _onGroupData(Packet packet) {
+    if (packet.payload.length < 4) return;
+    final channelHash = packet.payload[0];
+    Channel? channel;
+    int? channelIdx;
+    channels.forEach((idx, ch) {
+      if (_channelHash(ch.secret) == channelHash) {
+        channel = ch;
+        channelIdx = idx;
+      }
+    });
+    if (channel == null) return;
+    final ch = channel!;
+    final secret = Uint8List(32);
+    secret.setRange(0, ch.secret.length.clamp(0, 32), ch.secret);
+    late Uint8List plaintext;
+    try {
+      plaintext = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16),
+        secret,
+        packet.payload.sublist(1),
+      );
+    } catch (_) {
+      return;
+    }
+    if (plaintext.length < 3) return;
+    final dataType = plaintext[0] | (plaintext[1] << 8);
+    final dataLen = plaintext[2];
+    if (dataType == dataTypeReserved || plaintext.length < 3 + dataLen) return;
+    if (_isDuplicate(packet.calculatePacketHash())) return;
+    _enqueueMessage(QueuedMessage(
+      senderKey: Uint8List(32),
+      isChannel: true,
+      channelIdx: channelIdx ?? 0,
+      pathLen: packet.isRouteFlood ? packet.pathLenByte : 0xFF,
+      snr: packet.snr,
+      rssi: packet.rssi,
+      channelDataType: dataType,
+      channelDataPayload: Uint8List.fromList(plaintext.sublist(3, 3 + dataLen)),
     ));
   }
 
