@@ -132,6 +132,43 @@ void main() {
     expect(bob.syncNextMessage(), isNull);
   });
 
+  test('duplicate direct packets are re-ACKed but queued only once', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendTextMessage(bob.identity.publicKey, 'dedup me');
+    expect(result.success, isTrue);
+    await pump();
+    final raw = (alice.link as FakeDeviceLink).transmitted.last;
+    expect(bob.syncNextMessage(), isNotNull); // the original delivery
+
+    final bobLink = bob.link as FakeDeviceLink;
+    final ackedBefore = bobLink.transmitted.length;
+    bobLink.deliver(6.0, -70, raw);
+    await pump();
+    bobLink.deliver(6.0, -70, raw);
+    await pump();
+
+    // Not queued again, but ACKed each time (reliability for retransmits).
+    expect(bob.syncNextMessage(), isNull);
+    expect(bobLink.transmitted.length - ackedBefore, 2);
+  });
+
+  test('duplicate channel packets are queued only once', () async {
+    await alice.sendChannelMessage(0, 'dup channel');
+    await pump();
+    final raw = (alice.link as FakeDeviceLink).transmitted.last;
+    expect(bob.syncNextMessage(), isNotNull);
+
+    final bobLink = bob.link as FakeDeviceLink;
+    bobLink.deliver(6.0, -70, raw);
+    await pump();
+    bobLink.deliver(6.0, -70, raw);
+    await pump();
+    expect(bob.syncNextMessage(), isNull);
+  });
+
   test('setRadioParams updates prefs and forwards to the device link', () async {
     alice.setRadioParams(869000000, 125000, 11, 5);
     await pump();

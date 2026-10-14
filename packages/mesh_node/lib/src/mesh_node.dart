@@ -58,6 +58,32 @@ class MeshNode extends CompanionBridge {
   final List<_PendingAck> _pendingAcks = [];
   final Map<String, AdvertPath> _advertPaths = {};
 
+  /// Recently seen packet hashes (hex -> epoch seconds). Used to suppress
+  /// duplicate queued messages (retransmits, repeated reception) while still
+  /// ACKing direct duplicates. Mirrors `Mesh.cpp`'s `hasSeen` table and
+  /// openHop's `_check_dedup` (300s TTL, 1000 entries). Dart's Map preserves
+  /// insertion order, so the oldest entry is `keys.first`.
+  final Map<String, int> _seenPackets = {};
+  static const int _seenPacketTtlSecs = 300;
+  static const int _seenPacketMax = 1000;
+
+  /// Returns `true` if [packetHash] was already seen within the TTL window.
+  bool _isDuplicate(Uint8List packetHash) {
+    final key = bytesToHex(packetHash);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    if (_seenPackets.containsKey(key)) {
+      _seenPackets.remove(key);
+      _seenPackets[key] = now; // refresh recency
+      return true;
+    }
+    _seenPackets[key] = now;
+    _seenPackets.removeWhere((_, ts) => now - ts > _seenPacketTtlSecs);
+    while (_seenPackets.length > _seenPacketMax) {
+      _seenPackets.remove(_seenPackets.keys.first);
+    }
+    return false;
+  }
+
   static Channel _defaultChannel() => Channel(
         name: 'public',
         secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
@@ -547,6 +573,9 @@ class MeshNode extends CompanionBridge {
       );
     }
 
+    // Duplicate reception of the same packet is ACKed again (for reliability)
+    // but not queued twice.
+    if (_isDuplicate(packet.calculatePacketHash())) return;
     _enqueueMessage(QueuedMessage(
       senderKey: sender.publicKey,
       txtType: (flagsByte >> 2) & 0x3F,
@@ -587,6 +616,7 @@ class MeshNode extends CompanionBridge {
     final ts = r.readUInt32Le();
     r.skipBytes(1); // flags
     final text = r.readCString();
+    if (_isDuplicate(packet.calculatePacketHash())) return;
     _enqueueMessage(QueuedMessage(
       senderKey: Uint8List(32),
       timestamp: ts,
