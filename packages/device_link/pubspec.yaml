@@ -1,0 +1,17 @@
+name: device_link
+description: >-
+  Device-facing RadioLink SPI, TCP device client, and a stock-companion
+  simulator for tests. Pure Dart.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  mesh_protocol:
+    path: ../mesh_protocol
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

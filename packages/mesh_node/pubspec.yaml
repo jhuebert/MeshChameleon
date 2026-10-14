@@ -1,0 +1,21 @@
+name: mesh_node
+description: >-
+  MeshNode: the reimplemented companion node (contacts, channels, messages,
+  adverts, ACKs, path cache) driven by a RadioLink. Pure Dart.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  mesh_protocol:
+    path: ../mesh_protocol
+  companion_server:
+    path: ../companion_server
+  device_link:
+    path: ../device_link
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

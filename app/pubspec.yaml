@@ -1,0 +1,33 @@
+name: meshcore_companion_proxy
+description: >-
+  MeshCore Companion Proxy: hold a MeshCore identity on the phone and expose a
+  companion-protocol TCP server backed by a stock companion device used as a
+  raw radio.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  provider: ^6.1.5
+  flutter_secure_storage: ^9.2.2
+  flutter_blue_plus: ^1.35.3
+  mesh_protocol:
+    path: ../packages/mesh_protocol
+  companion_server:
+    path: ../packages/companion_server
+  mesh_node:
+    path: ../packages/mesh_node
+  device_link:
+    path: ../packages/device_link
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
