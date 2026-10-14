@@ -56,7 +56,9 @@ Future<void> main(List<String> args) async {
     stdout.writeln('DEVICE_INFO code=${deviceInfo[0]} fw=${deviceInfo[1]} '
         'maxContacts=${deviceInfo[2] * 2} maxChannels=${deviceInfo[3]}');
 
-    send([cmdAppStart, appProtocolVersion]);
+    // CMD_APP_START needs len>=8 (6 reserved bytes then trailing app name).
+    send([cmdAppStart, appProtocolVersion, 0, 0, 0, 0, 0, 0,
+      ...'MeshCoreCLI'.codeUnits, 0]);
     final selfInfo = await next();
     if (selfInfo.length < 59) {
       stderr.writeln('SELF_INFO too short (${selfInfo.length} bytes)');
