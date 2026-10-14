@@ -64,6 +64,11 @@ class MeshNode extends CompanionBridge {
   /// client via `PUSH_CODE_PATH_DISCOVERY_RESPONSE`.
   final Map<int, Uint8List> _pendingDiscovery = {};
 
+  /// Pending login/status requests, matched by the sender's 4-byte pubkey
+  /// prefix (the firmware's legacy matching scheme).
+  Uint8List? _pendingLogin;
+  Uint8List? _pendingStatus;
+
   /// Recently seen packet hashes (hex -> epoch seconds). Used to suppress
   /// duplicate queued messages (retransmits, repeated reception) while still
   /// ACKing direct duplicates. Mirrors `Mesh.cpp`'s `hasSeen` table and
@@ -393,6 +398,78 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
+  Future<SentResult> sendLogin(Uint8List pubkey, String password) async {
+    final contact = getContactByKey(pubkey);
+    if (contact == null) return const SentResult.failure();
+    var tag = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    while (_pendingDiscovery.containsKey(tag)) {
+      tag++;
+    }
+    final pw = utf8.encode(password);
+    final data = pw.length > 15 ? pw.sublist(0, 15) : pw;
+    final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final packet = await PacketBuilder.createAnonRequest(
+      contact: contact,
+      identity: identity,
+      data: data,
+      timestamp: tag,
+      flood: flood,
+    );
+    await _transmit(packet, flood: flood);
+    _pendingLogin = Uint8List.fromList(pubkey.sublist(0, 4));
+    return SentResult(
+      success: true,
+      isFlood: flood,
+      expectedAck: tag,
+      timeoutMs: 15000,
+    );
+  }
+
+  @override
+  Future<SentResult> sendStatusReq(Uint8List pubkey) async {
+    final contact = getContactByKey(pubkey);
+    if (contact == null) return const SentResult.failure();
+    var tag = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    while (_pendingDiscovery.containsKey(tag)) {
+      tag++;
+    }
+    final rng = Random.secure();
+    final data = Uint8List.fromList([
+      0, 0, 0, 0,
+      ...List<int>.generate(4, (_) => rng.nextInt(256)),
+    ]);
+    final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final packet = await PacketBuilder.createProtocolRequest(
+      contact: contact,
+      identity: identity,
+      protocolCode: reqTypeGetStatus,
+      data: data,
+      timestamp: tag,
+      flood: flood,
+    );
+    await _transmit(packet, flood: flood);
+    _pendingStatus = Uint8List.fromList(pubkey.sublist(0, 4));
+    return SentResult(
+      success: true,
+      isFlood: flood,
+      expectedAck: tag,
+      timeoutMs: 15000,
+    );
+  }
+
+  @override
+  bool logout(Uint8List pubkey) {
+    final prefix = Uint8List.fromList(pubkey.sublist(0, 4));
+    if (_pendingLogin != null && _bytesEqual(_pendingLogin!, prefix)) {
+      _pendingLogin = null;
+    }
+    if (_pendingStatus != null && _bytesEqual(_pendingStatus!, prefix)) {
+      _pendingStatus = null;
+    }
+    return true;
+  }
+
+  @override
   AdvertPath? getAdvertPath(Uint8List prefix) =>
       _advertPaths[bytesToHex(prefix)];
 
@@ -505,6 +582,8 @@ class MeshNode extends CompanionBridge {
         _onAck(packet);
       case payloadTypePath:
         await _onPathReturn(packet);
+      case payloadTypeResponse:
+        await _onResponse(packet);
       default:
         break;
     }
@@ -734,22 +813,113 @@ class MeshNode extends CompanionBridge {
       final crc =
           extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
       _confirmAck(crc);
-    } else if (extraType == payloadTypeResponse && extra.length >= 4) {
-      // A request response (e.g. path discovery / telemetry) returned as a
-      // returned-path packet. `extra` begins with the 4-byte request tag.
-      final tag =
-          extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
-      final pending = _pendingDiscovery.remove(tag);
-      if (pending != null) {
-        pushSink?.pushPathDiscoveryResponse(
-          Uint8List.fromList(sender.publicKey.sublist(0, 6)),
-          pathLenEncoded,
-          Uint8List.fromList(plaintext.sublist(1, extraStart)),
-          packet.pathLenByte,
-          packet.path,
+    } else if (extraType == payloadTypeResponse) {
+      _dispatchResponse(
+        sender.publicKey,
+        extra,
+        outPath: Uint8List.fromList(plaintext.sublist(1, extraStart)),
+        outPathLen: pathLenEncoded,
+        inPath: packet.path,
+        inPathLen: packet.pathLenByte,
+      );
+    }
+  }
+
+  /// Handle a `PAYLOAD_TYPE_RESPONSE` datagram (a response to a request sent as
+  /// a direct datagram rather than a returned-path packet).
+  Future<void> _onResponse(Packet packet) async {
+    final payload = packet.payload;
+    if (payload.length < 2) return;
+    if (payload[0] != _selfHash) return;
+    final srcHash = payload[1];
+    Contact? sender;
+    for (final c in contacts) {
+      if (c.publicKey[0] == srcHash) {
+        sender = c;
+        break;
+      }
+    }
+    if (sender == null) return;
+    final secret = await identity.sharedSecret(sender.publicKey);
+    late Uint8List plaintext;
+    try {
+      plaintext = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16),
+        secret,
+        payload.sublist(2),
+      );
+    } catch (_) {
+      return;
+    }
+    _dispatchResponse(sender.publicKey, plaintext);
+  }
+
+  /// Route a request response (login/status/path-discovery) to the matching
+  /// pending request. Returned-path responses also carry the learned paths.
+  void _dispatchResponse(
+    Uint8List senderPubkey,
+    Uint8List data, {
+    Uint8List? outPath,
+    int? outPathLen,
+    Uint8List? inPath,
+    int? inPathLen,
+  }) {
+    if (data.length < 4) return;
+    final tag = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+    final prefix4 = Uint8List.fromList(senderPubkey.sublist(0, 4));
+
+    if (outPath != null &&
+        outPathLen != null &&
+        inPath != null &&
+        inPathLen != null &&
+        _pendingDiscovery.remove(tag) != null) {
+      pushSink?.pushPathDiscoveryResponse(
+        Uint8List.fromList(senderPubkey.sublist(0, 6)),
+        outPathLen,
+        outPath,
+        inPathLen,
+        inPath,
+      );
+      return;
+    }
+
+    if (_pendingLogin != null && _bytesEqual(_pendingLogin!, prefix4)) {
+      _pendingLogin = null;
+      _handleLoginResponse(senderPubkey, data);
+      return;
+    }
+
+    if (_pendingStatus != null && _bytesEqual(_pendingStatus!, prefix4)) {
+      _pendingStatus = null;
+      if (data.length > 4) {
+        pushSink?.pushStatusResponse(
+          Uint8List.fromList(senderPubkey.sublist(0, 6)),
+          Uint8List.fromList(data.sublist(4)),
         );
       }
     }
+  }
+
+  void _handleLoginResponse(Uint8List senderPubkey, Uint8List data) {
+    final prefix6 = Uint8List.fromList(senderPubkey.sublist(0, 6));
+    // Legacy repeater login replies with the literal "OK".
+    if (data.length >= 6 && data[4] == 0x4F && data[5] == 0x4B) {
+      pushSink?.pushLoginSuccess(prefix6, legacy: true);
+      return;
+    }
+    if (data.length > 4 && data[4] == respServerLoginOk) {
+      final tag =
+          data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+      pushSink?.pushLoginSuccess(
+        prefix6,
+        permissions: data.length > 6 ? data[6] : 0,
+        serverTag: tag,
+        acl: data.length > 7 ? data[7] : 0,
+        firmwareVer: data.length > 12 ? data[12] : 0,
+      );
+      return;
+    }
+    pushSink?.pushLoginFail(prefix6);
   }
 
   // -------------------------------------------------------------------------

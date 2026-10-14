@@ -41,6 +41,27 @@ class RecordingSink implements CompanionPushSink {
       Uint8List outPath, int inPathLen, Uint8List inPath) {
     pathDiscovery.add([1, outPathLen, ...outPath, inPathLen, ...inPath]);
   }
+
+  final List<List<int>> logins = [];
+  final List<Uint8List> loginFails = [];
+  final List<List<int>> statuses = [];
+
+  @override
+  void pushLoginSuccess(Uint8List pubkeyPrefix6,
+      {bool legacy = false,
+      int permissions = 0,
+      int serverTag = 0,
+      int acl = 0,
+      int firmwareVer = 0}) {
+    logins.add([legacy ? 1 : 0, permissions, serverTag, acl, firmwareVer]);
+  }
+
+  @override
+  void pushLoginFail(Uint8List pubkeyPrefix6) => loginFails.add(pubkeyPrefix6);
+
+  @override
+  void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
+      statuses.add([...pubkeyPrefix6, ...data]);
 }
 
 Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 20));
@@ -215,6 +236,54 @@ void main() {
     expect(contact!.outPath, [0xAA, 0xBB]);
   });
 
+  test('login sends an ANON_REQ and pushes login success', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendLogin(bob.identity.publicKey, 'secret');
+    expect(result.success, isTrue);
+    final tag = result.expectedAck!;
+
+    // New-format server response: tag(4) + code(1) + ka(1) + perms(1) + acl(1)
+    // ... + firmware(1) at [12].
+    final body = Uint8List(13);
+    body.setRange(0, 4, (BufferWriter()..writeUInt32Le(tag)).toBytes());
+    body[4] = 0; // RESP_SERVER_LOGIN_OK
+    body[5] = 4; // keep-alive secs / 16
+    body[6] = 1; // permissions (is_admin)
+    body[7] = 3; // ACL permissions
+    body[12] = 7; // firmware version level
+    (alice.link as FakeDeviceLink)
+        .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
+    await pump();
+
+    expect(aliceSink.loginFails, isEmpty);
+    expect(aliceSink.logins.length, 1);
+    expect(aliceSink.logins.first, [0, 1, tag, 3, 7]);
+  });
+
+  test('status request pushes a status response', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendStatusReq(bob.identity.publicKey);
+    expect(result.success, isTrue);
+    final tag = result.expectedAck!;
+    final body = Uint8List.fromList([
+      ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
+      9, 8, 7, 6,
+    ]);
+    (alice.link as FakeDeviceLink)
+        .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
+    await pump();
+
+    expect(aliceSink.statuses.length, 1);
+    // AES-ECB decrypt returns block-padded plaintext; check the meaningful head.
+    expect(aliceSink.statuses.first.sublist(6, 10), [9, 8, 7, 6]);
+  });
+
   test('setRadioParams updates prefs and forwards to the device link', () async {
     alice.setRadioParams(869000000, 125000, 11, 5);
     await pump();
@@ -231,6 +300,22 @@ void main() {
       isTrue,
     );
   });
+}
+
+/// Build a `PAYLOAD_TYPE_RESPONSE` datagram from [from] to [to] carrying [body]
+/// (the responder's already-tagged response payload).
+Future<Packet> _responsePacket(
+    MeshNode from, MeshNode to, Uint8List body) async {
+  final secret = await from.identity.sharedSecret(to.identity.publicKey);
+  final cipher = CryptoUtils.encryptThenMac(secret.sublist(0, 16), secret, body);
+  final payload = Uint8List.fromList([
+    to.identity.publicKey[0],
+    from.identity.publicKey[0],
+    ...cipher,
+  ]);
+  return Packet()
+    ..header = Packet.createHeader(payloadTypeResponse, routeTypeDirect)
+    ..payload = payload;
 }
 
 extension<T> on T {

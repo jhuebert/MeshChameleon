@@ -36,6 +36,24 @@ abstract class CompanionPushSink {
     int inPathLen,
     Uint8List inPath,
   );
+
+  /// Login succeeded. When [legacy] is true the response was the legacy "OK"
+  /// form (no permissions/tag); otherwise [permissions], [serverTag], [acl] and
+  /// [firmwareVer] carry the server's reply.
+  void pushLoginSuccess(
+    Uint8List pubkeyPrefix6, {
+    bool legacy = false,
+    int permissions = 0,
+    int serverTag = 0,
+    int acl = 0,
+    int firmwareVer = 0,
+  });
+
+  /// Login failed.
+  void pushLoginFail(Uint8List pubkeyPrefix6);
+
+  /// Status response: 6-byte pubkey prefix + raw status payload.
+  void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data);
 }
 
 /// Logic backing the companion server: contacts, channels, messaging, adverts,
@@ -152,6 +170,19 @@ class CompanionBridge {
   /// [CompanionPushSink.pushPathDiscoveryResponse].
   Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async =>
       const SentResult.failure();
+
+  /// Log in to a repeater/room server with [password]. The result is delivered
+  /// via [CompanionPushSink.pushLoginSuccess]/[pushLoginFail].
+  Future<SentResult> sendLogin(Uint8List pubkey, String password) async =>
+      const SentResult.failure();
+
+  /// Request the status of a repeater/room server. The response is delivered
+  /// via [CompanionPushSink.pushStatusResponse].
+  Future<SentResult> sendStatusReq(Uint8List pubkey) async =>
+      const SentResult.failure();
+
+  /// Tear down any login/keep-alive session with [pubkey].
+  bool logout(Uint8List pubkey) => false;
 
   AdvertPath? getAdvertPath(Uint8List prefix) => null;
 

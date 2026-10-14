@@ -158,6 +158,9 @@ const int reqTypeGetStatus = 0x01;
 const int reqTypeKeepAlive = 0x02;
 const int reqTypeGetTelemetryData = 0x03;
 
+// Server login response codes (`RESP_SERVER_*` in the firmware).
+const int respServerLoginOk = 0x00;
+
 // Telemetry permission bits (`TELEM_PERM_*` in the firmware).
 const int telemPermBase = 0x01;
 const int telemPermLocation = 0x02;

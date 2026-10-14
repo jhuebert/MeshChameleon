@@ -215,6 +215,37 @@ class CompanionServer implements CompanionPushSink {
     _sendFrame(w.toBytes());
   }
 
+  @override
+  void pushLoginSuccess(
+    Uint8List pubkeyPrefix6, {
+    bool legacy = false,
+    int permissions = 0,
+    int serverTag = 0,
+    int acl = 0,
+    int firmwareVer = 0,
+  }) {
+    final w = BufferWriter()
+      ..writeByte(pushCodeLoginSuccess)
+      ..writeByte(legacy ? 0 : (permissions & 0xFF))
+      ..writeBytes(pubkeyPrefix6.take(6).toList());
+    if (!legacy) {
+      w
+        ..writeUInt32Le(serverTag)
+        ..writeByte(acl & 0xFF)
+        ..writeByte(firmwareVer & 0xFF);
+    }
+    _sendFrame(w.toBytes());
+  }
+
+  @override
+  void pushLoginFail(Uint8List pubkeyPrefix6) => _sendFrame(
+      Uint8List.fromList([pushCodeLoginFail, 0, ...pubkeyPrefix6.take(6)]));
+
+  @override
+  void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
+      _sendFrame(Uint8List.fromList(
+          [pushCodeStatusResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
+
   // -------------------------------------------------------------------------
   // Command dispatch
   // -------------------------------------------------------------------------
@@ -317,6 +348,12 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendTracePath(data);
       case cmdSendPathDiscoveryReq:
         await _cmdSendPathDiscoveryReq(data);
+      case cmdSendLogin:
+        await _cmdSendLogin(data);
+      case cmdSendStatusReq:
+        await _cmdSendStatusReq(data);
+      case cmdLogout:
+        _cmdLogout(data);
       default:
         _log('unsupported cmd 0x${cmd.toRadixString(16)}');
         sendErr(errCodeUnsupportedCmd);
@@ -884,6 +921,34 @@ class CompanionServer implements CompanionPushSink {
     final pubkey = Uint8List.fromList(data.sublist(1, 1 + pubKeySize));
     final result = await bridge.sendPathDiscoveryReq(pubkey);
     if (!result.success) return sendErr(errCodeNotFound);
+    _sendSent(result);
+  }
+
+  Future<void> _cmdSendLogin(Uint8List data) async {
+    if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
+    final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    final password = String.fromCharCodes(
+        data.sublist(pubKeySize).takeWhile((b) => b != 0));
+    final result = await bridge.sendLogin(pubkey, password);
+    if (!result.success) return sendErr(errCodeNotFound);
+    _sendSent(result);
+  }
+
+  Future<void> _cmdSendStatusReq(Uint8List data) async {
+    if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
+    final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    final result = await bridge.sendStatusReq(pubkey);
+    if (!result.success) return sendErr(errCodeNotFound);
+    _sendSent(result);
+  }
+
+  void _cmdLogout(Uint8List data) {
+    if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
+    bridge.logout(Uint8List.fromList(data.sublist(0, pubKeySize)));
+    sendOk();
+  }
+
+  void _sendSent(SentResult result) {
     final w = BufferWriter()
       ..writeByte(respCodeSent)
       ..writeByte(result.isFlood ? 1 : 0)

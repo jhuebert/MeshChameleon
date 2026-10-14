@@ -255,6 +255,40 @@ class PacketBuilder {
     return pkt;
   }
 
+  /// Build a `PAYLOAD_TYPE_ANON_REQ` datagram (used for repeater login). The
+  /// sender's full public key is embedded so the recipient can reply without
+  /// knowing the sender as a contact.
+  static Future<Packet> createAnonRequest({
+    required Contact contact,
+    required LocalIdentity identity,
+    List<int> data = const [],
+    int? timestamp,
+    bool? flood,
+  }) async {
+    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final plaintext = BufferWriter()
+      ..writeUInt32Le(ts)
+      ..writeBytes(data);
+    final secret = await identity.sharedSecret(contact.publicKey);
+    final aesKey = secret.sublist(0, 16);
+    final cipher =
+        CryptoUtils.encryptThenMac(aesKey, secret, plaintext.toBytes());
+    final payload = Uint8List.fromList([
+      contact.publicKey[0],
+      ...identity.publicKey,
+      ...cipher,
+    ]);
+    final useFlood =
+        flood ?? !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final pkt = _packet(
+      Packet.createHeader(payloadTypeAnonReq,
+          useFlood ? routeTypeFlood : routeTypeDirect),
+      payload,
+    );
+    if (!useFlood) pkt.setPath(contact.outPath, contact.outPathLen);
+    return pkt;
+  }
+
   /// Verify an advert packet and extract its encoded appdata.
   static Future<bool> verifyAdvert(Uint8List payload) async {
     // payload = pubkey(32) + timestamp(4) + signature(64) + appdata(...)
