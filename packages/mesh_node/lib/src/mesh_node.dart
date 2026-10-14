@@ -16,6 +16,28 @@ class _PendingAck {
   final Timer timer;
 }
 
+/// A login keep-alive session with a repeater/room server.
+class _Connection {
+  _Connection(this.pubkey, this.interval);
+
+  final Uint8List pubkey;
+  Duration interval;
+  Timer? timer;
+
+  /// Epoch seconds of the last activity; the session is dropped once this is
+  /// older than 2.5x [interval].
+  int lastActivity = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+
+  /// The ACK hash we expect from the next keep-alive request.
+  int? expectedAck;
+
+  void stop() {
+    timer?.cancel();
+    timer = null;
+    expectedAck = null;
+  }
+}
+
 /// Maximum number of inbound messages held for the client before the oldest
 /// is dropped. Matches openHop's `DEFAULT_OFFLINE_QUEUE_SIZE`.
 const int defaultOfflineQueueSize = 512;
@@ -68,6 +90,9 @@ class MeshNode extends CompanionBridge {
   /// prefix (the firmware's legacy matching scheme).
   Uint8List? _pendingLogin;
   Uint8List? _pendingStatus;
+
+  /// Active login keep-alive sessions, keyed by server public key hex.
+  final Map<String, _Connection> _connections = {};
 
   /// Recently seen packet hashes (hex -> epoch seconds). Used to suppress
   /// duplicate queued messages (retransmits, repeated reception) while still
@@ -149,6 +174,10 @@ class MeshNode extends CompanionBridge {
       ack.timer.cancel();
     }
     _pendingAcks.clear();
+    for (final conn in _connections.values) {
+      conn.stop();
+    }
+    _connections.clear();
   }
 
   Future<void> _readBattery() async {
@@ -466,7 +495,81 @@ class MeshNode extends CompanionBridge {
     if (_pendingStatus != null && _bytesEqual(_pendingStatus!, prefix)) {
       _pendingStatus = null;
     }
+    _stopKeepAlive(pubkey);
     return true;
+  }
+
+  void _startKeepAlive(Uint8List pubkey, int keepAliveSecs) {
+    if (keepAliveSecs <= 0) return;
+    final key = bytesToHex(pubkey);
+    final conn = _connections.putIfAbsent(
+      key,
+      () => _Connection(
+          Uint8List.fromList(pubkey), Duration(seconds: keepAliveSecs)),
+    );
+    conn.interval = Duration(seconds: keepAliveSecs);
+    conn.lastActivity = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    conn.timer?.cancel();
+    conn.timer =
+        Timer.periodic(conn.interval, (_) => unawaited(_sendKeepAlive(conn)));
+  }
+
+  void _stopKeepAlive(Uint8List pubkey) {
+    _connections.remove(bytesToHex(pubkey))?.stop();
+  }
+
+  /// Diagnostic/test hook: send a keep-alive request now for every active
+  /// connection without waiting for the interval timer.
+  Future<void> sendKeepAlivesNow() async {
+    for (final conn in _connections.values.toList()) {
+      await _sendKeepAlive(conn);
+    }
+  }
+
+  void _markConnectionActive(Uint8List pubkey) {
+    final conn = _connections[bytesToHex(pubkey)];
+    if (conn != null) {
+      conn.lastActivity = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    }
+  }
+
+  Future<void> _sendKeepAlive(_Connection conn) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final expire = conn.lastActivity + (conn.interval.inSeconds * 5 ~/ 2);
+    if (now >= expire) {
+      _connections.remove(bytesToHex(conn.pubkey));
+      conn.stop();
+      return;
+    }
+    final contact = getContactByKey(conn.pubkey);
+    if (contact == null) {
+      _connections.remove(bytesToHex(conn.pubkey));
+      conn.stop();
+      return;
+    }
+    // Keep-alive is only usable once we know the direct path to the server.
+    if (contact.outPath.isEmpty || contact.outPathLen <= 0) return;
+
+    const syncSince = 0;
+    final packet = await PacketBuilder.createProtocolRequest(
+      contact: contact,
+      identity: identity,
+      protocolCode: reqTypeKeepAlive,
+      data: (BufferWriter()..writeUInt32Le(syncSince)).toBytes(),
+      timestamp: now,
+      flood: false,
+    );
+    final digest = CryptoUtils.sha256([
+      ...(BufferWriter()
+            ..writeUInt32Le(now)
+            ..writeByte(reqTypeKeepAlive)
+            ..writeUInt32Le(syncSince))
+          .toBytes(),
+      ...identity.publicKey,
+    ]);
+    conn.expectedAck =
+        digest[0] | (digest[1] << 8) | (digest[2] << 16) | (digest[3] << 24);
+    await _transmit(packet, flood: false);
   }
 
   @override
@@ -755,6 +858,14 @@ class MeshNode extends CompanionBridge {
         (packet.payload[1] << 8) |
         (packet.payload[2] << 16) |
         (packet.payload[3] << 24);
+    // Keep-alive ACKs are matched separately and not surfaced to the client.
+    for (final conn in _connections.values) {
+      if (conn.expectedAck != null && conn.expectedAck == (crc & 0xFFFFFFFF)) {
+        conn.expectedAck = null;
+        conn.lastActivity = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        return;
+      }
+    }
     _confirmAck(crc);
   }
 
@@ -867,6 +978,7 @@ class MeshNode extends CompanionBridge {
     if (data.length < 4) return;
     final tag = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
     final prefix4 = Uint8List.fromList(senderPubkey.sublist(0, 4));
+    _markConnectionActive(senderPubkey);
 
     if (outPath != null &&
         outPathLen != null &&
@@ -910,6 +1022,8 @@ class MeshNode extends CompanionBridge {
     if (data.length > 4 && data[4] == respServerLoginOk) {
       final tag =
           data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+      final keepAliveSecs = data.length > 5 ? data[5] * 16 : 0;
+      if (keepAliveSecs > 0) _startKeepAlive(senderPubkey, keepAliveSecs);
       pushSink?.pushLoginSuccess(
         prefix6,
         permissions: data.length > 6 ? data[6] : 0,

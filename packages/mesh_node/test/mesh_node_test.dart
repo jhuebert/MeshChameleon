@@ -263,6 +263,55 @@ void main() {
     expect(aliceSink.logins.first, [0, 1, tag, 3, 7]);
   });
 
+  test('login keep-alive sends a request and consumes its ACK', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    // Give alice a direct path to bob so keep-alive is permitted.
+    alice.addUpdateContact(Contact(
+      publicKey: bob.identity.publicKey,
+      name: 'bob',
+      outPath: const [0xAA],
+      outPathLen: 1,
+    ));
+
+    final login = await alice.sendLogin(bob.identity.publicKey, 'secret');
+    final tag = login.expectedAck!;
+    final body = Uint8List(13);
+    body.setRange(0, 4, (BufferWriter()..writeUInt32Le(tag)).toBytes());
+    body[4] = 0; // RESP_SERVER_LOGIN_OK
+    body[5] = 1; // keep-alive secs / 16 => 16s
+    body[6] = 1; // permissions
+    (alice.link as FakeDeviceLink)
+        .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
+    await pump();
+    expect(aliceSink.logins.length, 1);
+
+    await alice.sendKeepAlivesNow();
+    await pump();
+
+    // The last transmission is a keep-alive REQ.
+    final link = alice.link as FakeDeviceLink;
+    final req = Packet.readFrom(link.transmitted.last)!;
+    expect(req.payloadType, payloadTypeReq);
+    final secret = await alice.identity.sharedSecret(bob.identity.publicKey);
+    final plain = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16), secret, req.payload.sublist(2));
+    expect(plain[4], reqTypeKeepAlive);
+
+    // Deliver the discrete ACK the server would send; it must be consumed
+    // silently and NOT surfaced as SEND_CONFIRMED.
+    final digest = CryptoUtils.sha256(
+        [...plain.sublist(0, 9), ...alice.identity.publicKey]);
+    final ack = Packet()
+      ..header = Packet.createHeader(payloadTypeAck, routeTypeDirect)
+      ..payload = Uint8List.fromList(digest.sublist(0, 4));
+    link.deliver(6.0, -70, ack.writeTo());
+    await pump();
+    expect(aliceSink.confirmed, isEmpty);
+  });
+
   test('status request pushes a status response', () async {
     await alice.advertise();
     await bob.advertise();
