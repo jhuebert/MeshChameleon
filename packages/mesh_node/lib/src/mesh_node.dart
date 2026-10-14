@@ -341,6 +341,17 @@ class MeshNode extends CompanionBridge {
     );
     final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
     await _transmit(packet, flood: flood);
+    // CLI data/commands are not acknowledged; don't track a pending ACK.
+    final isCommand =
+        txtType == txtTypeCliData || txtType == txtTypeCliCommand;
+    if (isCommand) {
+      return SentResult(
+        success: true,
+        isFlood: flood,
+        expectedAck: 0,
+        timeoutMs: waitForAck ? ackTimeout.inMilliseconds : 5000,
+      );
+    }
     final timer = Timer(ackTimeout, () {
       _pendingAcks.removeWhere((a) => a.crc == ackCrc);
     });
@@ -794,41 +805,55 @@ class MeshNode extends CompanionBridge {
     final r = BufferReader(plaintext);
     final ts = r.readUInt32Le();
     final flagsByte = r.readByte();
-    final text = r.readCString();
-    final attempt = flagsByte & 0x03;
+    final txtType = (flagsByte >> 2) & 0x3F;
 
-    // ACK the sender and queue the message for the client. A flooded direct
-    // message is acknowledged with an encrypted path-return (which also teaches
-    // the sender the route back); a routed one with a discrete ACK packet.
-    final ackBytes = PacketBuilder.ackHash(
-      timestamp: ts,
-      flagsByte: flagsByte,
-      text: utf8.encode(text),
-      senderPubkey: sender.publicKey,
-    );
-    if (packet.isRouteFlood) {
-      await _transmit(
-        PacketBuilder.createPathReturn(
-          destHashByte: sender.publicKey[0],
-          srcHashByte: identity.publicKey[0],
-          secret: secret,
-          path: packet.path,
-          pathLenEncoded: packet.pathLenByte,
-          extraType: payloadTypeAck,
-          extra: ackBytes,
-        ),
-        flood: true,
-      );
+    // Signed messages carry a 4-byte sender prefix before the text.
+    final String text;
+    final Uint8List ackBytes;
+    if (txtType == txtTypeSigned) {
+      if (plaintext.length < 9) return;
+      r.skipBytes(4); // sender prefix (informational)
+      text = r.readCString();
+      final textLen = utf8.encode(text).length;
+      final end = (9 + textLen).clamp(0, plaintext.length);
+      // The firmware ACKs signed messages with
+      // sha256(plaintext up to the text end | self pubkey).
+      ackBytes = Uint8List.fromList(
+          CryptoUtils.sha256(
+                  [...plaintext.sublist(0, end), ...identity.publicKey])
+              .sublist(0, 4));
     } else {
-      await _transmit(
-        PacketBuilder.createAck(
-          senderPubkey: sender.publicKey,
-          timestamp: ts,
-          attempt: attempt,
-          text: utf8.encode(text),
-        ),
-        flood: false,
+      text = r.readCString();
+      ackBytes = PacketBuilder.ackHash(
+        timestamp: ts,
+        flagsByte: flagsByte,
+        text: utf8.encode(text),
+        senderPubkey: sender.publicKey,
       );
+    }
+
+    // Only plain and signed messages are acknowledged; CLI data/commands are
+    // not. A flooded direct message is acknowledged with an encrypted
+    // path-return (which also teaches the sender the route back); a routed one
+    // with a discrete ACK packet.
+    final expectsAck = txtType == txtTypePlain || txtType == txtTypeSigned;
+    if (expectsAck) {
+      if (packet.isRouteFlood) {
+        await _transmit(
+          PacketBuilder.createPathReturn(
+            destHashByte: sender.publicKey[0],
+            srcHashByte: identity.publicKey[0],
+            secret: secret,
+            path: packet.path,
+            pathLenEncoded: packet.pathLenByte,
+            extraType: payloadTypeAck,
+            extra: ackBytes,
+          ),
+          flood: true,
+        );
+      } else {
+        await _transmit(PacketBuilder.createAckPacket(ackBytes), flood: false);
+      }
     }
 
     // Duplicate reception of the same packet is ACKed again (for reliability)
@@ -836,7 +861,7 @@ class MeshNode extends CompanionBridge {
     if (_isDuplicate(packet.calculatePacketHash())) return;
     _enqueueMessage(QueuedMessage(
       senderKey: sender.publicKey,
-      txtType: (flagsByte >> 2) & 0x3F,
+      txtType: txtType,
       timestamp: ts,
       text: text,
       snr: packet.snr,

@@ -358,6 +358,62 @@ void main() {
     expect(bob.syncNextMessage(), isNull);
   });
 
+  test('CLI data messages are queued but not ACKed', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendTextMessage(
+      bob.identity.publicKey,
+      'cmd reply',
+      txtType: txtTypeCliData,
+    );
+    expect(result.success, isTrue);
+    expect(result.expectedAck, 0);
+    await pump();
+
+    final msg = bob.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.txtType, txtTypeCliData);
+    expect(msg.text, 'cmd reply');
+    // No ACK is expected for CLI data.
+    expect(aliceSink.confirmed, isEmpty);
+  });
+
+  test('signed direct messages are parsed, queued, and ACKed', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final secret = await bob.identity.sharedSecret(alice.identity.publicKey);
+    final plaintext = BufferWriter()
+      ..writeUInt32Le(1234)
+      ..writeByte(txtTypeSigned << 2)
+      ..writeBytes(bob.identity.publicKey.sublist(0, 4)) // sender prefix
+      ..writeString('signed hi')
+      ..writeByte(0);
+    final cipher = CryptoUtils.encryptThenMac(
+        secret.sublist(0, 16), secret, plaintext.toBytes());
+    final pkt = Packet()
+      ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeFlood)
+      ..payload = Uint8List.fromList([
+        alice.identity.publicKey[0],
+        bob.identity.publicKey[0],
+        ...cipher,
+      ]);
+
+    final aliceLink = alice.link as FakeDeviceLink;
+    final ackedBefore = aliceLink.transmitted.length;
+    aliceLink.deliver(6.0, -70, pkt.writeTo());
+    await pump();
+
+    final msg = alice.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.txtType, txtTypeSigned);
+    expect(msg.text, 'signed hi');
+    expect(aliceLink.transmitted.length - ackedBefore, 1); // ACK sent
+  });
+
   test('control data is sent zero-hop and pushed on receive', () async {
     final ok = await alice.sendControlData(Uint8List.fromList([0x80, 1, 2, 3]));
     expect(ok, isTrue);

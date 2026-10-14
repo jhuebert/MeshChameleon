@@ -106,15 +106,18 @@ class PacketBuilder {
     if (senderPubkey.length != pubKeySize) {
       throw ArgumentError('pubkey must be 32 bytes');
     }
-    final digest = ackHash(
+    return createAckPacket(ackHash(
       timestamp: timestamp,
       flagsByte: attempt,
       text: text,
       senderPubkey: senderPubkey,
-    );
-    return _packet(Packet.createHeader(payloadTypeAck, routeTypeDirect),
-        digest);
+    ));
   }
+
+  /// Create a discrete ACK packet from a precomputed 4-byte ACK hash.
+  static Packet createAckPacket(List<int> ackBytes) => _packet(
+      Packet.createHeader(payloadTypeAck, routeTypeDirect),
+      Uint8List.fromList(ackBytes.sublist(0, 4)));
 
   /// Create an encrypted return-path packet carrying [extra] (e.g. an ACK
   /// hash), matching the firmware's `Mesh::createPathReturn`. Used to

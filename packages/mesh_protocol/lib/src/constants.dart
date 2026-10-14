@@ -169,6 +169,7 @@ const int telemPermEnvironment = 0x04;
 const int txtTypePlain = 0;
 const int txtTypeCliData = 1;
 const int txtTypeSigned = 2;
+const int txtTypeCliCommand = 3;
 
 const int teleModeDeny = 0;
 const int teleModeAllowFlags = 1;
