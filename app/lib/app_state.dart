@@ -10,6 +10,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'services/ble_device_link.dart';
+import 'services/foreground_service.dart';
 import 'services/identity_store.dart';
 
 enum ProxyStatus { stopped, running }
@@ -20,6 +21,9 @@ class AppState extends ChangeNotifier {
   AppState({IdentityStore? store}) : store = store ?? IdentityStore();
 
   final IdentityStore store;
+
+  /// Foreground service that keeps the process alive while backgrounded.
+  final ForegroundService _foreground = ForegroundService();
 
   LocalIdentity? identity;
   RadioLink? link;
@@ -132,6 +136,7 @@ class AppState extends ChangeNotifier {
       node.start();
       this.node = node;
       log('Device link ready; mesh node started');
+      await _startForegroundService();
     } catch (e) {
       log('Device connection failed: $e');
       await disconnectDevice();
@@ -148,7 +153,43 @@ class AppState extends ChangeNotifier {
     link = null;
     deviceConnected = false;
     deviceLabel = null;
+    try {
+      await _foreground.stop();
+    } catch (_) {
+      // The service may already be stopped.
+    }
     notifyListeners();
+  }
+
+  /// Persistent-notification text reflecting the current link/server state.
+  String _notificationText() {
+    final linkPart = deviceConnected ? 'device linked' : 'no device';
+    final serverPart = proxyStatus == ProxyStatus.running
+        ? 'serving :$port'
+        : 'server stopped';
+    return '$linkPart · $serverPart';
+  }
+
+  Future<void> _startForegroundService() async {
+    try {
+      await _foreground.start(
+        title: 'Companion Proxy',
+        text: _notificationText(),
+      );
+    } catch (e) {
+      log('Foreground service unavailable: $e');
+    }
+  }
+
+  Future<void> _updateNotification() async {
+    try {
+      await _foreground.update(
+        title: 'Companion Proxy',
+        text: _notificationText(),
+      );
+    } catch (e) {
+      log('Foreground service update failed: $e');
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -170,6 +211,7 @@ class AppState extends ChangeNotifier {
       port = server!.port ?? port;
       proxyStatus = ProxyStatus.running;
       log('Proxy server listening on port $port');
+      await _updateNotification();
     } catch (e) {
       log('Failed to start proxy: $e');
     }
@@ -180,6 +222,7 @@ class AppState extends ChangeNotifier {
     await server?.stop();
     server = null;
     proxyStatus = ProxyStatus.stopped;
+    await _updateNotification();
     notifyListeners();
   }
 

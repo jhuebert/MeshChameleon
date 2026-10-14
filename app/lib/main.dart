@@ -5,8 +5,11 @@ import 'app_state.dart';
 import 'screens/connect_screen.dart';
 import 'screens/identity_screen.dart';
 import 'screens/log_screen.dart';
+import 'services/foreground_service.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ForegroundService().initialize();
   runApp(const ProxyApp());
 }
 
@@ -19,7 +22,17 @@ class ProxyApp extends StatelessWidget {
       create: (_) => AppState()..loadIdentity(),
       child: MaterialApp(
         title: 'MeshCore Companion Proxy',
-        theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
+        theme: ThemeData(
+          colorSchemeSeed: Colors.teal,
+          brightness: Brightness.light,
+          useMaterial3: true,
+        ),
+        darkTheme: ThemeData(
+          colorSchemeSeed: Colors.teal,
+          brightness: Brightness.dark,
+          useMaterial3: true,
+        ),
+        themeMode: ThemeMode.system,
         home: const HomeScreen(),
       ),
     );
