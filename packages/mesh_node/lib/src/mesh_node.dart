@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:companion_server/companion_server.dart';
@@ -434,6 +435,8 @@ class MeshNode extends CompanionBridge {
         _onGroupText(packet);
       case payloadTypeAck:
         _onAck(packet);
+      case payloadTypePath:
+        await _onPathReturn(packet);
       default:
         break;
     }
@@ -510,14 +513,39 @@ class MeshNode extends CompanionBridge {
     final text = r.readCString();
     final attempt = flagsByte & 0x03;
 
-    // ACK the sender and queue the message for the client.
-    final ack = PacketBuilder.createAck(
-      senderPubkey: sender.publicKey,
+    // ACK the sender and queue the message for the client. A flooded direct
+    // message is acknowledged with an encrypted path-return (which also teaches
+    // the sender the route back); a routed one with a discrete ACK packet.
+    final ackBytes = PacketBuilder.ackHash(
       timestamp: ts,
-      attempt: attempt,
-      text: Uint8List.fromList(text.codeUnits),
+      flagsByte: flagsByte,
+      text: utf8.encode(text),
+      senderPubkey: sender.publicKey,
     );
-    await _transmit(ack, flood: false);
+    if (packet.isRouteFlood) {
+      await _transmit(
+        PacketBuilder.createPathReturn(
+          destHashByte: sender.publicKey[0],
+          srcHashByte: identity.publicKey[0],
+          secret: secret,
+          path: packet.path,
+          pathLenEncoded: packet.pathLenByte,
+          extraType: payloadTypeAck,
+          extra: ackBytes,
+        ),
+        flood: true,
+      );
+    } else {
+      await _transmit(
+        PacketBuilder.createAck(
+          senderPubkey: sender.publicKey,
+          timestamp: ts,
+          attempt: attempt,
+          text: utf8.encode(text),
+        ),
+        flood: false,
+      );
+    }
 
     _enqueueMessage(QueuedMessage(
       senderKey: sender.publicKey,
@@ -576,10 +604,65 @@ class MeshNode extends CompanionBridge {
         (packet.payload[1] << 8) |
         (packet.payload[2] << 16) |
         (packet.payload[3] << 24);
+    _confirmAck(crc);
+  }
+
+  void _confirmAck(int crc) {
     final idx = _pendingAcks.indexWhere((a) => a.crc == (crc & 0xFFFFFFFF));
     if (idx < 0) return;
     _pendingAcks.removeAt(idx).timer.cancel();
     pushSink?.pushSendConfirmed(crc & 0xFFFFFFFF);
+  }
+
+  /// Handle a returned-path packet (payload type `0x08`). The encrypted inner
+  /// payload is `path_len | path | extra_type | extra`. When the extra is an
+  /// ACK hash we confirm the pending send; the path is the route back to the
+  /// sender, so we cache it for future direct sends.
+  Future<void> _onPathReturn(Packet packet) async {
+    final payload = packet.payload;
+    if (payload.length < 2) return;
+    if (payload[0] != _selfHash) return; // not addressed to us
+    final srcHash = payload[1];
+    Contact? sender;
+    for (final c in contacts) {
+      if (c.publicKey[0] == srcHash) {
+        sender = c;
+        break;
+      }
+    }
+    if (sender == null) return;
+    final secret = await identity.sharedSecret(sender.publicKey);
+    late Uint8List plaintext;
+    try {
+      plaintext = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16),
+        secret,
+        payload.sublist(2),
+      );
+    } catch (_) {
+      return;
+    }
+    if (plaintext.isEmpty) return;
+    final pathLenEncoded = plaintext[0];
+    final pathByteLen = PathUtils.getByteLength(pathLenEncoded);
+    final extraStart = 1 + pathByteLen;
+    if (plaintext.length <= extraStart) return;
+    final extraType = plaintext[extraStart];
+    final extra = plaintext.sublist(extraStart + 1);
+
+    if (pathByteLen > 0 && PathUtils.isValidPathLen(pathLenEncoded)) {
+      sender.outPath = Uint8List.fromList(plaintext.sublist(1, extraStart));
+      sender.outPathLen = pathLenEncoded;
+      sender.lastmod = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      addUpdateContact(sender);
+      pushSink?.pushPathUpdated(sender.publicKey);
+    }
+
+    if (extraType == payloadTypeAck && extra.length >= 4) {
+      final crc =
+          extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
+      _confirmAck(crc);
+    }
   }
 
   // -------------------------------------------------------------------------

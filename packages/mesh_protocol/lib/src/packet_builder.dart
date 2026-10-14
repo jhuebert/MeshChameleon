@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'buffer.dart';
@@ -78,6 +79,23 @@ class PacketBuilder {
     );
   }
 
+  /// Truncated 4-byte ACK hash for a message sent by [senderPubkey].
+  ///
+  /// Matches the firmware: `sha256(timestamp | flags | text | sender_pubkey)`.
+  static Uint8List ackHash({
+    required int timestamp,
+    required int flagsByte,
+    required List<int> text,
+    required Uint8List senderPubkey,
+  }) {
+    final input = BufferWriter()
+      ..writeUInt32Le(timestamp)
+      ..writeByte(flagsByte & 0xFF)
+      ..writeBytes(text.where((b) => b != 0).toList());
+    return CryptoUtils.sha256([...input.toBytes(), ...senderPubkey])
+        .sublist(0, 4);
+  }
+
   /// Create an ACK hash packet for a received message.
   static Packet createAck({
     required Uint8List senderPubkey,
@@ -88,13 +106,38 @@ class PacketBuilder {
     if (senderPubkey.length != pubKeySize) {
       throw ArgumentError('pubkey must be 32 bytes');
     }
-    final temp = BufferWriter()
-      ..writeUInt32Le(timestamp)
-      ..writeByte(attempt)
-      ..writeBytes(text.where((b) => b != 0).toList());
-    final digest = CryptoUtils.sha256([...temp.toBytes(), ...senderPubkey]);
+    final digest = ackHash(
+      timestamp: timestamp,
+      flagsByte: attempt,
+      text: text,
+      senderPubkey: senderPubkey,
+    );
     return _packet(Packet.createHeader(payloadTypeAck, routeTypeDirect),
-        digest.sublist(0, 4));
+        digest);
+  }
+
+  /// Create an encrypted return-path packet carrying [extra] (e.g. an ACK
+  /// hash), matching the firmware's `Mesh::createPathReturn`. Used to
+  /// acknowledge a *flooded* direct message so the sender learns the path back
+  /// and receives the ACK.
+  static Packet createPathReturn({
+    required int destHashByte,
+    required int srcHashByte,
+    required Uint8List secret,
+    required List<int> path,
+    required int pathLenEncoded,
+    required int extraType,
+    required List<int> extra,
+  }) {
+    final inner = BufferWriter()..writeByte(pathLenEncoded & 0xFF);
+    inner.writeBytes(path);
+    inner.writeByte(extraType & 0xFF);
+    inner.writeBytes(extra);
+    final aesKey = secret.sublist(0, 16);
+    final cipher = CryptoUtils.encryptThenMac(aesKey, secret, inner.toBytes());
+    final payload = Uint8List.fromList([destHashByte, srcHashByte, ...cipher]);
+    return _packet(
+        Packet.createHeader(payloadTypePath, routeTypeFlood), payload);
   }
 
   /// Compute the ACK CRC for an outgoing direct message.
@@ -104,12 +147,13 @@ class PacketBuilder {
     required String message,
     required Uint8List selfPubkey,
   }) {
-    final input = BufferWriter()
-      ..writeUInt32Le(timestamp)
-      ..writeByte(flagsByte)
-      ..writeString(message);
-    final digest = CryptoUtils.sha256([...input.toBytes(), ...selfPubkey]);
-    return digest[0] | (digest[1] << 8) | (digest[2] << 16) | (digest[3] << 24);
+    final h = ackHash(
+      timestamp: timestamp,
+      flagsByte: flagsByte,
+      text: utf8.encode(message),
+      senderPubkey: selfPubkey,
+    );
+    return h[0] | (h[1] << 8) | (h[2] << 16) | (h[3] << 24);
   }
 
   /// Build an encrypted direct text message for [contact].
