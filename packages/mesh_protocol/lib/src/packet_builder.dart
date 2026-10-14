@@ -253,6 +253,13 @@ class PacketBuilder {
     return pkt;
   }
 
+  /// Build a raw control-data packet (`PAYLOAD_TYPE_CONTROL`). These are sent
+  /// zero-hop (direct route, empty path) and are not encrypted.
+  static Packet createControlData(List<int> data) => Packet()
+    ..header = Packet.createHeader(payloadTypeControl, routeTypeDirect)
+    ..pathLenByte = 0
+    ..payload = Uint8List.fromList(data);
+
   /// Build a protocol request (repeater status/telemetry/etc.).
   static Future<Packet> createProtocolRequest({
     required Contact contact,

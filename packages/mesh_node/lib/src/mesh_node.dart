@@ -391,6 +391,12 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
+  Future<bool> sendControlData(Uint8List data) async {
+    await _transmit(PacketBuilder.createControlData(data), flood: false);
+    return true;
+  }
+
+  @override
   QueuedMessage? syncNextMessage() {
     if (_messageQueue.isEmpty) return null;
     final msg = _messageQueue.removeAt(0);
@@ -707,6 +713,8 @@ class MeshNode extends CompanionBridge {
         _onGroupText(packet);
       case payloadTypeGrpData:
         _onGroupData(packet);
+      case payloadTypeControl:
+        _onControlData(packet);
       case payloadTypeAck:
         _onAck(packet);
       case payloadTypePath:
@@ -918,6 +926,17 @@ class MeshNode extends CompanionBridge {
       channelDataType: dataType,
       channelDataPayload: Uint8List.fromList(plaintext.sublist(3, 3 + dataLen)),
     ));
+  }
+
+  void _onControlData(Packet packet) {
+    if (packet.payload.isEmpty) return;
+    if (_isDuplicate(packet.calculatePacketHash())) return;
+    pushSink?.pushControlData(
+      packet.snr,
+      packet.rssi,
+      packet.pathLenByte,
+      packet.payload,
+    );
   }
 
   void _onAck(Packet packet) {

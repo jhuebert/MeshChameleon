@@ -246,6 +246,21 @@ class CompanionServer implements CompanionPushSink {
       _sendFrame(Uint8List.fromList(
           [pushCodeStatusResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
 
+  @override
+  void pushControlData(double snr, int rssi, int pathLen, Uint8List data) {
+    var snrByte = (snr * 4).round().clamp(-128, 127);
+    if (snrByte < 0) snrByte += 256;
+    var rssiByte = rssi.clamp(-128, 127);
+    if (rssiByte < 0) rssiByte += 256;
+    _sendFrame(Uint8List.fromList([
+      pushCodeControlData,
+      snrByte & 0xFF,
+      rssiByte & 0xFF,
+      pathLen & 0xFF,
+      ...data,
+    ]));
+  }
+
   // -------------------------------------------------------------------------
   // Command dispatch
   // -------------------------------------------------------------------------
@@ -326,6 +341,8 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendChannelTxt(data);
       case cmdSendChannelData:
         await _cmdSendChannelData(data);
+      case cmdSendControlData:
+        await _cmdSendControlData(data);
       case cmdSyncNextMessage:
         _cmdSyncNextMessage();
       case cmdSignStart:
@@ -733,6 +750,15 @@ class CompanionServer implements CompanionPushSink {
       path: pathBytes,
       pathLenEncoded: pathLen,
     );
+    ok ? sendOk() : sendErr(errCodeTableFull);
+  }
+
+  Future<void> _cmdSendControlData(Uint8List data) async {
+    // The first control byte must set the 0x80 bit (control-data marker).
+    if (data.isEmpty || (data[0] & 0x80) == 0) {
+      return sendErr(errCodeIllegalArg);
+    }
+    final ok = await bridge.sendControlData(data);
     ok ? sendOk() : sendErr(errCodeTableFull);
   }
 

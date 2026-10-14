@@ -213,6 +213,19 @@ void main() {
       expect(dr.readByte(), 2);
       expect(dr.readBytes(2), [7, 7]);
 
+      // Control data: the client can send it (zero-hop) and receives a push for
+      // control data heard on the air.
+      client.send([cmdSendControlData, 0x80, 9, 8]);
+      expect((await client.next())[0], respCodeOk);
+      await pump();
+
+      expect(await bob.sendControlData(Uint8List.fromList([0x80, 5])), isTrue);
+      await pump();
+      final cd = await client.next();
+      expect(cd[0], pushCodeControlData);
+      expect(cd[3], 0); // zero-hop => empty path
+      expect(cd.sublist(4), [0x80, 5]);
+
       // Signing round trip.
       client.send([cmdSignStart]);
       expect((await client.next())[0], respCodeSignStart);

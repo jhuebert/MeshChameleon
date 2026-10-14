@@ -47,6 +47,13 @@ class RecordingSink implements CompanionPushSink {
   final List<List<int>> statuses = [];
 
   @override
+  void pushControlData(double snr, int rssi, int pathLen, Uint8List data) {
+    controlData.add([pathLen, ...data]);
+  }
+
+  final List<List<int>> controlData = [];
+
+  @override
   void pushLoginSuccess(Uint8List pubkeyPrefix6,
       {bool legacy = false,
       int permissions = 0,
@@ -349,6 +356,14 @@ void main() {
     (bob.link as FakeDeviceLink).deliver(6.0, -70, raw);
     await pump();
     expect(bob.syncNextMessage(), isNull);
+  });
+
+  test('control data is sent zero-hop and pushed on receive', () async {
+    final ok = await alice.sendControlData(Uint8List.fromList([0x80, 1, 2, 3]));
+    expect(ok, isTrue);
+    await pump();
+    expect(bobSink.controlData.length, 1);
+    expect(bobSink.controlData.first, [0, 0x80, 1, 2, 3]);
   });
 
   test('setRadioParams updates prefs and forwards to the device link', () async {

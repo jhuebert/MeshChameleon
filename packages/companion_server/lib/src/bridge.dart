@@ -27,6 +27,9 @@ abstract class CompanionPushSink {
   /// Binary (status/ACL/etc.) response: 6-byte pubkey prefix + raw payload.
   void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data);
 
+  /// A raw control-data packet was received.
+  void pushControlData(double snr, int rssi, int pathLen, Uint8List data);
+
   /// Path-discovery result: 6-byte pubkey prefix plus the outbound and inbound
   /// paths (each with its encoded path-length byte).
   void pushPathDiscoveryResponse(
@@ -194,6 +197,9 @@ class CompanionBridge {
 
   /// Tear down any login/keep-alive session with [pubkey].
   bool logout(Uint8List pubkey) => false;
+
+  /// Send a raw control-data packet zero-hop.
+  Future<bool> sendControlData(Uint8List data) async => false;
 
   AdvertPath? getAdvertPath(Uint8List prefix) => null;
 
