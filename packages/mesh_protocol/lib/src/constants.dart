@@ -153,6 +153,16 @@ const int advTypeRepeater = 2;
 const int advTypeRoom = 3;
 const int advTypeSensor = 4;
 
+// On-air request/response types (carried inside PAYLOAD_TYPE_REQ / _RESPONSE).
+const int reqTypeGetStatus = 0x01;
+const int reqTypeKeepAlive = 0x02;
+const int reqTypeGetTelemetryData = 0x03;
+
+// Telemetry permission bits (`TELEM_PERM_*` in the firmware).
+const int telemPermBase = 0x01;
+const int telemPermLocation = 0x02;
+const int telemPermEnvironment = 0x04;
+
 const int txtTypePlain = 0;
 const int txtTypeCliData = 1;
 const int txtTypeSigned = 2;

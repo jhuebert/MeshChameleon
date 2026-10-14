@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:companion_server/companion_server.dart';
@@ -57,6 +58,11 @@ class MeshNode extends CompanionBridge {
   final List<QueuedMessage> _messageQueue = [];
   final List<_PendingAck> _pendingAcks = [];
   final Map<String, AdvertPath> _advertPaths = {};
+
+  /// Pending path-discovery requests: tag -> target public key. A matching
+  /// `PAYLOAD_TYPE_RESPONSE` extra in a returned-path packet is pushed to the
+  /// client via `PUSH_CODE_PATH_DISCOVERY_RESPONSE`.
+  final Map<int, Uint8List> _pendingDiscovery = {};
 
   /// Recently seen packet hashes (hex -> epoch seconds). Used to suppress
   /// duplicate queued messages (retransmits, repeated reception) while still
@@ -348,6 +354,42 @@ class MeshNode extends CompanionBridge {
     await _transmit(packet, flood: flood);
     return SentResult(
         success: true, isFlood: flood, expectedAck: 0, timeoutMs: 10000);
+  }
+
+  @override
+  Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async {
+    final contact = getContactByKey(pubkey);
+    if (contact == null) return const SentResult.failure();
+    var tag = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    while (_pendingDiscovery.containsKey(tag)) {
+      tag++;
+    }
+    final rng = Random.secure();
+    // req_data = [type][inverse base-telemetry permission mask][3 reserved][4 random]
+    final reqData = Uint8List.fromList([
+      (~telemPermBase) & 0xFF,
+      0,
+      0,
+      0,
+      ...List<int>.generate(4, (_) => rng.nextInt(256)),
+    ]);
+    // Path discovery is a flooded telemetry request (firmware forces flood).
+    final packet = await PacketBuilder.createProtocolRequest(
+      contact: contact,
+      identity: identity,
+      protocolCode: reqTypeGetTelemetryData,
+      data: reqData,
+      timestamp: tag,
+      flood: true,
+    );
+    await _transmit(packet, flood: true);
+    _pendingDiscovery[tag] = Uint8List.fromList(pubkey);
+    return SentResult(
+      success: true,
+      isFlood: true,
+      expectedAck: tag,
+      timeoutMs: 15000,
+    );
   }
 
   @override
@@ -692,6 +734,21 @@ class MeshNode extends CompanionBridge {
       final crc =
           extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
       _confirmAck(crc);
+    } else if (extraType == payloadTypeResponse && extra.length >= 4) {
+      // A request response (e.g. path discovery / telemetry) returned as a
+      // returned-path packet. `extra` begins with the 4-byte request tag.
+      final tag =
+          extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
+      final pending = _pendingDiscovery.remove(tag);
+      if (pending != null) {
+        pushSink?.pushPathDiscoveryResponse(
+          Uint8List.fromList(sender.publicKey.sublist(0, 6)),
+          pathLenEncoded,
+          Uint8List.fromList(plaintext.sublist(1, extraStart)),
+          packet.pathLenByte,
+          packet.path,
+        );
+      }
     }
   }
 

@@ -229,6 +229,7 @@ class PacketBuilder {
     required int protocolCode,
     List<int> data = const [],
     int? timestamp,
+    bool? flood,
   }) async {
     final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final plaintext = BufferWriter()
@@ -243,12 +244,14 @@ class PacketBuilder {
       identity.publicKey[0],
       ...cipher,
     ]);
-    final hasPath = contact.outPath.isNotEmpty && contact.outPathLen > 0;
+    final useFlood =
+        flood ?? !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
     final pkt = _packet(
-      Packet.createHeader(payloadTypeReq, _routeTypeValue(hasPath)),
+      Packet.createHeader(
+          payloadTypeReq, useFlood ? routeTypeFlood : routeTypeDirect),
       payload,
     );
-    if (hasPath) pkt.setPath(contact.outPath, contact.outPathLen);
+    if (!useFlood) pkt.setPath(contact.outPath, contact.outPathLen);
     return pkt;
   }
 

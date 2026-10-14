@@ -201,6 +201,20 @@ class CompanionServer implements CompanionPushSink {
       _sendFrame(Uint8List.fromList(
           [pushCodeBinaryResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
 
+  @override
+  void pushPathDiscoveryResponse(Uint8List pubkeyPrefix6, int outPathLen,
+      Uint8List outPath, int inPathLen, Uint8List inPath) {
+    final w = BufferWriter()
+      ..writeByte(pushCodePathDiscoveryResponse)
+      ..writeByte(0) // reserved
+      ..writeBytes(pubkeyPrefix6.take(6).toList())
+      ..writeByte(outPathLen & 0xFF)
+      ..writeBytes(outPath)
+      ..writeByte(inPathLen & 0xFF)
+      ..writeBytes(inPath);
+    _sendFrame(w.toBytes());
+  }
+
   // -------------------------------------------------------------------------
   // Command dispatch
   // -------------------------------------------------------------------------
@@ -301,6 +315,8 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendTelemetryReq(data);
       case cmdSendTracePath:
         await _cmdSendTracePath(data);
+      case cmdSendPathDiscoveryReq:
+        await _cmdSendPathDiscoveryReq(data);
       default:
         _log('unsupported cmd 0x${cmd.toRadixString(16)}');
         sendErr(errCodeUnsupportedCmd);
@@ -857,6 +873,22 @@ class CompanionServer implements CompanionPushSink {
       ..writeByte(0)
       ..writeUInt32Le(tag)
       ..writeUInt32Le(timeout);
+    _sendFrame(w.toBytes());
+  }
+
+  Future<void> _cmdSendPathDiscoveryReq(Uint8List data) async {
+    // data = [request-index(0)] + pubkey(32); the index must be 0.
+    if (data.length < 1 + pubKeySize || data[0] != 0) {
+      return sendErr(errCodeIllegalArg);
+    }
+    final pubkey = Uint8List.fromList(data.sublist(1, 1 + pubKeySize));
+    final result = await bridge.sendPathDiscoveryReq(pubkey);
+    if (!result.success) return sendErr(errCodeNotFound);
+    final w = BufferWriter()
+      ..writeByte(respCodeSent)
+      ..writeByte(result.isFlood ? 1 : 0)
+      ..writeUInt32Le(result.expectedAck ?? 0)
+      ..writeUInt32Le(result.timeoutMs ?? 10000);
     _sendFrame(w.toBytes());
   }
 

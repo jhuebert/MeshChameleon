@@ -33,6 +33,14 @@ class RecordingSink implements CompanionPushSink {
 
   @override
   void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
+
+  final List<List<int>> pathDiscovery = [];
+
+  @override
+  void pushPathDiscoveryResponse(Uint8List pubkeyPrefix6, int outPathLen,
+      Uint8List outPath, int inPathLen, Uint8List inPath) {
+    pathDiscovery.add([1, outPathLen, ...outPath, inPathLen, ...inPath]);
+  }
 }
 
 Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 20));
@@ -167,6 +175,44 @@ void main() {
     bobLink.deliver(6.0, -70, raw);
     await pump();
     expect(bob.syncNextMessage(), isNull);
+  });
+
+  test('path discovery request is sent and its response is pushed', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendPathDiscoveryReq(bob.identity.publicKey);
+    expect(result.success, isTrue);
+    expect(result.isFlood, isTrue);
+    final tag = result.expectedAck!;
+
+    // Build the returned-path response the peer would send back.
+    final secret = await bob.identity.sharedSecret(alice.identity.publicKey);
+    final tagBytes = (BufferWriter()..writeUInt32Le(tag)).toBytes();
+    final resp = PacketBuilder.createPathReturn(
+      destHashByte: alice.identity.publicKey[0],
+      srcHashByte: bob.identity.publicKey[0],
+      secret: secret,
+      path: const [0xAA, 0xBB],
+      pathLenEncoded: 2,
+      extraType: payloadTypeResponse,
+      extra: [...tagBytes, 0, 0, 0, 0],
+    );
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, resp.writeTo());
+    await pump();
+
+    // Pushed as [_, outPathLen, ...outPath, inPathLen, ...inPath].
+    expect(aliceSink.pathDiscovery.length, 1);
+    final pushed = aliceSink.pathDiscovery.first;
+    expect(pushed[1], 2); // outPathLen
+    expect(pushed.sublist(2, 4), [0xAA, 0xBB]);
+    expect(pushed[4], 0); // inPathLen (no path on the delivered packet)
+
+    // The node also learned the outbound path to the peer.
+    final contact = alice.getContactByKey(bob.identity.publicKey);
+    expect(contact, isNotNull);
+    expect(contact!.outPath, [0xAA, 0xBB]);
   });
 
   test('setRadioParams updates prefs and forwards to the device link', () async {

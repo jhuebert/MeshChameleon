@@ -26,6 +26,16 @@ abstract class CompanionPushSink {
 
   /// Binary (status/ACL/etc.) response: 6-byte pubkey prefix + raw payload.
   void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data);
+
+  /// Path-discovery result: 6-byte pubkey prefix plus the outbound and inbound
+  /// paths (each with its encoded path-length byte).
+  void pushPathDiscoveryResponse(
+    Uint8List pubkeyPrefix6,
+    int outPathLen,
+    Uint8List outPath,
+    int inPathLen,
+    Uint8List inPath,
+  );
 }
 
 /// Logic backing the companion server: contacts, channels, messaging, adverts,
@@ -136,6 +146,12 @@ class CompanionBridge {
     Uint8List pathBytes,
   ) async =>
       false;
+
+  /// Send a flooded path-discovery request (a telemetry request) to [pubkey].
+  /// A matching response is delivered via
+  /// [CompanionPushSink.pushPathDiscoveryResponse].
+  Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async =>
+      const SentResult.failure();
 
   AdvertPath? getAdvertPath(Uint8List prefix) => null;
 
