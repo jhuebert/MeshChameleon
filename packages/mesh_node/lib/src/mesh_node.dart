@@ -5,12 +5,18 @@ import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
+import 'node_store.dart';
+
 class _PendingAck {
   _PendingAck(this.crc, this.contactPubkey, this.timer);
   final int crc;
   final Uint8List contactPubkey;
   final Timer timer;
 }
+
+/// Maximum number of inbound messages held for the client before the oldest
+/// is dropped. Matches openHop's `DEFAULT_OFFLINE_QUEUE_SIZE`.
+const int defaultOfflineQueueSize = 512;
 
 /// The reimplemented MeshCore companion node.
 ///
@@ -24,13 +30,12 @@ class MeshNode extends CompanionBridge {
     required this.link,
     NodePrefs? prefs,
     DeviceInfo? deviceInfo,
+    this.store,
     this.ackTimeout = const Duration(seconds: 10),
+    this.maxQueueSize = defaultOfflineQueueSize,
   })  : prefs = prefs ?? NodePrefs(),
         deviceInfo_ = deviceInfo ?? const DeviceInfo() {
-    channels[0] = Channel(
-      name: 'public',
-      secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
-    );
+    channels[0] = _defaultChannel();
   }
 
   final LocalIdentity identity;
@@ -39,11 +44,45 @@ class MeshNode extends CompanionBridge {
   final DeviceInfo deviceInfo_;
   final Duration ackTimeout;
 
+  /// Optional persistence backend. When set, [load] restores the last saved
+  /// state and every mutation is written back with [NodeStore.save].
+  final NodeStore? store;
+
+  /// Maximum number of queued inbound messages; oldest are dropped on overflow.
+  final int maxQueueSize;
+
   final List<Contact> contacts = [];
   final Map<int, Channel> channels = {};
   final List<QueuedMessage> _messageQueue = [];
   final List<_PendingAck> _pendingAcks = [];
   final Map<String, AdvertPath> _advertPaths = {};
+
+  static Channel _defaultChannel() => Channel(
+        name: 'public',
+        secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
+      );
+
+  /// Restore persisted state from [store], if one is configured. Call before
+  /// [start] so the node comes up with the previously known contacts,
+  /// channels, queue, and preferences.
+  Future<void> load() async {
+    final state = await store?.load();
+    if (state == null) return;
+    prefs.copyFrom(state.prefs);
+    contacts
+      ..clear()
+      ..addAll(state.contacts);
+    channels
+      ..clear()
+      ..addAll(state.channels);
+    channels.putIfAbsent(0, _defaultChannel);
+    _messageQueue
+      ..clear()
+      ..addAll(state.queue);
+    _advertPaths
+      ..clear()
+      ..addAll(state.advertPaths);
+  }
 
   BatteryReading _battery =
       const BatteryReading(millivolts: 0, storageUsedKb: 0, storageTotalKb: 0);
@@ -134,6 +173,7 @@ class MeshNode extends CompanionBridge {
     } else {
       contacts.add(contact);
     }
+    _persist();
     return true;
   }
 
@@ -142,7 +182,9 @@ class MeshNode extends CompanionBridge {
     final hex = bytesToHex(pubkey);
     final before = contacts.length;
     contacts.removeWhere((c) => c.publicKeyHex == hex);
-    return contacts.length != before;
+    if (contacts.length == before) return false;
+    _persist();
+    return true;
   }
 
   @override
@@ -151,6 +193,7 @@ class MeshNode extends CompanionBridge {
     if (c == null) return false;
     c.outPath = Uint8List(0);
     c.outPathLen = -1;
+    _persist();
     return true;
   }
 
@@ -167,6 +210,7 @@ class MeshNode extends CompanionBridge {
   @override
   bool setChannel(int index, String name, Uint8List secret) {
     channels[index] = Channel(name: name, secret: Uint8List.fromList(secret));
+    _persist();
     return true;
   }
 
@@ -195,12 +239,16 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
-  void setAdvertName(String name) => prefs.nodeName = name;
+  void setAdvertName(String name) {
+    prefs.nodeName = name;
+    _persist();
+  }
 
   @override
   void setAdvertLatLon(double lat, double lon) {
     prefs.latitude = lat;
     prefs.longitude = lon;
+    _persist();
   }
 
   // -------------------------------------------------------------------------
@@ -254,7 +302,9 @@ class MeshNode extends CompanionBridge {
   @override
   QueuedMessage? syncNextMessage() {
     if (_messageQueue.isEmpty) return null;
-    return _messageQueue.removeAt(0);
+    final msg = _messageQueue.removeAt(0);
+    _persist();
+    return msg;
   }
 
   @override
@@ -299,6 +349,7 @@ class MeshNode extends CompanionBridge {
     prefs.bandwidthHz = bwHz;
     prefs.spreadingFactor = sf;
     prefs.codingRate = cr;
+    _persist();
     unawaited(
       link.setRadioParams(RadioParams(
         frequencyHz: freqHz,
@@ -313,7 +364,19 @@ class MeshNode extends CompanionBridge {
   @override
   void setTxPower(int dbm) {
     prefs.txPowerDbm = dbm;
+    _persist();
     unawaited(link.setTxPower(dbm));
+  }
+
+  /// Adopt the connected device's actual radio parameters as the node's own
+  /// without re-configuring the device (used once at connect time).
+  void syncRadioParams(RadioParams params) {
+    prefs.frequencyHz = params.frequencyHz;
+    prefs.bandwidthHz = params.bandwidthHz;
+    prefs.spreadingFactor = params.spreadingFactor;
+    prefs.codingRate = params.codingRate;
+    prefs.txPowerDbm = params.txPowerDbm;
+    _persist();
   }
 
   @override
@@ -397,7 +460,6 @@ class MeshNode extends CompanionBridge {
     contact.lastmod = now;
     contact.outPath = packet.path;
     contact.outPathLen = packet.path.isEmpty ? -1 : packet.pathLenByte;
-    addUpdateContact(contact);
 
     _advertPaths[bytesToHex(pubkey.sublist(0, 7))] = AdvertPath(
       publicKeyPrefix: pubkey.sublist(0, 7),
@@ -406,6 +468,8 @@ class MeshNode extends CompanionBridge {
       path: packet.path,
       recvTimestamp: now,
     );
+    // Persists both the contact and the advert path in one snapshot.
+    addUpdateContact(contact);
 
     if (existing == null) {
       pushSink?.pushNewAdvert(_contactFrameBody(contact));
@@ -455,7 +519,7 @@ class MeshNode extends CompanionBridge {
     );
     await _transmit(ack, flood: false);
 
-    _messageQueue.add(QueuedMessage(
+    _enqueueMessage(QueuedMessage(
       senderKey: sender.publicKey,
       txtType: (flagsByte >> 2) & 0x3F,
       timestamp: ts,
@@ -463,7 +527,6 @@ class MeshNode extends CompanionBridge {
       snr: packet.snr,
       rssi: packet.rssi,
     ));
-    pushSink?.pushMsgWaiting();
   }
 
   void _onGroupText(Packet packet) {
@@ -496,7 +559,7 @@ class MeshNode extends CompanionBridge {
     final ts = r.readUInt32Le();
     r.skipBytes(1); // flags
     final text = r.readCString();
-    _messageQueue.add(QueuedMessage(
+    _enqueueMessage(QueuedMessage(
       senderKey: Uint8List(32),
       timestamp: ts,
       text: text,
@@ -505,7 +568,6 @@ class MeshNode extends CompanionBridge {
       snr: packet.snr,
       rssi: packet.rssi,
     ));
-    pushSink?.pushMsgWaiting();
   }
 
   void _onAck(Packet packet) {
@@ -518,6 +580,37 @@ class MeshNode extends CompanionBridge {
     if (idx < 0) return;
     _pendingAcks.removeAt(idx).timer.cancel();
     pushSink?.pushSendConfirmed(crc & 0xFFFFFFFF);
+  }
+
+  // -------------------------------------------------------------------------
+  // Persistence
+  // -------------------------------------------------------------------------
+
+  void _enqueueMessage(QueuedMessage message) {
+    _messageQueue.add(message);
+    while (_messageQueue.length > maxQueueSize) {
+      _messageQueue.removeAt(0); // drop oldest on overflow
+    }
+    pushSink?.pushMsgWaiting();
+    _persist();
+  }
+
+  void _persist() {
+    final s = store;
+    if (s == null) return;
+    unawaited(s.save(NodeState(
+      prefs: NodePrefs()..copyFrom(prefs),
+      contacts: contacts.map((c) => c.clone()).toList(),
+      channels: {
+        for (final e in channels.entries)
+          e.key: Channel(
+            name: e.value.name,
+            secret: Uint8List.fromList(e.value.secret),
+          ),
+      },
+      queue: List<QueuedMessage>.of(_messageQueue),
+      advertPaths: Map<String, AdvertPath>.of(_advertPaths),
+    )));
   }
 
   // -------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'services/ble_device_link.dart';
 import 'services/identity_store.dart';
@@ -31,6 +33,19 @@ class AppState extends ChangeNotifier {
   bool busy = false;
 
   final List<String> logs = [];
+
+  NodeStore? _nodeStoreInstance;
+
+  /// Lazily create the on-disk node-state store (contacts, channels, queue,
+  /// prefs) under the app's support directory.
+  Future<NodeStore> _nodeStore() async {
+    final existing = _nodeStoreInstance;
+    if (existing != null) return existing;
+    final dir = await getApplicationSupportDirectory();
+    final store = JsonNodeStore(file: File('${dir.path}/node_state.json'));
+    _nodeStoreInstance = store;
+    return store;
+  }
 
   void log(String message) {
     logs.add('${DateTime.now().toIso8601String()}  $message');
@@ -105,15 +120,16 @@ class AppState extends ChangeNotifier {
       log('Device: fw ${deviceInfo.firmwareVerCode}, '
           '${deviceInfo.manufacturer} ${deviceInfo.version}');
 
-      final prefs = NodePrefs(
-        frequencyHz: params.frequencyHz,
-        bandwidthHz: params.bandwidthHz,
-        spreadingFactor: params.spreadingFactor,
-        codingRate: params.codingRate,
-        txPowerDbm: params.txPowerDbm,
+      final node = MeshNode(
+        identity: identity!,
+        link: link,
+        deviceInfo: deviceInfo,
+        store: await _nodeStore(),
       );
-      final node = MeshNode(identity: identity!, link: link, prefs: prefs, deviceInfo: deviceInfo)
-        ..start();
+      await node.load();
+      // The device is the source of truth for the radio at connect time.
+      node.syncRadioParams(params);
+      node.start();
       this.node = node;
       log('Device link ready; mesh node started');
     } catch (e) {

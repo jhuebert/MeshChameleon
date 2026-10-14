@@ -107,6 +107,31 @@ class NodePrefs {
       (telemetryModeBase & 0x03) |
       ((telemetryModeLocation & 0x03) << 2) |
       ((telemetryModeEnvironment & 0x03) << 4);
+
+  /// Copy every field from [other] into this instance, preserving object
+  /// identity. Used when restoring preferences loaded from a store.
+  void copyFrom(NodePrefs other) {
+    nodeName = other.nodeName;
+    advType = other.advType;
+    txPowerDbm = other.txPowerDbm;
+    maxTxPower = other.maxTxPower;
+    frequencyHz = other.frequencyHz;
+    bandwidthHz = other.bandwidthHz;
+    spreadingFactor = other.spreadingFactor;
+    codingRate = other.codingRate;
+    latitude = other.latitude;
+    longitude = other.longitude;
+    advertLocPolicy = other.advertLocPolicy;
+    multiAcks = other.multiAcks;
+    telemetryModeBase = other.telemetryModeBase;
+    telemetryModeLocation = other.telemetryModeLocation;
+    telemetryModeEnvironment = other.telemetryModeEnvironment;
+    manualAddContacts = other.manualAddContacts;
+    autoaddConfig = other.autoaddConfig;
+    clientRepeat = other.clientRepeat;
+    pathHashMode = other.pathHashMode;
+    exportPrivateKeyEnabled = other.exportPrivateKeyEnabled;
+  }
 }
 
 /// Device capabilities returned by `CMD_DEVICE_QUERY`.
