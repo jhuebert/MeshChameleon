@@ -474,6 +474,39 @@ void main() {
     );
   });
 
+  test('multipart ACKs are accepted and extra ACKs sent when multiAcks set',
+      () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    // Give alice a direct path to bob so the DM is routed (not flooded).
+    alice.addUpdateContact(Contact(
+      publicKey: bob.identity.publicKey,
+      name: 'bob',
+      outPath: const [0xAA],
+      outPathLen: 1,
+    ));
+    bob.prefs.multiAcks = 1;
+
+    final bobLink = bob.link as FakeDeviceLink;
+    final before = bobLink.transmitted.length;
+    final result = await alice.sendTextMessage(bob.identity.publicKey, 'hi');
+    expect(result.isFlood, isFalse);
+    await pump();
+
+    // Bob sent a multipart ACK plus the plain ACK.
+    expect(bobLink.transmitted.length - before, 2);
+    expect(Packet.readFrom(bobLink.transmitted.last)!.payloadType,
+        payloadTypeAck);
+    expect(Packet.readFrom(bobLink.transmitted[before])!.payloadType,
+        payloadTypeMultipart);
+
+    // Alice confirmed exactly once.
+    expect(aliceSink.confirmed.length, 1);
+    expect(aliceSink.confirmed.first, result.expectedAck);
+  });
+
   test('control data is sent zero-hop and pushed on receive', () async {
     final ok = await alice.sendControlData(Uint8List.fromList([0x80, 1, 2, 3]));
     expect(ok, isTrue);

@@ -119,6 +119,16 @@ class PacketBuilder {
       Packet.createHeader(payloadTypeAck, routeTypeDirect),
       Uint8List.fromList(ackBytes.sublist(0, 4)));
 
+  /// Create a multipart ACK packet (`PAYLOAD_TYPE_MULTIPART` whose first byte is
+  /// `remaining << 4 | PAYLOAD_TYPE_ACK`). Used to send a redundant ACK on
+  /// direct routes when `multi_acks` is enabled.
+  static Packet createMultiAck(List<int> ackBytes, int remaining) => _packet(
+      Packet.createHeader(payloadTypeMultipart, routeTypeDirect),
+      Uint8List.fromList([
+        ((remaining & 0x0F) << 4) | payloadTypeAck,
+        ...ackBytes.sublist(0, 4),
+      ]));
+
   /// Create an encrypted return-path packet carrying [extra] (e.g. an ACK
   /// hash), matching the firmware's `Mesh::createPathReturn`. Used to
   /// acknowledge a *flooded* direct message so the sender learns the path back

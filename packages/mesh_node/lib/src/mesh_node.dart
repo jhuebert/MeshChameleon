@@ -760,6 +760,8 @@ class MeshNode extends CompanionBridge {
         _onControlData(packet);
       case payloadTypeAck:
         _onAck(packet);
+      case payloadTypeMultipart:
+        _onMultipart(packet);
       case payloadTypePath:
         await _onPathReturn(packet);
       case payloadTypeResponse:
@@ -889,6 +891,14 @@ class MeshNode extends CompanionBridge {
           flood: true,
         );
       } else {
+        // With multi_acks enabled, precede the plain ACK with a multipart ACK
+        // (the firmware sends one redundant MultiAck, then the ACK).
+        if (prefs.multiAcks > 0) {
+          await _transmit(
+            PacketBuilder.createMultiAck(ackBytes, 1),
+            flood: false,
+          );
+        }
         await _transmit(PacketBuilder.createAckPacket(ackBytes), flood: false);
       }
     }
@@ -1016,6 +1026,21 @@ class MeshNode extends CompanionBridge {
       }
     }
     _confirmAck(crc);
+  }
+
+  /// Handle a `PAYLOAD_TYPE_MULTIPART` packet. Only multipart ACKs are used by
+  /// the firmware: the first byte is `remaining << 4 | PAYLOAD_TYPE_ACK` and the
+  /// rest is the 4-byte ACK hash of an ordinary ACK.
+  void _onMultipart(Packet packet) {
+    if (packet.payload.length < 5) return;
+    final innerType = packet.payload[0] & 0x0F;
+    if (innerType != payloadTypeAck) return;
+    final ackPacket = Packet()
+      ..header = packet.header
+      ..pathLenByte = packet.pathLenByte
+      ..path = packet.path
+      ..payload = Uint8List.fromList(packet.payload.sublist(1));
+    _onAck(ackPacket);
   }
 
   void _confirmAck(int crc) {
