@@ -133,7 +133,7 @@ class TcpDeviceLink implements RadioLink {
       _pending = completer;
       _expected = expected;
       try {
-        socket.add(_codec.encodeFrame(frame));
+        socket.add(_codec.encodeFrame(frame, prefix: frameInboundPrefix));
         return await completer.future.timeout(requestTimeout);
       } finally {
         _pending = null;
@@ -142,12 +142,13 @@ class TcpDeviceLink implements RadioLink {
   }
 
   @override
-  Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) {
-    // Fire and forget: raw TX has no per-packet response.
-    final socket = _socket;
-    if (socket == null) throw StateError('device link not connected');
-    socket.add(_codec.encodeFrame(DeviceFrames.sendRawPacket(packet, priority)));
-    return Future<void>.value();
+  Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) async {
+    // The firmware replies OK/ERR for raw TX. Await it so a stray response
+    // cannot be mistaken for another in-flight request's reply.
+    await _request(
+      DeviceFrames.sendRawPacket(packet, priority),
+      {respCodeOk, respCodeErr},
+    );
   }
 
   @override

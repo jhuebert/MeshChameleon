@@ -25,7 +25,8 @@ class FramedClient {
   final _controller = StreamController<Uint8List>.broadcast();
   late final _frames = _Queue(_controller.stream);
 
-  void send(List<int> payload) => _socket.add(_codec.encodeFrame(payload));
+  void send(List<int> payload) =>
+      _socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
 
   Future<Uint8List> next() => _frames.next();
 

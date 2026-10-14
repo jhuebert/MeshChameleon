@@ -14,6 +14,16 @@ void main() {
     ]);
   });
 
+  test('encodes with an explicit inbound prefix for device-facing clients', () {
+    final codec = SerialFrameCodec();
+    final frame = codec.encodeFrame([1, 2, 3], prefix: frameInboundPrefix);
+    expect(frame[0], frameInboundPrefix);
+    expect(frame[1], 3);
+    expect(codec.ingest(frame), [
+      [1, 2, 3],
+    ]);
+  });
+
   test('decodes frames split across chunks', () {
     final codec = SerialFrameCodec();
     final frame = codec.encodeFrame(List.generate(50, (i) => i));

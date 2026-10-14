@@ -19,8 +19,15 @@ class SerialFrameCodec {
     _startIndex = 0;
   }
 
-  /// Wrap a payload in an outbound (`'>'`) frame.
-  Uint8List encodeFrame(List<int> payload) {
+  /// Wrap a payload in a frame.
+  ///
+  /// [prefix] defaults to the outbound (`'>'`) delimiter used when the radio
+  /// replies to the app. A device-facing client (the proxy talking to a stock
+  /// companion) must use the inbound `'<'` prefix instead.
+  Uint8List encodeFrame(
+    List<int> payload, {
+    int prefix = frameOutboundPrefix,
+  }) {
     if (payload.length > maxPayloadLength) {
       throw ArgumentError.value(
         payload.length,
@@ -29,7 +36,7 @@ class SerialFrameCodec {
       );
     }
     final out = Uint8List(3 + payload.length);
-    out[0] = frameOutboundPrefix;
+    out[0] = prefix;
     out[1] = payload.length & 0xFF;
     out[2] = (payload.length >> 8) & 0xFF;
     out.setRange(3, out.length, payload);

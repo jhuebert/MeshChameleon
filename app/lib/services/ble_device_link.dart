@@ -160,7 +160,12 @@ class BleDeviceLink implements RadioLink {
   Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) async {
     final rx = _rx;
     if (rx == null) throw StateError('BLE not connected');
-    await rx.write(DeviceFrames.sendRawPacket(packet, priority), withoutResponse: false);
+    // The firmware replies OK/ERR for raw TX; consume it so it can't be
+    // mistaken for another in-flight request's reply.
+    await _request(
+      DeviceFrames.sendRawPacket(packet, priority),
+      {respCodeOk, respCodeErr},
+    );
   }
 
   @override

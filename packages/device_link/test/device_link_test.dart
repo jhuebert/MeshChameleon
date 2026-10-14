@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:device_link/device_link.dart';
@@ -73,6 +75,72 @@ void main() {
     b.setRawRxListener((snr, rssi, raw) => received.add(raw));
     await a.sendRawPacket(Uint8List.fromList([9, 8, 7]));
     expect(received.single, [9, 8, 7]);
+  });
+
+  test('TcpDeviceLink frames device requests with the inbound prefix', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final received = Completer<Uint8List>();
+    server.listen((socket) {
+      socket.listen((data) {
+        if (!received.isCompleted) {
+          received.complete(Uint8List.fromList(data));
+        }
+      });
+    });
+
+    final link = TcpDeviceLink(
+      host: '127.0.0.1',
+      port: server.port,
+      requestTimeout: const Duration(milliseconds: 300),
+    );
+    await link.connect();
+    link.deviceInfo().then((_) {}, onError: (Object _) {});
+
+    final bytes = await received.future.timeout(const Duration(seconds: 2));
+    expect(bytes[0], frameInboundPrefix, reason: 'app→device frames use "<"');
+    expect(bytes[1], 2);
+    expect(bytes.sublist(3), [cmdDeviceQuery, appProtocolVersion]);
+
+    await link.disconnect();
+    await server.close();
+  });
+
+  test('TcpDeviceLink sends raw TX as an inbound frame and awaits OK', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final frames = <Uint8List>[];
+    final firstFrame = Completer<void>();
+    server.listen((socket) {
+      final buffer = <int>[];
+      socket.listen((data) {
+        buffer.addAll(data);
+        while (buffer.length >= 3) {
+          final length = buffer[1] | (buffer[2] << 8);
+          if (buffer.length < 3 + length) break;
+          frames.add(Uint8List.fromList(buffer.sublist(3, 3 + length)));
+          buffer.removeRange(0, 3 + length);
+          if (!firstFrame.isCompleted) firstFrame.complete();
+          socket.add(
+              Uint8List.fromList([frameOutboundPrefix, 1, 0, respCodeOk]));
+        }
+      });
+    });
+
+    final link = TcpDeviceLink(
+      host: '127.0.0.1',
+      port: server.port,
+      requestTimeout: const Duration(seconds: 2),
+    );
+    await link.connect();
+    final packet = Uint8List.fromList([0x04, 0x00, 0xAA, 0xBB]);
+    await link.sendRawPacket(packet, 1);
+    await firstFrame.future;
+
+    expect(frames.single[0], cmdSendRawPacket);
+    expect(frames.single[1], 1);
+    expect(frames.single.sublist(2), packet);
+
+    await link.disconnect();
+    await server.close();
   });
 
   test('TcpDeviceLink parses DEVICE_INFO', () {
