@@ -234,14 +234,39 @@ class MeshNode extends CompanionBridge {
 
   @override
   bool addUpdateContact(Contact contact) {
-    final idx = contacts.indexWhere((c) => c.publicKeyHex == contact.publicKeyHex);
+    final idx =
+        contacts.indexWhere((c) => c.publicKeyHex == contact.publicKeyHex);
     if (idx >= 0) {
       contacts[idx] = contact;
     } else {
-      contacts.add(contact);
+      final max = deviceInfo_.maxContacts;
+      final capped = max > 0 && contacts.length >= max;
+      if (capped) {
+        final overwrite = _oldestOverwritableContactIndex();
+        if (overwrite < 0) return false; // table full, overwrite disabled
+        contacts[overwrite] = contact;
+      } else {
+        contacts.add(contact);
+      }
     }
     _persist();
     return true;
+  }
+
+  /// Index of the oldest non-favourite contact, or -1 when overwrite-on-full is
+  /// disabled (`AUTO_ADD_OVERWRITE_OLDEST`) or every contact is a favourite.
+  int _oldestOverwritableContactIndex() {
+    if ((prefs.autoaddConfig & autoAddOverwriteOldest) == 0) return -1;
+    var oldestIdx = -1;
+    var oldestLastmod = 0x7FFFFFFF;
+    for (var i = 0; i < contacts.length; i++) {
+      final isFavourite = (contacts[i].flags & 0x01) != 0;
+      if (!isFavourite && contacts[i].lastmod < oldestLastmod) {
+        oldestLastmod = contacts[i].lastmod;
+        oldestIdx = i;
+      }
+    }
+    return oldestIdx;
   }
 
   @override
@@ -476,7 +501,14 @@ class MeshNode extends CompanionBridge {
       tag++;
     }
     final pw = utf8.encode(password);
-    final data = pw.length > 15 ? pw.sublist(0, 15) : pw;
+    final pwTrimmed = pw.length > 15 ? pw.sublist(0, 15) : pw;
+    // Room servers take a sync cursor before the password.
+    final List<int> data = contact.advType == advTypeRoom
+        ? [
+            ...(BufferWriter()..writeUInt32Le(contact.syncSince)).toBytes(),
+            ...pwTrimmed,
+          ]
+        : pwTrimmed;
     final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
     final packet = await PacketBuilder.createAnonRequest(
       contact: contact,
@@ -814,6 +846,11 @@ class MeshNode extends CompanionBridge {
       if (plaintext.length < 9) return;
       r.skipBytes(4); // sender prefix (informational)
       text = r.readCString();
+      // Track the room-server sync cursor (highest signed timestamp seen).
+      if (ts > sender.syncSince) {
+        sender.syncSince = ts;
+        _persist();
+      }
       final textLen = utf8.encode(text).length;
       final end = (9 + textLen).clamp(0, plaintext.length);
       // The firmware ACKs signed messages with

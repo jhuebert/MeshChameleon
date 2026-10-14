@@ -239,6 +239,7 @@ Map<String, Object?> _contactToJson(Contact c) => <String, Object?>{
       'lastmod': c.lastmod,
       'gps_lat': c.gpsLat,
       'gps_lon': c.gpsLon,
+      'sync_since': c.syncSince,
     };
 
 Contact? _contactFromJson(Map<String, Object?> j) {
@@ -255,6 +256,7 @@ Contact? _contactFromJson(Map<String, Object?> j) {
     lastmod: _int(j['lastmod']),
     gpsLat: _double(j['gps_lat']),
     gpsLon: _double(j['gps_lon']),
+    syncSince: _int(j['sync_since']),
   );
 }
 

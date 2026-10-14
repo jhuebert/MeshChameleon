@@ -16,6 +16,7 @@ class Contact {
     this.lastmod = 0,
     this.gpsLat = 0.0,
     this.gpsLon = 0.0,
+    this.syncSince = 0,
   })  : outPath = Uint8List.fromList(outPath),
         assert(publicKey.length == pubKeySize, 'public key must be 32 bytes');
 
@@ -29,6 +30,10 @@ class Contact {
   int lastmod;
   double gpsLat;
   double gpsLon;
+
+  /// Highest signed-message timestamp seen from this contact (room-server sync
+  /// cursor), sent on room login.
+  int syncSince;
 
   String get publicKeyHex => bytesToHex(publicKey);
 
@@ -45,6 +50,7 @@ class Contact {
         lastmod: lastmod,
         gpsLat: gpsLat,
         gpsLon: gpsLon,
+        syncSince: syncSince,
       );
 }
 

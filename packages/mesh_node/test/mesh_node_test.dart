@@ -414,6 +414,66 @@ void main() {
     expect(aliceLink.transmitted.length - ackedBefore, 1); // ACK sent
   });
 
+  test('contact table capacity is enforced (overwrite opt-in)', () async {
+    final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 9);
+    final link = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(maxContacts: 2),
+    );
+    await link.connect();
+    final node = MeshNode(
+      identity: id,
+      link: link,
+      deviceInfo: const DeviceInfo(maxContacts: 2),
+    )..start();
+    addTearDown(node.stop);
+
+    Contact c(int i) =>
+        Contact(publicKey: Uint8List(32)..[0] = i, name: 'c$i', lastmod: i);
+    expect(node.addUpdateContact(c(1)), isTrue);
+    expect(node.addUpdateContact(c(2)), isTrue);
+    // Full; overwrite is disabled by default.
+    expect(node.addUpdateContact(c(3)), isFalse);
+    expect(node.contacts.length, 2);
+
+    // Opt into overwrite-on-full: the oldest non-favourite is replaced.
+    node.prefs.autoaddConfig = autoAddOverwriteOldest;
+    expect(node.addUpdateContact(c(4)), isTrue);
+    expect(node.contacts.length, 2);
+    expect(node.getContactByKey(Uint8List(32)..[0] = 1), isNull);
+    expect(node.getContactByKey(Uint8List(32)..[0] = 4), isNotNull);
+  });
+
+  test('room login includes the sync cursor', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    alice.addUpdateContact(Contact(
+      publicKey: bob.identity.publicKey,
+      name: 'room',
+      advType: advTypeRoom,
+      syncSince: 4242,
+    ));
+
+    final aliceLink = alice.link as FakeDeviceLink;
+    final before = aliceLink.transmitted.length;
+    final result = await alice.sendLogin(bob.identity.publicKey, 'pw');
+    expect(result.success, isTrue);
+    expect(aliceLink.transmitted.length - before, 1);
+
+    // ANON_REQ payload = dest_hash + sender pubkey(32) + cipher.
+    final pkt = Packet.readFrom(aliceLink.transmitted.last)!;
+    final secret = await alice.identity.sharedSecret(bob.identity.publicKey);
+    final plaintext = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16), secret, pkt.payload.sublist(33));
+    final r = BufferReader(plaintext)..skipBytes(4); // tag
+    expect(r.readUInt32Le(), 4242); // sync cursor
+    expect(
+      String.fromCharCodes(r.readRemainingBytes().takeWhile((b) => b != 0)),
+      'pw',
+    );
+  });
+
   test('control data is sent zero-hop and pushed on receive', () async {
     final ok = await alice.sendControlData(Uint8List.fromList([0x80, 1, 2, 3]));
     expect(ok, isTrue);
