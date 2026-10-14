@@ -4,14 +4,14 @@ A mobile app that sits between an existing **MeshCore client app** (e.g.
 `meshcore-open`) and an existing **MeshCore companion device**, masquerading as
 the companion to the client while holding the companion identity on the phone.
 
-```
-┌────────────────────┐   TCP   ┌──────────────────────────┐  BLE or TCP  ┌───────────────────────┐
-│ MeshCore app       │ <─────> │ Companion Proxy          │ <──────────> │ MeshCore companion    │
-│ (meshcore-open)    │ 0x3c/   │  - virtual companion     │  0x3c/0x3e   │ device (stock fw)     │
-│                    │ 0x3e    │  - holds identity/keys   │              │ - used as a dumb      │
-│                    │ frames  │  - full mesh node logic  │  raw frames  │   LoRa radio only     │
-└────────────────────┘         └──────────────────────────┘              └───────────────────────┘
-        client                         proxy server + device client             radio
+```mermaid
+flowchart LR
+    client["MeshCore app<br/>(meshcore-open)"]
+    proxy["Companion Proxy<br/>virtual companion<br/>holds identity/keys<br/>full mesh node logic"]
+    radio["MeshCore companion<br/>stock firmware<br/>used as a dumb LoRa radio"]
+
+    client <-->|"TCP · 0x3c/0x3e frames"| proxy
+    proxy <-->|"BLE (NUS) or TCP · raw frames"| radio
 ```
 
 The proxy exposes a **TCP server** that speaks the MeshCore companion protocol
