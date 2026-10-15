@@ -159,6 +159,8 @@ class CompanionServer implements CompanionPushSink {
   void sendOk() => _sendFrame(Uint8List.fromList([respCodeOk]));
   void sendErr(int code) =>
       _sendFrame(Uint8List.fromList([respCodeErr, code]));
+  void sendDisabled() =>
+      _sendFrame(Uint8List.fromList([respCodeDisabled]));
 
   static Uint8List _u32Frame(int code, int value) {
     final w = BufferWriter()
@@ -337,6 +339,16 @@ class CompanionServer implements CompanionPushSink {
         _cmdSetRadioParams(data);
       case cmdSetRadioTxPower:
         _cmdSetTxPower(data);
+      // These commands are intentionally disabled for the proxy: never change
+      // device settings/state or expose/replace the proxy identity over TCP.
+      case cmdSetDevicePin:
+        sendDisabled();
+      case cmdFactoryReset:
+        sendDisabled();
+      case cmdExportPrivateKey:
+        sendDisabled();
+      case cmdImportPrivateKey:
+        sendDisabled();
       case cmdGetTuningParams:
         await _cmdGetTuningParams();
       case cmdSetTuningParams:

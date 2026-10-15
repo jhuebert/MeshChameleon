@@ -86,6 +86,14 @@ and transmits it verbatim — the route type and path are whatever the packet's
 header encodes, so no scope or route rewriting is applied. The priority byte is
 accepted for protocol compatibility but the transport does not use it.
 
+## Disabled sensitive commands
+
+`SET_DEVICE_PIN (37)`, `FACTORY_RESET (51)`, and client-facing
+`EXPORT/IMPORT_PRIVATE_KEY (23/24)` each receive the one-byte
+`RESP_CODE_DISABLED (15)` response. They do not alter device settings or proxy
+state and do not expose or replace the proxy identity. The app's separate
+user-initiated **import from connected device** flow remains available.
+
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form

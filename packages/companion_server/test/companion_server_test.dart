@@ -517,11 +517,22 @@ void main() {
     expect(short[1], errCodeIllegalArg);
   });
 
-  test('unsupported command returns ERR', () async {
-    client.send([cmdFactoryReset]);
-    final resp = await client.frames.next();
-    expect(resp[0], respCodeErr);
-    expect(resp[1], errCodeUnsupportedCmd);
+  test('sensitive commands respond DISABLED without side effects', () async {
+    final privateKey = Uint8List(64);
+    final disabledCommands = <List<int>>[
+      (BufferWriter()
+            ..writeByte(cmdSetDevicePin)
+            ..writeUInt32Le(123456))
+          .toBytes(),
+      [cmdFactoryReset, ...'reset'.codeUnits],
+      [cmdExportPrivateKey],
+      [cmdImportPrivateKey, ...privateKey],
+    ];
+
+    for (final command in disabledCommands) {
+      client.send(command);
+      expect(await client.frames.next(), [respCodeDisabled]);
+    }
   });
 
   test('SET_FLOOD_SCOPE stores, resets, and forces unscoped', () async {
