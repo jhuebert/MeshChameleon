@@ -141,6 +141,17 @@ class TestBridge extends CompanionBridge {
 
   @override
   void reboot() => reboots++;
+
+  Uint8List? anonPubkey;
+  Uint8List? anonData;
+
+  @override
+  Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async {
+    anonPubkey = pubkey;
+    anonData = data;
+    return const SentResult(
+        success: true, isFlood: false, expectedAck: 0x4242, timeoutMs: 10000);
+  }
 }
 
 /// Minimal framed client for tests.
@@ -500,6 +511,27 @@ void main() {
     final resp = await client.frames.next();
     expect(resp[0], respCodeErr);
     expect(resp[1], errCodeIllegalArg);
+  });
+
+  test('SEND_ANON_REQ returns SENT and forwards to the bridge', () async {
+    final pubkey = identity.publicKey;
+    client.send([cmdSendAnonReq, ...pubkey, 1, 0, 7]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeSent);
+    expect(bridge.anonPubkey, pubkey);
+    expect(bridge.anonData, [1, 0, 7]);
+    final r = BufferReader(resp)..skipBytes(2);
+    expect(r.readUInt32Le(), 0x4242);
+  });
+
+  test('pushBinaryResponse emits reserved + tag + payload', () async {
+    bridge.pushSink!.pushBinaryResponse(0x11223344, Uint8List.fromList([9, 8]));
+    final resp = await client.frames.next();
+    expect(resp[0], pushCodeBinaryResponse);
+    expect(resp[1], 0); // reserved
+    final r = BufferReader(resp)..skipBytes(2);
+    expect(r.readUInt32Le(), 0x11223344);
+    expect(r.readRemainingBytes(), [9, 8]);
   });
 }
 

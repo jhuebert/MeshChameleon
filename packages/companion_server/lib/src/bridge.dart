@@ -24,8 +24,9 @@ abstract class CompanionPushSink {
   /// Repeater telemetry response: 6-byte pubkey prefix + raw LPP payload.
   void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data);
 
-  /// Binary (status/ACL/etc.) response: 6-byte pubkey prefix + raw payload.
-  void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data);
+  /// Binary (status/ACL/region/etc.) response: the request [tag] plus the raw
+  /// response payload. Emitted as `PUSH_CODE_BINARY_RESPONSE`.
+  void pushBinaryResponse(int tag, Uint8List data);
 
   /// A raw control-data packet was received.
   void pushControlData(double snr, int rssi, int pathLen, Uint8List data);
@@ -191,6 +192,12 @@ class CompanionBridge {
   Map<String, Object?> getStats(int statsType) => const {};
 
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async =>
+      const SentResult.failure();
+
+  /// Send an anonymous request (`CMD_SEND_ANON_REQ`) to [pubkey] carrying
+  /// [data] (`[anon_req_type][reply_path_len][reply_path...]`). The response is
+  /// delivered via [CompanionPushSink.pushBinaryResponse].
+  Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async =>
       const SentResult.failure();
 
   Future<SentResult> sendTelemetryRequest(

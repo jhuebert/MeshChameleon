@@ -35,8 +35,12 @@ class RecordingSink implements CompanionPushSink {
 
   final List<List<int>> telemetry = [];
 
+  final List<List<int>> binaryResponses = [];
+
   @override
-  void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
+  void pushBinaryResponse(int tag, Uint8List data) {
+    binaryResponses.add([tag, ...data]);
+  }
 
   final List<List<int>> pathDiscovery = [];
 
@@ -652,6 +656,65 @@ void main() {
     pkt = await lastPacket();
     expect(pkt.transportCode0,
         CryptoUtils.transportCode(def, pkt.payloadType, pkt.payload));
+  });
+
+  test('binary request pushes a matching PUSH_CODE_BINARY_RESPONSE', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice.sendBinaryReq(
+        bob.identity.publicKey, Uint8List.fromList([reqTypeGetStatus, 1, 2]));
+    expect(result.success, isTrue);
+    final tag = result.expectedAck!;
+    expect(tag, isNot(0));
+    await pump();
+
+    final body = Uint8List.fromList([
+      ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
+      0xAA,
+      0xBB,
+      0xCC,
+    ]);
+    (alice.link as FakeDeviceLink)
+        .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
+    await pump();
+
+    expect(aliceSink.binaryResponses.length, 1);
+    final binResp = aliceSink.binaryResponses.first;
+    expect(binResp.first, tag);
+    // AES-ECB returns block-padded plaintext (as on the firmware), so only the
+    // meaningful prefix is asserted.
+    expect(binResp.sublist(1, 4), [0xAA, 0xBB, 0xCC]);
+  });
+
+  test('anonymous request auto-adds the contact and pushes its response',
+      () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final result = await alice
+        .sendAnonReq(bob.identity.publicKey, Uint8List.fromList([1, 0]));
+    expect(result.success, isTrue);
+    final tag = result.expectedAck!;
+    await pump();
+
+    final body = Uint8List.fromList([
+      ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
+      5,
+      6,
+      7,
+      8,
+    ]);
+    (alice.link as FakeDeviceLink)
+        .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
+    await pump();
+
+    expect(aliceSink.binaryResponses.length, 1);
+    final anonResp = aliceSink.binaryResponses.first;
+    expect(anonResp.first, tag);
+    expect(anonResp.sublist(1, 5), [5, 6, 7, 8]);
   });
 
   test('telemetry request encodes the inverse permission mask', () async {

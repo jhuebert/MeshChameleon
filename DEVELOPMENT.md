@@ -45,6 +45,17 @@ a 16-bit code: the first two bytes (LE) of
 reserved, matching the firmware's `TransportKey::calcTransportCode`. With no
 scope set, packets are byte-for-byte unchanged. This is not hardware-validated.
 
+## Binary and anonymous requests
+
+`CMD_SEND_BINARY_REQ (50)` and `CMD_SEND_ANON_REQ (57)` both answer `SENT`
+(`[6][flood][tag(4)][timeout(4)]`) with the request's real tag, and deliver the
+reply as `PUSH_CODE_BINARY_RESPONSE`:
+`[0x8C][reserved(1)][tag(4)][payload]` — the firmware's `onContactResponse`
+layout, matched by `meshcore-open` (e.g. the region management and neighbors
+screens). An anonymous request for an unknown target registers a zero-hop
+contact first, mirroring the firmware. As with telemetry, the decrypted payload
+is AES-block-padded, so a trailing partial block may be zero-filled.
+
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form

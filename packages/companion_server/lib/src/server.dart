@@ -197,9 +197,10 @@ class CompanionServer implements CompanionPushSink {
           [pushCodeTelemetryResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
 
   @override
-  void pushBinaryResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
+  void pushBinaryResponse(int tag, Uint8List data) =>
       _sendFrame(Uint8List.fromList(
-          [pushCodeBinaryResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
+          [pushCodeBinaryResponse, 0, tag & 0xFF, (tag >> 8) & 0xFF,
+           (tag >> 16) & 0xFF, (tag >> 24) & 0xFF, ...data]));
 
   @override
   void pushPathDiscoveryResponse(Uint8List pubkeyPrefix6, int outPathLen,
@@ -392,6 +393,8 @@ class CompanionServer implements CompanionPushSink {
         bridge.importContact(data) ? sendOk() : sendErr(errCodeIllegalArg);
       case cmdSendBinaryReq:
         await _cmdSendBinaryReq(data);
+      case cmdSendAnonReq:
+        await _cmdSendAnonReq(data);
       case cmdSendTelemetryReq:
         await _cmdSendTelemetryReq(data);
       case cmdSendTracePath:
@@ -1023,6 +1026,16 @@ class CompanionServer implements CompanionPushSink {
       ..writeUInt32Le(result.expectedAck ?? 0)
       ..writeUInt32Le(result.timeoutMs ?? 10000);
     _sendFrame(w.toBytes());
+  }
+
+  Future<void> _cmdSendAnonReq(Uint8List data) async {
+    // [pubkey(32)][anon_req_data...]
+    if (data.length <= pubKeySize) return sendErr(errCodeIllegalArg);
+    final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    final reqData = Uint8List.fromList(data.sublist(pubKeySize));
+    final result = await bridge.sendAnonReq(pubkey, reqData);
+    if (!result.success) return sendErr(errCodeNotFound);
+    _sendSent(result);
   }
 
   Future<void> _cmdSendTelemetryReq(Uint8List data) async {

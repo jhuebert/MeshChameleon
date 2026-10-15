@@ -96,6 +96,10 @@ class MeshNode extends CompanionBridge {
   /// `PUSH_CODE_TELEMETRY_RESPONSE`.
   final Map<int, Uint8List> _pendingTelemetry = {};
 
+  /// Pending binary/anon requests, matched by the reflected request tag. The
+  /// response (when it arrives) is pushed via `PUSH_CODE_BINARY_RESPONSE`.
+  final Map<int, Uint8List> _pendingBinary = {};
+
   /// Active login keep-alive sessions, keyed by server public key hex.
   final Map<String, _Connection> _connections = {};
 
@@ -485,16 +489,61 @@ class MeshNode extends CompanionBridge {
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async {
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
+    final tag = _nextRequestTag();
     final packet = await PacketBuilder.createProtocolRequest(
       contact: contact,
       identity: identity,
       protocolCode: data.isEmpty ? 0 : data[0],
       data: data.length > 1 ? data.sublist(1) : const [],
+      timestamp: tag,
     );
     final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
     await _transmit(packet, flood: flood);
+    _pendingBinary[tag] = Uint8List.fromList(pubkey);
     return SentResult(
-        success: true, isFlood: flood, expectedAck: 0, timeoutMs: 10000);
+        success: true, isFlood: flood, expectedAck: tag, timeoutMs: 10000);
+  }
+
+  @override
+  Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async {
+    // Like the firmware, ensure a contact exists (a zero-hop one if unknown) so
+    // the response can be decrypted and matched.
+    final contact = getContactByKey(pubkey) ?? _ensureAnonContact(pubkey);
+    final tag = _nextRequestTag();
+    final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final packet = await PacketBuilder.createAnonRequest(
+      contact: contact,
+      identity: identity,
+      data: data,
+      timestamp: tag,
+      flood: flood,
+    );
+    await _transmit(packet, flood: flood);
+    _pendingBinary[tag] = Uint8List.fromList(pubkey);
+    return SentResult(
+        success: true, isFlood: flood, expectedAck: tag, timeoutMs: 10000);
+  }
+
+  /// Monotonic-enough request tag that doesn't collide with an in-flight request.
+  int _nextRequestTag() {
+    var tag = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    while (_pendingBinary.containsKey(tag) ||
+        _pendingTelemetry.containsKey(tag) ||
+        _pendingDiscovery.containsKey(tag)) {
+      tag++;
+    }
+    return tag;
+  }
+
+  /// Register a zero-hop contact for [pubkey] if one doesn't exist yet.
+  Contact _ensureAnonContact(Uint8List pubkey) {
+    final contact = Contact(
+      publicKey: Uint8List.fromList(pubkey),
+      advType: advTypeNone,
+      lastmod: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+    addUpdateContact(contact);
+    return getContactByKey(pubkey) ?? contact;
   }
 
   @override
@@ -725,6 +774,7 @@ class MeshNode extends CompanionBridge {
     _pendingAcks.clear();
     _pendingDiscovery.clear();
     _pendingTelemetry.clear();
+    _pendingBinary.clear();
     _pendingLogin = null;
     _pendingStatus = null;
     for (final conn in _connections.values) {
@@ -1448,6 +1498,14 @@ class MeshNode extends CompanionBridge {
       pushSink?.pushTelemetryResponse(
         Uint8List.fromList(senderPubkey.sublist(0, 6)),
         Uint8List.fromList(data.sublist(4)),
+      );
+      return;
+    }
+
+    if (_pendingBinary.remove(tag) != null) {
+      pushSink?.pushBinaryResponse(
+        tag,
+        Uint8List.fromList(data.length > 4 ? data.sublist(4) : const []),
       );
       return;
     }

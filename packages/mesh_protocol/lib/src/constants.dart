@@ -148,6 +148,7 @@ const int statsTypeCore = 0;
 const int statsTypeRadio = 1;
 const int statsTypePackets = 2;
 
+const int advTypeNone = 0;
 const int advTypeChat = 1;
 const int advTypeRepeater = 2;
 const int advTypeRoom = 3;
