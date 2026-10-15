@@ -107,6 +107,11 @@ class TestBridge extends CompanionBridge {
       const SentResult(success: true, expectedAck: 0x1234, timeoutMs: 5000);
 
   @override
+  Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async =>
+      const SentResult(
+          success: true, isFlood: true, expectedAck: 0, timeoutMs: 5000);
+
+  @override
   Future<Uint8List> sign(Uint8List message) => identity.sign(message);
 
   bool connection = false;
@@ -694,8 +699,9 @@ void main() {
 
   test('a full meshcore-open-style session stays framed and ordered', () async {
     final pubkey = identity.publicKey;
+    final peerKey = Uint8List(32)..[0] = 9;
     bridge.contacts.add(Contact(
-      publicKey: Uint8List(32)..[0] = 9,
+      publicKey: peerKey,
       name: 'peer',
       advType: advTypeChat,
       lastmod: 100,
@@ -800,6 +806,36 @@ void main() {
         .writeTo();
     client.send([cmdSendRawPacket, 0, ...raw]);
     expect((await client.frames.next())[0], respCodeOk);
+
+    // Messaging: a direct text send is acknowledged SENT.
+    client.send((BufferWriter()
+          ..writeByte(cmdSendTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeBytes(peerKey.sublist(0, 6))
+          ..writeString('hi')
+          ..writeByte(0))
+        .toBytes());
+    expect((await client.frames.next())[0], respCodeSent);
+
+    // Empty message queue.
+    client.send([cmdSyncNextMessage]);
+    expect((await client.frames.next())[0], respCodeNoMoreMessages);
+
+    // Path discovery is acknowledged SENT.
+    client.send([cmdSendPathDiscoveryReq, 0, ...pubkey]);
+    expect((await client.frames.next())[0], respCodeSent);
+
+    // Signing handshake returns a 64-byte signature.
+    client.send([cmdSignStart]);
+    expect((await client.frames.next())[0], respCodeSignStart);
+    client.send([cmdSignData, ...utf8Bytes('hello')]);
+    expect((await client.frames.next())[0], respCodeOk);
+    client.send([cmdSignFinish]);
+    final sig = await client.frames.next();
+    expect(sig[0], respCodeSignature);
+    expect(sig.length, 65);
   });
 }
 
