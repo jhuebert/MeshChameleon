@@ -180,6 +180,19 @@ class TestBridge extends CompanionBridge {
 
   @override
   Future<Uint8List> getAllowedRepeatFreq() async => allowedRepeatFreq;
+
+  Uint8List? rawPayload;
+  Uint8List? rawPath;
+  int? rawPathLenByte;
+
+  @override
+  Future<bool> sendRawData(
+      Uint8List payload, Uint8List path, int pathLenByte) async {
+    rawPayload = payload;
+    rawPath = path;
+    rawPathLenByte = pathLenByte;
+    return true;
+  }
 }
 
 /// Minimal framed client for tests.
@@ -606,6 +619,27 @@ void main() {
     final resp = await client.frames.next();
     expect(resp[0], respCodeAllowedRepeatFreq);
     expect(resp.sublist(1), bridge.allowedRepeatFreq);
+  });
+
+  test('SEND_RAW_DATA forwards the path and payload', () async {
+    // path_len 0x02 => 1-byte hashes, 2 hops, then 2 path bytes, 4-byte payload.
+    client.send([cmdSendRawData, 0x02, 0xAA, 0xBB, 1, 2, 3, 4]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.rawPathLenByte, 0x02);
+    expect(bridge.rawPath, [0xAA, 0xBB]);
+    expect(bridge.rawPayload, [1, 2, 3, 4]);
+
+    // Too-short payload is rejected.
+    client.send([cmdSendRawData, 0x00, 1, 2]);
+    final err = await client.frames.next();
+    expect(err[0], respCodeErr);
+    expect(err[1], errCodeIllegalArg);
+
+    // Reserved hash width (hash_size == 4) is unsupported.
+    client.send([cmdSendRawData, 0xC0, 1, 2, 3, 4]);
+    final err2 = await client.frames.next();
+    expect(err2[0], respCodeErr);
+    expect(err2[1], errCodeUnsupportedCmd);
   });
 }
 

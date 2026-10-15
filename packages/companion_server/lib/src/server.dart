@@ -409,6 +409,8 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendLogin(data);
       case cmdSendStatusReq:
         await _cmdSendStatusReq(data);
+      case cmdSendRawData:
+        await _cmdSendRawData(data);
       case cmdLogout:
         _cmdLogout(data);
       case cmdHasConnection:
@@ -1062,6 +1064,21 @@ class CompanionServer implements CompanionPushSink {
     if (!result.success) return sendErr(errCodeNotFound);
     // The telemetry payload itself arrives later via PUSH_CODE_TELEMETRY_RESPONSE.
     _sendSent(result);
+  }
+
+  Future<void> _cmdSendRawData(Uint8List data) async {
+    // [path_len][path bytes][payload (>=4)] — flood is not supported.
+    if (data.isEmpty) return sendErr(errCodeIllegalArg);
+    final pathLenByte = data[0];
+    if (!PathUtils.isValidPathLen(pathLenByte)) {
+      return sendErr(errCodeUnsupportedCmd);
+    }
+    final pathBytes = PathUtils.getByteLength(pathLenByte);
+    if (data.length < 1 + pathBytes + 4) return sendErr(errCodeIllegalArg);
+    final path = Uint8List.fromList(data.sublist(1, 1 + pathBytes));
+    final payload = Uint8List.fromList(data.sublist(1 + pathBytes));
+    final ok = await bridge.sendRawData(payload, path, pathLenByte);
+    ok ? sendOk() : sendErr(errCodeTableFull);
   }
 
   Future<void> _cmdSendTracePath(Uint8List data) async {

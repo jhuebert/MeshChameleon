@@ -294,6 +294,20 @@ class PacketBuilder {
       ..payload = w.toBytes();
   }
 
+  /// Build a raw custom packet (`PAYLOAD_TYPE_RAW_CUSTOM`) sent directly along
+  /// [path]. Backs `CMD_SEND_RAW_DATA`.
+  static Packet createRawCustom(
+    List<int> payload, {
+    List<int> path = const [],
+    int? encodedPathLen,
+  }) {
+    final pkt = Packet()
+      ..header = Packet.createHeader(payloadTypeRawCustom, routeTypeDirect)
+      ..payload = Uint8List.fromList(payload);
+    pkt.setPath(path, encodedPathLen);
+    return pkt;
+  }
+
   /// Build a protocol request (repeater status/telemetry/etc.).
   static Future<Packet> createProtocolRequest({
     required Contact contact,

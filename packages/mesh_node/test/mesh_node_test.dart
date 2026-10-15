@@ -795,6 +795,27 @@ void main() {
     node.stop();
   });
 
+  test('sendRawData transmits a direct raw custom packet with the path',
+      () async {
+    final aliceLink = alice.link as FakeDeviceLink;
+    aliceLink.transmitted.clear();
+
+    final ok = await alice.sendRawData(
+      Uint8List.fromList([9, 8, 7, 6]),
+      Uint8List.fromList([0xAA, 0xBB]),
+      0x02,
+    );
+    expect(ok, isTrue);
+    await pump();
+
+    expect(aliceLink.transmitted.length, 1);
+    final pkt = Packet.readFrom(aliceLink.transmitted.single)!;
+    expect(pkt.payloadType, payloadTypeRawCustom);
+    expect(pkt.routeType, routeTypeDirect);
+    expect(pkt.path, [0xAA, 0xBB]);
+    expect(pkt.payload, [9, 8, 7, 6]);
+  });
+
   test('telemetry request encodes the inverse permission mask', () async {
     await bob.advertise();
     await pump();

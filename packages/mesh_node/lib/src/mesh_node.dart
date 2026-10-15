@@ -639,6 +639,21 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
+  Future<bool> sendRawData(
+    Uint8List payload,
+    Uint8List path,
+    int pathLenByte,
+  ) async {
+    final packet = PacketBuilder.createRawCustom(
+      payload,
+      path: path,
+      encodedPathLen: pathLenByte,
+    );
+    await _transmit(packet, flood: false);
+    return true;
+  }
+
+  @override
   Future<SentResult> sendLogin(Uint8List pubkey, String password) async {
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();

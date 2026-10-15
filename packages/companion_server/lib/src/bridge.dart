@@ -197,6 +197,11 @@ class CompanionBridge {
   /// Re-transmit a contact's saved advert zero-hop (`CMD_SHARE_CONTACT`).
   Future<bool> shareContact(Uint8List pubkey) async => false;
 
+  /// Send a raw custom packet (`CMD_SEND_RAW_DATA`) directly along [path]
+  /// (already-decoded path bytes plus their encoded length byte).
+  Future<bool> sendRawData(Uint8List payload, Uint8List path, int pathLenByte) async =>
+      false;
+
   QueuedMessage? syncNextMessage() => null;
 
   Map<String, Object?> getStats(int statsType) => const {};

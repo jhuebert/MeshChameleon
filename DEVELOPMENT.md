@@ -73,6 +73,14 @@ ranges by forwarding command 60 to the device link
 (`RadioLink.getAllowedRepeatFreq`) and returning the raw
 `[lower(4)][upper(4)]...` bytes under `RESP_ALLOWED_REPEAT_FREQ (26)`.
 
+## Raw data
+
+`CMD_SEND_RAW_DATA (25)` takes `[path_len][path][payload]` and transmits a
+`PAYLOAD_TYPE_RAW_CUSTOM` packet directly along the decoded path (minimum
+4-byte payload), matching the firmware. Flood is not supported (a reserved
+hash-width encoding is rejected with `ERR_CODE_UNSUPPORTED_CMD`), and the path
+is used verbatim without adding an ACK.
+
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form

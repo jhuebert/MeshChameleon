@@ -302,5 +302,24 @@ void main() {
       expect(reparsed.payloadType, payloadTypeTrace);
       expect(reparsed.payload, pkt.payload);
     });
+
+    test('createRawCustom builds a direct raw packet with a path', () {
+      final pkt = PacketBuilder.createRawCustom(
+        [1, 2, 3, 4],
+        path: [0xAA, 0xBB],
+        encodedPathLen: 0x02,
+      );
+      expect(pkt.payloadType, payloadTypeRawCustom);
+      expect(pkt.routeType, routeTypeDirect);
+      expect(pkt.pathLenByte, 0x02);
+      expect(pkt.path, [0xAA, 0xBB]);
+      expect(pkt.payload, [1, 2, 3, 4]);
+
+      // Round-trips through the wire codec.
+      final reparsed = Packet.readFrom(pkt.writeTo())!;
+      expect(reparsed.payloadType, payloadTypeRawCustom);
+      expect(reparsed.path, [0xAA, 0xBB]);
+      expect(reparsed.payload, [1, 2, 3, 4]);
+    });
   });
 }
