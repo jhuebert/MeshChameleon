@@ -99,6 +99,11 @@ class MeshNode extends CompanionBridge {
   /// Active login keep-alive sessions, keyed by server public key hex.
   final Map<String, _Connection> _connections = {};
 
+  /// `CMD_SET_FLOOD_SCOPE_KEY` override (null = use the default scope) and the
+  /// "force unscoped" flag. Both are cleared by [reboot].
+  Uint8List? _floodScopeOverride;
+  bool _floodUnscoped = false;
+
   /// Recently seen packet hashes (hex -> epoch seconds). Used to suppress
   /// duplicate queued messages (retransmits, repeated reception) while still
   /// ACKing direct duplicates. Mirrors `Mesh.cpp`'s `hasSeen` table and
@@ -362,7 +367,7 @@ class MeshNode extends CompanionBridge {
       flags: prefs.advType,
       flood: flood,
     );
-    await _transmit(packet, flood: flood);
+    await _transmit(packet, flood: flood, scoped: true);
     return true;
   }
 
@@ -401,7 +406,7 @@ class MeshNode extends CompanionBridge {
       txtType: txtType,
     );
     final flood = !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
-    await _transmit(packet, flood: flood);
+    await _transmit(packet, flood: flood, scoped: true);
     // CLI data/commands are not acknowledged; don't track a pending ACK.
     final isCommand =
         txtType == txtTypeCliData || txtType == txtTypeCliCommand;
@@ -434,7 +439,7 @@ class MeshNode extends CompanionBridge {
       message: text,
       senderName: prefs.nodeName,
     );
-    await _transmit(packet, flood: true);
+    await _transmit(packet, flood: true, scoped: true);
     return true;
   }
 
@@ -458,7 +463,7 @@ class MeshNode extends CompanionBridge {
       pathLenEncoded: pathLen,
     );
     final flood = pathLen == 0xFF || pathBytes.isEmpty;
-    await _transmit(packet, flood: flood);
+    await _transmit(packet, flood: flood, scoped: true);
     return true;
   }
 
@@ -662,6 +667,73 @@ class MeshNode extends CompanionBridge {
     }
     _stopKeepAlive(pubkey);
     return true;
+  }
+
+  @override
+  bool hasConnection(Uint8List pubkey) =>
+      _connections.containsKey(bytesToHex(pubkey));
+
+  // -------------------------------------------------------------------------
+  // Flood scope
+  // -------------------------------------------------------------------------
+
+  /// The scope key used for scoped floods: the override (unless unscoped) or
+  /// the stored default scope. Zero/absent keys mean unset.
+  Uint8List? _effectiveFloodScope() {
+    if (_floodUnscoped) return null;
+    final override = _floodScopeOverride;
+    if (override != null && !_isZeroKey(override)) return override;
+    final def = prefs.defaultScopeKey;
+    if (def != null && def.length == 16 && !_isZeroKey(def)) return def;
+    return null;
+  }
+
+  static bool _isZeroKey(Uint8List key) {
+    for (final b in key) {
+      if (b != 0) return false;
+    }
+    return true;
+  }
+
+  @override
+  void setFloodScopeKey(Uint8List? key) {
+    _floodScopeOverride = key == null ? null : Uint8List.fromList(key);
+    _floodUnscoped = false;
+  }
+
+  @override
+  void setFloodUnscoped() => _floodUnscoped = true;
+
+  @override
+  void setDefaultFloodScope(String name, Uint8List? key) {
+    prefs.defaultScopeName = name;
+    prefs.defaultScopeKey = key == null ? null : Uint8List.fromList(key);
+    _persist();
+  }
+
+  @override
+  (String, Uint8List?) getDefaultFloodScope() =>
+      (prefs.defaultScopeName, prefs.defaultScopeKey);
+
+  @override
+  void reboot() {
+    // A soft restart of the node engine: drop ephemeral runtime state while
+    // keeping persisted prefs, contacts, channels and the queued messages.
+    for (final ack in _pendingAcks) {
+      ack.timer.cancel();
+    }
+    _pendingAcks.clear();
+    _pendingDiscovery.clear();
+    _pendingTelemetry.clear();
+    _pendingLogin = null;
+    _pendingStatus = null;
+    for (final conn in _connections.values) {
+      conn.stop();
+    }
+    _connections.clear();
+    _seenPackets.clear();
+    _floodScopeOverride = null;
+    _floodUnscoped = false;
   }
 
   void _startKeepAlive(Uint8List pubkey, int keepAliveSecs) {
@@ -883,7 +955,12 @@ class MeshNode extends CompanionBridge {
   // RX path
   // -------------------------------------------------------------------------
 
-  Future<void> _transmit(Packet packet, {required bool flood}) async {
+  Future<void> _transmit(Packet packet,
+      {required bool flood, bool scoped = false}) async {
+    if (scoped && flood) {
+      final scope = _effectiveFloodScope();
+      if (scope != null) packet.applyFloodScope(scope);
+    }
     _packetStats['sent'] = (_packetStats['sent'] ?? 0) + 1;
     _packetStats[flood ? 'flood_tx' : 'direct_tx'] =
         (_packetStats[flood ? 'flood_tx' : 'direct_tx'] ?? 0) + 1;

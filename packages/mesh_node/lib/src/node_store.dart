@@ -198,6 +198,9 @@ Map<String, Object?> _prefsToJson(NodePrefs p) => <String, Object?>{
       'export_private_key_enabled': p.exportPrivateKeyEnabled,
       'rx_delay_base_ms': p.rxDelayBaseMs,
       'airtime_factor_ms': p.airtimeFactorMs,
+      'default_scope_name': p.defaultScopeName,
+      'default_scope_key':
+          p.defaultScopeKey == null ? null : bytesToHex(p.defaultScopeKey!),
     };
 
 NodePrefs _prefsFromJson(Map<String, Object?> j) {
@@ -229,6 +232,10 @@ NodePrefs _prefsFromJson(Map<String, Object?> j) {
     exportPrivateKeyEnabled: j['export_private_key_enabled'] == true,
     rxDelayBaseMs: _int(j['rx_delay_base_ms'], defaults.rxDelayBaseMs),
     airtimeFactorMs: _int(j['airtime_factor_ms'], defaults.airtimeFactorMs),
+    defaultScopeName: _str(j['default_scope_name'], defaults.defaultScopeName),
+    defaultScopeKey: j['default_scope_key'] == null
+        ? null
+        : _bytes(j['default_scope_key']),
   );
 }
 

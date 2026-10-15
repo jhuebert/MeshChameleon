@@ -404,6 +404,16 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendStatusReq(data);
       case cmdLogout:
         _cmdLogout(data);
+      case cmdHasConnection:
+        _cmdHasConnection(data);
+      case cmdSetFloodScope:
+        _cmdSetFloodScope(data);
+      case cmdSetDefaultFloodScope:
+        _cmdSetDefaultFloodScope(data);
+      case cmdGetDefaultFloodScope:
+        _cmdGetDefaultFloodScope();
+      case cmdReboot:
+        _cmdReboot(data);
       default:
         _log('unsupported cmd 0x${cmd.toRadixString(16)}');
         sendErr(errCodeUnsupportedCmd);
@@ -1079,6 +1089,67 @@ class CompanionServer implements CompanionPushSink {
   void _cmdLogout(Uint8List data) {
     if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
     bridge.logout(Uint8List.fromList(data.sublist(0, pubKeySize)));
+    sendOk();
+  }
+
+  void _cmdHasConnection(Uint8List data) {
+    if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
+    final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    bridge.hasConnection(pubkey) ? sendOk() : sendErr(errCodeNotFound);
+  }
+
+  void _cmdSetFloodScope(Uint8List data) {
+    if (data.isEmpty) return sendErr(errCodeIllegalArg);
+    switch (data[0]) {
+      case 0: // set (or reset) the send-scope override
+        if (data.length >= 1 + 16) {
+          bridge.setFloodScopeKey(Uint8List.fromList(data.sublist(1, 1 + 16)));
+        } else {
+          bridge.setFloodScopeKey(null);
+        }
+        sendOk();
+      case 1: // force unscoped flooding (fw v12+)
+        bridge.setFloodUnscoped();
+        sendOk();
+      default:
+        sendErr(errCodeIllegalArg);
+    }
+  }
+
+  void _cmdSetDefaultFloodScope(Uint8List data) {
+    // [name(31)][key(16)] sets; anything shorter clears the default scope.
+    if (data.length >= 31 + 16) {
+      final nameBytes = data.sublist(0, 31);
+      final end = nameBytes.indexOf(0);
+      final name = String.fromCharCodes(
+          end >= 0 ? nameBytes.sublist(0, end) : nameBytes);
+      if (name.isEmpty || name.length >= 31) {
+        return sendErr(errCodeIllegalArg);
+      }
+      bridge.setDefaultFloodScope(
+          name, Uint8List.fromList(data.sublist(31, 31 + 16)));
+    } else {
+      bridge.setDefaultFloodScope('', null);
+    }
+    sendOk();
+  }
+
+  void _cmdGetDefaultFloodScope() {
+    final (name, key) = bridge.getDefaultFloodScope();
+    if (name.isEmpty || key == null) {
+      return _sendFrame(Uint8List.fromList([respCodeDefaultFloodScope]));
+    }
+    final w = BufferWriter()
+      ..writeByte(respCodeDefaultFloodScope)
+      ..writeCString(name, 31)
+      ..writeBytes(key);
+    _sendFrame(w.toBytes());
+  }
+
+  void _cmdReboot(Uint8List data) {
+    final magic = String.fromCharCodes(data.take(6));
+    if (magic != 'reboot') return sendErr(errCodeIllegalArg);
+    bridge.reboot();
     sendOk();
   }
 

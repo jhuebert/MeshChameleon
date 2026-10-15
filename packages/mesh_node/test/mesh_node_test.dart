@@ -280,6 +280,11 @@ void main() {
     expect(aliceSink.loginFails, isEmpty);
     expect(aliceSink.logins.length, 1);
     expect(aliceSink.logins.first, [0, 1, tag, 3, 7]);
+
+    // A successful login with a keep-alive interval opens a session.
+    expect(alice.hasConnection(bob.identity.publicKey), isTrue);
+    expect(alice.logout(bob.identity.publicKey), isTrue);
+    expect(alice.hasConnection(bob.identity.publicKey), isFalse);
   });
 
   test('login keep-alive sends a request and consumes its ACK', () async {
@@ -542,6 +547,111 @@ void main() {
       await LocalIdentity.verify(message, sig, alice.identity.publicKey),
       isTrue,
     );
+  });
+
+  test('a 64-byte (imported) identity can advertise and message', () async {
+    // Simulate import-from-device: rebuild alice from the 64-byte expanded form
+    // of its key (as IdentityStore persists and the device exports).
+    final imported = await LocalIdentity.fromMeshcore64(alice.identity.meshcore64);
+    expect(imported.canSign, isTrue);
+
+    final localBus = FakeRadioBus();
+    final importedLink = FakeDeviceLink(bus: localBus);
+    final peerLink = FakeDeviceLink(bus: localBus);
+    await importedLink.connect();
+    await peerLink.connect();
+    final importedNode = MeshNode(
+      identity: imported,
+      link: importedLink,
+      prefs: NodePrefs(nodeName: 'imported'),
+    )..start();
+    final peer = MeshNode(
+      identity: bob.identity,
+      link: peerLink,
+      prefs: NodePrefs(nodeName: 'peer'),
+    )..start();
+    final peerSink = RecordingSink()..let((s) => peer.setPushSink(s));
+
+    // Advertising requires signing; the peer must accept it and learn us.
+    await importedNode.advertise();
+    await peer.advertise();
+    await pump();
+    expect(peer.contacts.length, 1);
+    expect(peer.contacts.first.publicKey, imported.publicKey);
+    expect(peerSink.newAdverts.length, 1);
+
+    // A direct message must be signable and deliverable too.
+    final result =
+        await importedNode.sendTextMessage(peer.identity.publicKey, 'hi');
+    expect(result.success, isTrue);
+    await pump();
+    final msg = peer.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.text, 'hi');
+    expect(msg.senderKey, imported.publicKey);
+
+    importedNode.stop();
+    peer.stop();
+  });
+
+  test('default flood scope tags flooded sends with transport codes', () async {
+    final key = Uint8List.fromList(List.generate(16, (i) => i + 1));
+    alice.setDefaultFloodScope('RegionOne', key);
+
+    await alice.advertise();
+    await pump();
+
+    final pkt =
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
+    expect(pkt.hasTransportCodes, isTrue);
+    expect(pkt.payloadType, payloadTypeAdvert);
+    expect(pkt.transportCode1, 0);
+    expect(
+      pkt.transportCode0,
+      CryptoUtils.transportCode(key, pkt.payloadType, pkt.payload),
+    );
+
+    // A scoped advert is still valid on air and accepted by a peer.
+    expect(bob.contacts.length, 1);
+    expect(bob.contacts.first.publicKey, alice.identity.publicKey);
+  });
+
+  test('flood scope override, unscoped flag, and reboot reset', () async {
+    final def = Uint8List(16)..[0] = 1;
+    alice.setDefaultFloodScope('def', def);
+
+    Future<Packet> lastPacket() async => Packet.readFrom(
+        (alice.link as FakeDeviceLink).transmitted.last)!;
+
+    // No override: the default scope applies to channel sends.
+    await alice.sendChannelMessage(0, 'hi');
+    await pump();
+    var pkt = await lastPacket();
+    expect(pkt.transportCode0,
+        CryptoUtils.transportCode(def, pkt.payloadType, pkt.payload));
+
+    // An override replaces the default.
+    final over = Uint8List(16)..[0] = 2;
+    alice.setFloodScopeKey(over);
+    await alice.sendChannelMessage(0, 'hi2');
+    await pump();
+    pkt = await lastPacket();
+    expect(pkt.transportCode0,
+        CryptoUtils.transportCode(over, pkt.payloadType, pkt.payload));
+
+    // The unscoped flag removes transport codes entirely.
+    alice.setFloodUnscoped();
+    await alice.sendChannelMessage(0, 'hi3');
+    await pump();
+    expect((await lastPacket()).hasTransportCodes, isFalse);
+
+    // reboot clears the override/unscoped flags: back to the default scope.
+    alice.reboot();
+    await alice.sendChannelMessage(0, 'hi4');
+    await pump();
+    pkt = await lastPacket();
+    expect(pkt.transportCode0,
+        CryptoUtils.transportCode(def, pkt.payloadType, pkt.payload));
   });
 
   test('telemetry request encodes the inverse permission mask', () async {

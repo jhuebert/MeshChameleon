@@ -108,6 +108,39 @@ class TestBridge extends CompanionBridge {
 
   @override
   Future<Uint8List> sign(Uint8List message) => identity.sign(message);
+
+  bool connection = false;
+
+  @override
+  bool hasConnection(Uint8List pubkey) => connection;
+
+  Uint8List? floodScopeKey;
+  bool floodUnscoped = false;
+  String defaultScopeName = '';
+  Uint8List? defaultScopeKey;
+  int reboots = 0;
+
+  @override
+  void setFloodScopeKey(Uint8List? key) {
+    floodScopeKey = key;
+    floodUnscoped = false;
+  }
+
+  @override
+  void setFloodUnscoped() => floodUnscoped = true;
+
+  @override
+  void setDefaultFloodScope(String name, Uint8List? key) {
+    defaultScopeName = name;
+    defaultScopeKey = key;
+  }
+
+  @override
+  (String, Uint8List?) getDefaultFloodScope() =>
+      (defaultScopeName, defaultScopeKey);
+
+  @override
+  void reboot() => reboots++;
 }
 
 /// Minimal framed client for tests.
@@ -391,11 +424,82 @@ void main() {
     expect(r.readByte(), 24);
   });
 
+  test('HAS_CONNECTION reflects the bridge session state', () async {
+    final pubkey = identity.publicKey;
+
+    bridge.connection = false;
+    client.send([cmdHasConnection, ...pubkey]);
+    final missing = await client.frames.next();
+    expect(missing[0], respCodeErr);
+    expect(missing[1], errCodeNotFound);
+
+    bridge.connection = true;
+    client.send([cmdHasConnection, ...pubkey]);
+    expect((await client.frames.next())[0], respCodeOk);
+
+    // Too short is an illegal argument, not a not-found.
+    client.send([cmdHasConnection, 1, 2, 3]);
+    final short = await client.frames.next();
+    expect(short[0], respCodeErr);
+    expect(short[1], errCodeIllegalArg);
+  });
+
   test('unsupported command returns ERR', () async {
-    client.send([cmdReboot]);
+    client.send([cmdFactoryReset]);
     final resp = await client.frames.next();
     expect(resp[0], respCodeErr);
     expect(resp[1], errCodeUnsupportedCmd);
+  });
+
+  test('SET_FLOOD_SCOPE stores, resets, and forces unscoped', () async {
+    final key = Uint8List.fromList(List.generate(16, (i) => i + 1));
+    client.send([cmdSetFloodScope, 0, ...key]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.floodScopeKey, key);
+    expect(bridge.floodUnscoped, isFalse);
+
+    client.send([cmdSetFloodScope, 0]); // reset override
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.floodScopeKey, isNull);
+
+    client.send([cmdSetFloodScope, 1]); // force unscoped (fw v12+)
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.floodUnscoped, isTrue);
+  });
+
+  test('SET/GET_DEFAULT_FLOOD_SCOPE round trips and clears', () async {
+    final key = Uint8List.fromList(List.generate(16, (i) => (i * 5) % 256));
+    final w = BufferWriter()
+      ..writeByte(cmdSetDefaultFloodScope)
+      ..writeCString('RegionOne', 31)
+      ..writeBytes(key);
+    client.send(w.toBytes());
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.defaultScopeName, 'RegionOne');
+    expect(bridge.defaultScopeKey, key);
+
+    client.send([cmdGetDefaultFloodScope]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeDefaultFloodScope);
+    // Name occupies a fixed 31-byte, NUL-padded field, then the 16-byte key.
+    expect(resp.sublist(1, 1 + 31).indexOf(0), 'RegionOne'.length);
+    expect(resp.sublist(1 + 31, 1 + 31 + 16), key);
+
+    client.send([cmdSetDefaultFloodScope]); // clear
+    expect((await client.frames.next())[0], respCodeOk);
+    client.send([cmdGetDefaultFloodScope]);
+    expect(await client.frames.next(), [respCodeDefaultFloodScope]);
+  });
+
+  test('REBOOT accepts the "reboot" magic and calls the bridge', () async {
+    client.send([cmdReboot, ...'reboot'.codeUnits]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.reboots, 1);
+
+    client.send([cmdReboot, ...'nope'.codeUnits]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeErr);
+    expect(resp[1], errCodeIllegalArg);
   });
 }
 

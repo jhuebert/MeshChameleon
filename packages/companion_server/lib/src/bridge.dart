@@ -228,6 +228,29 @@ class CompanionBridge {
   /// Tear down any login/keep-alive session with [pubkey].
   bool logout(Uint8List pubkey) => false;
 
+  /// Whether an active login/keep-alive session exists with [pubkey]
+  /// (`CMD_HAS_CONNECTION`).
+  bool hasConnection(Uint8List pubkey) => false;
+
+  /// `CMD_SET_FLOOD_SCOPE_KEY` verb 0: set (or clear, with `null`) the flood
+  /// scope override used for sends.
+  void setFloodScopeKey(Uint8List? key) {}
+
+  /// `CMD_SET_FLOOD_SCOPE_KEY` verb 1 (fw v12+): force unscoped flooding until
+  /// the next scope set.
+  void setFloodUnscoped() {}
+
+  /// `CMD_SET_DEFAULT_FLOOD_SCOPE`: store the default region scope name and its
+  /// 16-byte key (both cleared when [key] is null).
+  void setDefaultFloodScope(String name, Uint8List? key) {}
+
+  /// The stored default flood scope: a (name, 16-byte key) pair, or `('', null)`
+  /// when unset. Backs `CMD_GET_DEFAULT_FLOOD_SCOPE`.
+  (String, Uint8List?) getDefaultFloodScope() => ('', null);
+
+  /// `CMD_REBOOT`: restart the node engine (best-effort; ephemeral state only).
+  void reboot() {}
+
   /// Send a raw control-data packet zero-hop.
   Future<bool> sendControlData(Uint8List data) async => false;
 
