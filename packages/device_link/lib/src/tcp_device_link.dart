@@ -252,6 +252,18 @@ class TcpDeviceLink implements RadioLink {
     return parsePrivateKeyReply(frame);
   }
 
+  @override
+  Future<Uint8List> getAllowedRepeatFreq() async {
+    final frame = await _request(
+      DeviceFrames.getAllowedRepeatFreq(),
+      {respCodeAllowedRepeatFreq, respCodeErr},
+    );
+    if (frame.isEmpty || frame[0] != respCodeAllowedRepeatFreq) {
+      throw StateError('unexpected allowed-repeat-freq reply');
+    }
+    return Uint8List.fromList(frame.sublist(1));
+  }
+
   /// Parse `RESP_CODE_DEVICE_INFO`.
   static DeviceInfo parseDeviceInfo(Uint8List frame) {
     if (frame.length < 4) throw StateError('truncated DEVICE_INFO');

@@ -995,6 +995,9 @@ class MeshNode extends CompanionBridge {
     await link.runCliCommand(command);
   }
 
+  @override
+  Future<Uint8List> getAllowedRepeatFreq() => link.getAllowedRepeatFreq();
+
   /// Device housekeeping: zero the device's autonomous advert intervals so the
   /// stock firmware never advertises under its own identity while proxied.
   /// A no-op on firmware older than v14.

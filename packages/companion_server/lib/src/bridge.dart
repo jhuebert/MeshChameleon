@@ -168,6 +168,10 @@ class CompanionBridge {
   /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
   Future<void> runCliCommand(String command) async {}
 
+  /// The allowed repeat-frequency ranges (`CMD_GET_ALLOWED_REPEAT_FREQ`): raw
+  /// `[lower(4)][upper(4)]...` bytes (empty when unrestricted/unknown).
+  Future<Uint8List> getAllowedRepeatFreq() async => Uint8List(0);
+
   Map<String, String> getCustomVars() => const {};
 
   bool setCustomVar(String name, String value) => false;

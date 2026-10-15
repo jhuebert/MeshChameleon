@@ -66,6 +66,13 @@ contact's saved advert zero-hop so nearby nodes can learn it, and
 `CMD_IMPORT_CONTACT (18)` parses a blob and processes it as if it had just been
 received (flood). Not hardware-validated.
 
+## Allowed repeat frequencies
+
+`CMD_GET_ALLOWED_REPEAT_FREQ (60)` relays the connected device's regulatory
+ranges by forwarding command 60 to the device link
+(`RadioLink.getAllowedRepeatFreq`) and returning the raw
+`[lower(4)][upper(4)]...` bytes under `RESP_ALLOWED_REPEAT_FREQ (26)`.
+
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form

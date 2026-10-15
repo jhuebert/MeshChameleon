@@ -55,7 +55,8 @@ class FakeDeviceLink implements RadioLink {
     this.connectFailures = 0,
     this.devicePrivateKey,
     this.exportPrivateKeyDisabled = false,
-  });
+    Uint8List? allowedRepeatFreq,
+  }) : allowedRepeatFreq = allowedRepeatFreq ?? Uint8List(0);
 
   final DeviceInfo deviceInfo_;
   final RadioParams radioParams_;
@@ -69,6 +70,9 @@ class FakeDeviceLink implements RadioLink {
 
   /// When true, `CMD_EXPORT_PRIVATE_KEY` answers `RESP_CODE_DISABLED`.
   final bool exportPrivateKeyDisabled;
+
+  /// Raw `CMD_GET_ALLOWED_REPEAT_FREQ` ranges returned by this simulator.
+  final Uint8List allowedRepeatFreq;
 
   /// When true, the simulator also loops the transmitted frame back to itself.
   final bool echoSelf;
@@ -164,6 +168,9 @@ class FakeDeviceLink implements RadioLink {
     if (exportPrivateKeyDisabled) return null;
     return devicePrivateKey;
   }
+
+  @override
+  Future<Uint8List> getAllowedRepeatFreq() async => allowedRepeatFreq;
 
   /// Number of `CMD_EXPORT_PRIVATE_KEY` requests received (for tests).
   int exportPrivateKeyRequests = 0;

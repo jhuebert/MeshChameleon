@@ -782,6 +782,19 @@ void main() {
     expect(await bob.shareContact(Uint8List(32)..[0] = 99), isFalse);
   });
 
+  test('getAllowedRepeatFreq delegates to the device link', () async {
+    final ranges = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7, 8]);
+    final link = FakeDeviceLink(allowedRepeatFreq: ranges);
+    await link.connect();
+    final node = MeshNode(
+      identity: await LocalIdentity.fromSeed(Uint8List(32)..[0] = 9),
+      link: link,
+      prefs: NodePrefs(nodeName: 'regs'),
+    )..start();
+    expect(await node.getAllowedRepeatFreq(), ranges);
+    node.stop();
+  });
+
   test('telemetry request encodes the inverse permission mask', () async {
     await bob.advertise();
     await pump();

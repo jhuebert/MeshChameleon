@@ -109,6 +109,7 @@ const int respCodeAdvertPath = 22;
 const int respCodeTuningParams = 23;
 const int respCodeStats = 24;
 const int respCodeAutoAddConfig = 25;
+const int respCodeAllowedRepeatFreq = 26;
 const int respCodeChannelDataRecv = 27;
 const int respCodeDefaultFloodScope = 28;
 

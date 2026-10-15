@@ -45,6 +45,10 @@ abstract class RadioLink {
   /// Returns the expanded key, or null when the firmware disables export
   /// (`RESP_CODE_DISABLED`). The returned key is secret: never log it.
   Future<Uint8List?> exportPrivateKey();
+
+  /// The device's allowed repeat-frequency ranges
+  /// (`CMD_GET_ALLOWED_REPEAT_FREQ`): raw `[lower(4)][upper(4)]...` bytes.
+  Future<Uint8List> getAllowedRepeatFreq();
 }
 
 /// Frames the proxy sends to the device (the device-facing subset).
@@ -116,6 +120,9 @@ class DeviceFrames {
 
   static Uint8List exportPrivateKey() =>
       Uint8List.fromList([cmdExportPrivateKey]);
+
+  static Uint8List getAllowedRepeatFreq() =>
+      Uint8List.fromList([cmdGetAllowedRepeatFreq]);
 }
 
 /// Parse a reply to `CMD_EXPORT_PRIVATE_KEY`.

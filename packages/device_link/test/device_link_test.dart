@@ -97,6 +97,14 @@ void main() {
     expect(await disabled.exportPrivateKey(), isNull);
   });
 
+  test('FakeDeviceLink exposes allowed repeat frequencies', () async {
+    final ranges = Uint8List.fromList([1, 0, 0, 0, 2, 0, 0, 0]);
+    final link = FakeDeviceLink(allowedRepeatFreq: ranges);
+    await link.connect();
+    expect(await link.getAllowedRepeatFreq(), ranges);
+    expect(DeviceFrames.getAllowedRepeatFreq(), [cmdGetAllowedRepeatFreq]);
+  });
+
   test('connectWithBackoff retries transient failures', () async {
     final link = FakeDeviceLink(connectFailures: 2);
     await connectWithBackoff(

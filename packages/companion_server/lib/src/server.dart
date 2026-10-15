@@ -385,6 +385,8 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSignFinish();
       case cmdGetStats:
         _cmdGetStats(data);
+      case cmdGetAllowedRepeatFreq:
+        await _cmdGetAllowedRepeatFreq();
       case cmdGetAdvertPath:
         _cmdGetAdvertPath(data);
       case cmdExportContact:
@@ -1160,6 +1162,11 @@ class CompanionServer implements CompanionPushSink {
       bridge.setDefaultFloodScope('', null);
     }
     sendOk();
+  }
+
+  Future<void> _cmdGetAllowedRepeatFreq() async {
+    final ranges = await bridge.getAllowedRepeatFreq();
+    _sendFrame(Uint8List.fromList([respCodeAllowedRepeatFreq, ...ranges]));
   }
 
   void _cmdGetDefaultFloodScope() {

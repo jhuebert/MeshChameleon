@@ -175,6 +175,11 @@ class TestBridge extends CompanionBridge {
     sharedPubkey = pubkey;
     return true;
   }
+
+  Uint8List allowedRepeatFreq = Uint8List(0);
+
+  @override
+  Future<Uint8List> getAllowedRepeatFreq() async => allowedRepeatFreq;
 }
 
 /// Minimal framed client for tests.
@@ -593,6 +598,14 @@ void main() {
     final err = await client.frames.next();
     expect(err[0], respCodeErr);
     expect(err[1], errCodeIllegalArg);
+  });
+
+  test('GET_ALLOWED_REPEAT_FREQ returns the bridge ranges', () async {
+    bridge.allowedRepeatFreq = Uint8List.fromList([0x40, 0x42, 0x0F, 0x00, 0, 0, 0, 0]);
+    client.send([cmdGetAllowedRepeatFreq]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeAllowedRepeatFreq);
+    expect(resp.sublist(1), bridge.allowedRepeatFreq);
   });
 }
 
