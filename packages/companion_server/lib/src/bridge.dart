@@ -166,7 +166,9 @@ class CompanionBridge {
   void setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) {}
 
   /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
-  Future<void> runCliCommand(String command) async {}
+  /// Run a CLI command on the device, returning its reply text (fw v14+).
+  /// Returns null when unsupported (device firmware < v14).
+  Future<String?> runCliCommand(String command) async => null;
 
   /// The allowed repeat-frequency ranges (`CMD_GET_ALLOWED_REPEAT_FREQ`): raw
   /// `[lower(4)][upper(4)]...` bytes (empty when unrestricted/unknown).

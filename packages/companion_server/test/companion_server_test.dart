@@ -32,6 +32,24 @@ class TestBridge extends CompanionBridge {
   BatteryReading getBatteryAndStorage() =>
       const BatteryReading(millivolts: 3900, storageUsedKb: 5, storageTotalKb: 100);
 
+  /// Reply text for `CMD_RUN_CLI_COMMAND`; null models a pre-v14 device.
+  String? cliReply;
+
+  @override
+  Future<String?> runCliCommand(String command) async => cliReply;
+
+  final customVars = <String, String>{};
+
+  @override
+  Map<String, String> getCustomVars() => customVars;
+
+  @override
+  bool setCustomVar(String name, String value) {
+    if (name.isEmpty || name.contains(':') || value.contains(':')) return false;
+    customVars[name] = value;
+    return true;
+  }
+
   @override
   List<Contact> getContacts({int since = 0}) => contacts;
 
@@ -498,9 +516,12 @@ void main() {
     expect(r.readUInt32Le(), 0x99);
   });
 
-  test('RUN_CLI_COMMAND forwards to the bridge', () async {
+  test('RUN_CLI_COMMAND forwards to the bridge and returns its reply', () async {
+    bridge.cliReply = 'OK';
     client.send([cmdRunCliCommand, ...'adv_int 0'.codeUnits, 0]);
-    expect((await client.frames.next())[0], respCodeOk);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeCliReply);
+    expect(String.fromCharCodes(resp.sublist(1)), 'OK');
   });
 
   test('SEND_TRACE_PATH returns SENT', () async {
@@ -734,6 +755,30 @@ void main() {
     final err = await client.frames.next();
     expect(err[0], respCodeErr);
     expect(err[1], errCodeIllegalArg);
+  });
+
+  test('self telemetry returns PUSH_CODE_TELEMETRY_RESPONSE', () async {
+    client.send([cmdSendTelemetryReq, 0, 0, 0]);
+    final resp = await client.frames.next();
+    expect(resp[0], pushCodeTelemetryResponse);
+    expect(resp.sublist(2, 8), identity.publicKey.sublist(0, 6));
+    expect(resp[8], telemChannelSelf); // CayenneLPP self channel
+    expect(resp[9], 0x74); // voltage
+  });
+
+  test('RUN_CLI_COMMAND returns ERR when unsupported (fw < 14)', () async {
+    bridge.cliReply = null;
+    client.send([cmdRunCliCommand, ...utf8Bytes('ver')]);
+    expect((await client.frames.next())[0], respCodeErr);
+  });
+
+  test('SET/GET_CUSTOM_VAR round-trips', () async {
+    client.send([cmdSetCustomVar, ...utf8Bytes('region:us')]);
+    expect((await client.frames.next())[0], respCodeOk);
+    client.send([cmdGetCustomVars]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeCustomVars);
+    expect(String.fromCharCodes(resp.sublist(1)), 'region:us');
   });
 
   test('a full meshcore-open-style session stays framed and ordered', () async {

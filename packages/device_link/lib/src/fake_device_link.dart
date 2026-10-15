@@ -163,8 +163,9 @@ class FakeDeviceLink implements RadioLink {
   }
 
   @override
-  Future<void> runCliCommand(String command) async {
+  Future<String> runCliCommand(String command) async {
     cliCommands.add(command);
+    return cliReply;
   }
 
   @override
@@ -188,6 +189,7 @@ class FakeDeviceLink implements RadioLink {
 
   /// Every CLI command received (for test assertions).
   final List<String> cliCommands = [];
+  String cliReply = '';
 
   @override
   Future<BatteryReading?> battery() async => batteryReading_;

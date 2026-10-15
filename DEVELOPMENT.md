@@ -69,6 +69,18 @@ screens). An anonymous request for an unknown target registers a zero-hop
 contact first, mirroring the firmware. As with telemetry, the decrypted payload
 is AES-block-padded, so a trailing partial block may be zero-filled.
 
+## CLI commands and self telemetry
+
+`CMD_RUN_CLI_COMMAND (66)` (fw v14+) returns the device's CLI text as
+`RESP_CODE_CLI_REPLY (29)` (`[29][utf8 text]`), matching the firmware; on older
+firmware the proxy answers `ERR`. `CMD_SEND_TELEMETRY_REQ (39)` with a 3-byte
+payload is the `'self'` telemetry request (firmware `len == 4`): the proxy
+answers with its own CayenneLPP telemetry (battery voltage on the self channel)
+as `PUSH_CODE_TELEMETRY_RESPONSE (0x8B)`.
+
+Flooded request replies (login/status/telemetry/binary) can take **~15-25 s** to
+arrive, because the repeater has to complete/return the path.
+
 ## Contact sharing
 
 Each `Contact` stores the last raw advert packet it was learned from

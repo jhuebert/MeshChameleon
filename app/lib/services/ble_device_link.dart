@@ -252,11 +252,12 @@ class BleDeviceLink implements RadioLink {
   }
 
   @override
-  Future<void> runCliCommand(String command) async {
-    await _request(
+  Future<String> runCliCommand(String command) async {
+    final frame = await _request(
       DeviceFrames.runCliCommand(command),
-      {respCodeOk, respCodeErr},
+      {respCodeCliReply, respCodeErr},
     );
+    return String.fromCharCodes(frame.length > 1 ? frame.sublist(1) : const []);
   }
 
   @override

@@ -246,6 +246,26 @@ class MeshNode extends CompanionBridge {
   @override
   BatteryReading getBatteryAndStorage() => _battery;
 
+  final Map<String, String> _customVars = {};
+
+  @override
+  Map<String, String> getCustomVars() => Map<String, String>.unmodifiable(_customVars);
+
+  @override
+  bool setCustomVar(String name, String value) {
+    // Custom vars are exchanged as comma-separated `name:value` pairs, so the
+    // separators are not representable.
+    if (name.isEmpty ||
+        name.contains(':') ||
+        name.contains(',') ||
+        value.contains(':') ||
+        value.contains(',')) {
+      return false;
+    }
+    _customVars[name] = value;
+    return true;
+  }
+
   @override
   Future<Uint8List> sign(Uint8List message) => identity.sign(message);
 
@@ -1016,10 +1036,10 @@ class MeshNode extends CompanionBridge {
   }
 
   @override
-  Future<void> runCliCommand(String command) async {
+  Future<String?> runCliCommand(String command) async {
     // CLI commands are a firmware v14+ feature.
-    if (deviceInfo_.firmwareVerCode < 14) return;
-    await link.runCliCommand(command);
+    if (deviceInfo_.firmwareVerCode < 14) return null;
+    return link.runCliCommand(command);
   }
 
   @override

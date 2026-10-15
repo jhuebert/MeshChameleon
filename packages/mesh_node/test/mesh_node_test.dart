@@ -661,6 +661,13 @@ void main() {
         CryptoUtils.transportCode(def, pkt.payloadType, pkt.payload));
   });
 
+  test('custom vars round-trip through the bridge', () {
+    expect(alice.getCustomVars(), isEmpty);
+    expect(alice.setCustomVar('region', 'us'), isTrue);
+    expect(alice.setCustomVar('bad:key', 'x'), isFalse);
+    expect(alice.getCustomVars(), {'region': 'us'});
+  });
+
   test('binary request pushes a matching PUSH_CODE_BINARY_RESPONSE', () async {
     await alice.advertise();
     await bob.advertise();

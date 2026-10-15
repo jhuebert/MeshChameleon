@@ -21,6 +21,12 @@ void main() {
     expect(String.fromCharCodes(frame.sublist(1)), 'reboot');
   });
 
+  test('DeviceFrames.runCliCommand wraps the command', () {
+    final frame = DeviceFrames.runCliCommand('ver');
+    expect(frame[0], cmdRunCliCommand);
+    expect(String.fromCharCodes(frame.sublist(1)), 'ver');
+  });
+
   test('DeviceFrames.setRadioParams encodes kHz frequency', () {
     final frame = DeviceFrames.setRadioParams(
       const RadioParams(

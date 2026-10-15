@@ -94,6 +94,12 @@ class BufferWriter {
     writeBytes(bytes);
   }
 
+  void writeUInt16Be(int num) {
+    final bytes = Uint8List(2)
+      ..buffer.asByteData().setUint16(0, num & 0xFFFF, Endian.big);
+    writeBytes(bytes);
+  }
+
   void writeUInt32Le(int num) {
     final bytes = Uint8List(4)
       ..buffer.asByteData().setUint32(0, num & 0xFFFFFFFF, Endian.little);

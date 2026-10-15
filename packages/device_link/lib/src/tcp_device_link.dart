@@ -252,8 +252,12 @@ class TcpDeviceLink implements RadioLink {
 
   /// Run a CLI command on the device (firmware v14+).
   @override
-  Future<void> runCliCommand(String command) async {
-    await _request(DeviceFrames.runCliCommand(command), {respCodeOk, respCodeErr});
+  Future<String> runCliCommand(String command) async {
+    final frame = await _request(
+      DeviceFrames.runCliCommand(command),
+      {respCodeCliReply, respCodeErr},
+    );
+    return String.fromCharCodes(frame.length > 1 ? frame.sublist(1) : const []);
   }
 
   @override

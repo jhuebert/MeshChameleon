@@ -44,7 +44,9 @@ abstract class RadioLink {
   Future<void> setPathHashMode(int mode);
 
   /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
-  Future<void> runCliCommand(String command);
+  ///
+  /// Returns the CLI reply text (`RESP_CODE_CLI_REPLY`).
+  Future<String> runCliCommand(String command);
 
   /// Ask the device for its 64-byte private key (`CMD_EXPORT_PRIVATE_KEY`).
   ///

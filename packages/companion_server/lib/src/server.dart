@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -586,8 +587,9 @@ class CompanionServer implements CompanionPushSink {
   Future<void> _cmdRunCliCommand(Uint8List data) async {
     if (data.isEmpty) return sendErr(errCodeIllegalArg);
     final command = String.fromCharCodes(data.where((b) => b != 0));
-    await bridge.runCliCommand(command);
-    sendOk();
+    final text = await bridge.runCliCommand(command);
+    if (text == null) return sendErr(errCodeUnsupportedCmd);
+    _sendFrame(Uint8List.fromList([respCodeCliReply, ...utf8.encode(text)]));
   }
 
   // -------------------------------------------------------------------------
@@ -1072,6 +1074,24 @@ class CompanionServer implements CompanionPushSink {
   }
 
   Future<void> _cmdSendTelemetryReq(Uint8List data) async {
+    // 'self' telemetry: the firmware accepts a 4-byte frame (command + 3 zero
+    // bytes) and answers with the local node's own LPP telemetry. `data` here
+    // excludes the command byte, so that is a 3-byte payload.
+    if (data.length == 3) {
+      final batt = bridge.getBatteryAndStorage();
+      final lpp = (BufferWriter()
+            ..writeByte(telemChannelSelf)
+            ..writeByte(0x74) // CayenneLPP voltage (0.01 V)
+            ..writeUInt16Be((batt.millivolts / 10).round()))
+          .toBytes();
+      _sendFrame(Uint8List.fromList([
+        pushCodeTelemetryResponse,
+        0,
+        ...bridge.getPublicKey().sublist(0, 6),
+        ...lpp,
+      ]));
+      return;
+    }
     if (data.length < 3 + pubKeySize) return sendErr(errCodeIllegalArg);
     final pubkey = Uint8List.fromList(data.sublist(3, 3 + pubKeySize));
     final result = await bridge.sendTelemetryRequest(pubkey);

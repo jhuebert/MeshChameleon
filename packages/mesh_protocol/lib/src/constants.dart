@@ -112,6 +112,7 @@ const int respCodeAutoAddConfig = 25;
 const int respCodeAllowedRepeatFreq = 26;
 const int respCodeChannelDataRecv = 27;
 const int respCodeDefaultFloodScope = 28;
+const int respCodeCliReply = 29; // v14+, reply to CMD_RUN_CLI_COMMAND
 
 // ---------------------------------------------------------------------------
 // Push codes (radio -> app, unsolicited)
@@ -165,6 +166,8 @@ const int respServerLoginOk = 0x00;
 
 // Telemetry permission bits (`TELEM_PERM_*` in the firmware).
 const int telemPermBase = 0x01;
+/// CayenneLPP channel the firmware uses for the local node's own telemetry.
+const int telemChannelSelf = 1;
 const int telemPermLocation = 0x02;
 const int telemPermEnvironment = 0x04;
 
