@@ -153,6 +153,17 @@ class TestBridge extends CompanionBridge {
         success: true, isFlood: false, expectedAck: 0x4242, timeoutMs: 10000);
   }
 
+  Uint8List? binPubkey;
+  Uint8List? binData;
+
+  @override
+  Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async {
+    binPubkey = pubkey;
+    binData = data;
+    return const SentResult(
+        success: true, isFlood: false, expectedAck: 0x5151, timeoutMs: 10000);
+  }
+
   Uint8List? contactBlob;
   Uint8List? exportedFor;
   Uint8List? importedData;
@@ -668,6 +679,116 @@ void main() {
     final err = await client.frames.next();
     expect(err[0], respCodeErr);
     expect(err[1], errCodeIllegalArg);
+  });
+
+  test('a full meshcore-open-style session stays framed and ordered', () async {
+    final pubkey = identity.publicKey;
+    bridge.contacts.add(Contact(
+      publicKey: Uint8List(32)..[0] = 9,
+      name: 'peer',
+      advType: advTypeChat,
+      lastmod: 100,
+    ));
+    bridge.contactBlob = Uint8List.fromList([0x04, 0xAA, 0xBB, 0xCC]);
+
+    // Handshake / info block.
+    client.send([cmdDeviceQuery, appProtocolVersion]);
+    expect((await client.frames.next())[0], respCodeDeviceInfo);
+
+    client.send([cmdAppStart, appProtocolVersion]);
+    expect((await client.frames.next())[0], respCodeSelfInfo);
+
+    client.send([cmdGetBattAndStorage]);
+    expect((await client.frames.next())[0], respCodeBattAndStorage);
+
+    client.send([cmdGetCustomVars]);
+    expect((await client.frames.next())[0], respCodeCustomVars);
+
+    client.send([cmdGetAutoAddConfig]);
+    expect((await client.frames.next())[0], respCodeAutoAddConfig);
+
+    client.send([cmdGetContacts, 0, 0, 0, 0]);
+    expect((await client.frames.next())[0], respCodeContactsStart);
+    expect((await client.frames.next())[0], respCodeContact);
+    expect((await client.frames.next())[0], respCodeEndOfContacts);
+
+    // Channel setup round-trips on the same connection.
+    final psk = Uint8List.fromList(List.generate(16, (i) => i));
+    client.send((BufferWriter()
+          ..writeByte(cmdSetChannel)
+          ..writeByte(1)
+          ..writeCString('general', 32)
+          ..writeBytes(psk))
+        .toBytes());
+    expect((await client.frames.next())[0], respCodeOk);
+    client.send([cmdGetChannel, 1]);
+    final chan = await client.frames.next();
+    expect(chan[0], respCodeChannelInfo);
+    expect(chan.sublist(34, 50), psk);
+
+    // Device time + radio params.
+    client.send([cmdGetDeviceTime]);
+    expect((await client.frames.next())[0], respCodeCurrTime);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSetRadioParams)
+          ..writeUInt32Le(915000) // kHz on the wire
+          ..writeUInt32Le(250000)
+          ..writeByte(10)
+          ..writeByte(5))
+        .toBytes());
+    expect((await client.frames.next())[0], respCodeOk);
+
+    // Regulatory ranges.
+    bridge.allowedRepeatFreq = Uint8List.fromList([0x40, 0x42, 0x0F, 0x00]);
+    client.send([cmdGetAllowedRepeatFreq]);
+    final freq = await client.frames.next();
+    expect(freq[0], respCodeAllowedRepeatFreq);
+    expect(freq.sublist(1), bridge.allowedRepeatFreq);
+
+    // Contact sharing.
+    client.send([cmdShareContact, ...pubkey]);
+    expect((await client.frames.next())[0], respCodeOk);
+
+    client.send([cmdExportContact, ...pubkey]);
+    final exported = await client.frames.next();
+    expect(exported[0], respCodeExportContact);
+    expect(exported.sublist(1), bridge.contactBlob);
+
+    client.send([cmdImportContact, 0x04, 1, 2, 3]);
+    expect((await client.frames.next())[0], respCodeOk);
+
+    // Binary request: SENT now, the reply follows asynchronously by tag.
+    client.send([cmdSendBinaryReq, ...pubkey, reqTypeGetStatus]);
+    final sent = await client.frames.next();
+    expect(sent[0], respCodeSent);
+    final binTag = (BufferReader(sent)..skipBytes(2)).readUInt32Le();
+    expect(binTag, 0x5151);
+    expect(bridge.binData, [reqTypeGetStatus]);
+
+    bridge.pushSink!.pushBinaryResponse(binTag, Uint8List.fromList([7, 8]));
+    final push = await client.frames.next();
+    expect(push[0], pushCodeBinaryResponse);
+    final pr = BufferReader(push)..skipBytes(2);
+    expect(pr.readUInt32Le(), binTag);
+    expect(pr.readRemainingBytes(), [7, 8]);
+
+    // Anonymous request: SENT only.
+    client.send([cmdSendAnonReq, ...pubkey, 1, 0]);
+    final anon = await client.frames.next();
+    expect(anon[0], respCodeSent);
+    expect((BufferReader(anon)..skipBytes(2)).readUInt32Le(), 0x4242);
+
+    // Raw data + raw packet.
+    client.send([cmdSendRawData, 0x00, 1, 2, 3, 4]);
+    expect((await client.frames.next())[0], respCodeOk);
+
+    final raw = (Packet()
+          ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeDirect)
+          ..payload = Uint8List.fromList([1, 2, 3, 4]))
+        .writeTo();
+    client.send([cmdSendRawPacket, 0, ...raw]);
+    expect((await client.frames.next())[0], respCodeOk);
   });
 }
 
