@@ -43,6 +43,17 @@ class _IdentityScreenState extends State<IdentityScreen> {
     }
   }
 
+  Future<void> _importFromDevice() async {
+    final app = context.read<AppState>();
+    final ok = await app.importIdentityFromDevice();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(ok
+          ? 'Identity imported; reconnect the device to use it'
+          : 'Import from device failed — see the log'),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final identity = context.watch<AppState>().identity;
@@ -81,6 +92,12 @@ class _IdentityScreenState extends State<IdentityScreen> {
             icon: const Icon(Icons.download),
             label: const Text('Import key'),
             onPressed: _import,
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            icon: const Icon(Icons.phonelink_lock),
+            label: const Text('Import from connected device'),
+            onPressed: _importFromDevice,
           ),
           const SizedBox(height: 24),
           const Text('Export', style: TextStyle(fontWeight: FontWeight.bold)),

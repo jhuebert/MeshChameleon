@@ -56,18 +56,22 @@ pre-1.0 change; release installs start clean.
 - **Rooted/compromised device or a malicious local app with the same UID** can
   read anything the app can.
 - **No key material is sent off-device.** There is no analytics, telemetry
-  upload, or cloud component.
+  upload, or cloud component. (Import-from-device does move the *device's* key
+  from the companion to the phone over the local BLE/TCP link; that link is the
+  OS transport, not an end-to-end-encrypted channel we control.)
 
 ## Identity entry points
 
 - **Generate** — 32-byte seed from a CSPRNG (`LocalIdentity.generate()`); the
   seed is retained in memory for signing and stored only as the expanded key.
-- **Import** — accepts a 32-byte seed *or* the 64-byte expanded key. A
-  seed-less 64-byte import can advertise, derive the public key, and perform
-  ECDH, but **cannot sign** (the seed is not recoverable). See
+- **Import** — accepts a 32-byte seed *or* the 64-byte expanded key. Both forms
+  can sign now: the 64-byte form is the expanded Ed25519 key, which is all that
+  RFC 8032 signing needs (`CryptoUtils.ed25519SignFromExpanded`). See
   `DEVELOPMENT.md`.
-- **Import from the device (optional, not yet implemented)** — the plan calls
-  for a one-time import of the companion device's identity when its firmware has
-  `ENABLE_PRIVATE_KEY_EXPORT`. That is deferred: it requires a device-link
-  `CMD_EXPORT_PRIVATE_KEY` command (command 23) and the firmware build to permit
-  it, which stock companion firmware does not.
+- **Import from the device (implemented)** — the Identity screen's **Import from
+  connected device** sends `CMD_EXPORT_PRIVATE_KEY` (command 23) over the live
+  device link and adopts the device's 64-byte key. The firmware enables export
+  by default (its `arduino_base` build flags); hardened firmware replies
+  `RESP_CODE_DISABLED`, which the app reports and ignores. The exported key is
+  handled in memory only, never logged, and replaces the proxy identity (the
+  link is dropped so the node is rebuilt under the new identity).

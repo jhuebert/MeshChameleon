@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -104,6 +106,18 @@ class HomeScreen extends StatelessWidget {
                     },
             ),
           ),
+          Card(
+            child: SwitchListTile(
+              secondary: const Icon(Icons.restart_alt),
+              title: const Text('Resume on launch'),
+              subtitle: const Text(
+                  'Reconnect the last device and restart the proxy when the app opens'),
+              value: app.autoResume,
+              onChanged:
+                  app.busy ? null : (value) => app.setAutoResume(value),
+            ),
+          ),
+          const _BatteryOptimizationCard(),
           if (app.busy) const LinearProgressIndicator(),
           const SizedBox(height: 16),
           const Text('Recent log', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -111,6 +125,72 @@ class HomeScreen extends StatelessWidget {
           for (final line in app.logs.reversed.take(8))
             Text(line, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
         ],
+      ),
+    );
+  }
+}
+
+/// Prompts for a battery-optimization exemption, the main M0 reliability
+/// control: without it, Doze/OEM battery managers can suspend the background
+/// device link and proxy. Android-only.
+class _BatteryOptimizationCard extends StatefulWidget {
+  const _BatteryOptimizationCard();
+
+  @override
+  State<_BatteryOptimizationCard> createState() =>
+      _BatteryOptimizationCardState();
+}
+
+class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppState>().refreshBatteryOptimizationStatus();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // The user may toggle the exemption in system settings, so re-check on
+    // return to the foreground.
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<AppState>().refreshBatteryOptimizationStatus();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!Platform.isAndroid) return const SizedBox.shrink();
+    final app = context.watch<AppState>();
+    final ignored = app.batteryOptimizationsIgnored;
+    return Card(
+      child: ListTile(
+        leading: Icon(
+          ignored == true ? Icons.battery_saver : Icons.battery_alert,
+        ),
+        title: const Text('Battery optimization'),
+        subtitle: Text(
+          ignored == null
+              ? 'Checking…'
+              : ignored
+                  ? 'Exempt — the background link runs reliably'
+                  : 'Optimized — the OS may throttle the background link',
+        ),
+        trailing: ignored == false
+            ? TextButton(
+                onPressed: app.requestBatteryOptimizationExemption,
+                child: const Text('Disable'),
+              )
+            : null,
       ),
     );
   }

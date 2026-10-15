@@ -53,6 +53,23 @@ class Packet {
     }
   }
 
+  /// Convert a flooded packet into a transport-flooded one carrying the region
+  /// scope code derived from [scopeKey] (16 bytes).
+  ///
+  /// No-op for a direct packet, a zero/short key, or an already-scoped packet,
+  /// so an unset scope leaves the wire bytes unchanged. The scope network is
+  /// identified by `transportCode0`; `transportCode1` is 0 (like the firmware's
+  /// `sendFloodScoped`).
+  void applyFloodScope(Uint8List scopeKey) {
+    if (!isRouteFlood) return;
+    if (scopeKey.length != 16) return;
+    if (scopeKey.every((b) => b == 0)) return;
+    header = (header & ~phRouteMask) | routeTypeTransportFlood;
+    transportCode0 =
+        CryptoUtils.transportCode(scopeKey, payloadType, payload);
+    transportCode1 = 0;
+  }
+
   int get rawLength =>
       2 + pathByteLength + payload.length + (hasTransportCodes ? 4 : 0);
 

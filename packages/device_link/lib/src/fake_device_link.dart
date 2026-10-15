@@ -53,6 +53,8 @@ class FakeDeviceLink implements RadioLink {
     this.bus,
     this.echoSelf = false,
     this.connectFailures = 0,
+    this.devicePrivateKey,
+    this.exportPrivateKeyDisabled = false,
   });
 
   final DeviceInfo deviceInfo_;
@@ -61,6 +63,12 @@ class FakeDeviceLink implements RadioLink {
   final double snr;
   final int rssi;
   final FakeRadioBus? bus;
+
+  /// The 64-byte expanded key this simulated device exports, if any.
+  final Uint8List? devicePrivateKey;
+
+  /// When true, `CMD_EXPORT_PRIVATE_KEY` answers `RESP_CODE_DISABLED`.
+  final bool exportPrivateKeyDisabled;
 
   /// When true, the simulator also loops the transmitted frame back to itself.
   final bool echoSelf;
@@ -149,6 +157,16 @@ class FakeDeviceLink implements RadioLink {
   Future<void> runCliCommand(String command) async {
     cliCommands.add(command);
   }
+
+  @override
+  Future<Uint8List?> exportPrivateKey() async {
+    exportPrivateKeyRequests++;
+    if (exportPrivateKeyDisabled) return null;
+    return devicePrivateKey;
+  }
+
+  /// Number of `CMD_EXPORT_PRIVATE_KEY` requests received (for tests).
+  int exportPrivateKeyRequests = 0;
 
   TuningParams _tuning = const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
 

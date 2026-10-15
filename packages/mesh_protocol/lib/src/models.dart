@@ -87,6 +87,8 @@ class NodePrefs {
     this.exportPrivateKeyEnabled = false,
     this.rxDelayBaseMs = 0,
     this.airtimeFactorMs = 0,
+    this.defaultScopeName = '',
+    this.defaultScopeKey,
   });
 
   String nodeName;
@@ -114,6 +116,11 @@ class NodePrefs {
   /// and airtime factor, both in milliseconds ×1000 on the wire.
   int rxDelayBaseMs;
   int airtimeFactorMs;
+
+  /// Default flood scope (`CMD_SET_DEFAULT_FLOOD_SCOPE`): a region name and its
+  /// 16-byte transport key, applied to flooded sends unless overridden.
+  String defaultScopeName;
+  Uint8List? defaultScopeKey;
 
   /// `SELF_INFO` telemetry byte: base | location<<2 | environment<<4.
   int get telemetryModes =>
@@ -146,6 +153,8 @@ class NodePrefs {
     exportPrivateKeyEnabled = other.exportPrivateKeyEnabled;
     rxDelayBaseMs = other.rxDelayBaseMs;
     airtimeFactorMs = other.airtimeFactorMs;
+    defaultScopeName = other.defaultScopeName;
+    defaultScopeKey = other.defaultScopeKey;
   }
 }
 

@@ -243,6 +243,15 @@ class TcpDeviceLink implements RadioLink {
     await _request(DeviceFrames.runCliCommand(command), {respCodeOk, respCodeErr});
   }
 
+  @override
+  Future<Uint8List?> exportPrivateKey() async {
+    final frame = await _request(
+      DeviceFrames.exportPrivateKey(),
+      {respCodePrivateKey, respCodeDisabled, respCodeErr},
+    );
+    return parsePrivateKeyReply(frame);
+  }
+
   /// Parse `RESP_CODE_DEVICE_INFO`.
   static DeviceInfo parseDeviceInfo(Uint8List frame) {
     if (frame.length < 4) throw StateError('truncated DEVICE_INFO');

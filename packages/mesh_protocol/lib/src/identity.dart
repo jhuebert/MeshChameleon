@@ -10,12 +10,13 @@ import 'crypto.dart';
 /// The local MeshCore identity (Ed25519 + derived X25519 for ECDH).
 ///
 /// Two key forms are supported:
-///  * a 32-byte Ed25519 seed (fresh identities and imports);
-///  * the 64-byte MeshCore firmware form `[scalar(32)][nonce(32)]`.
+///  * a 32-byte Ed25519 seed (fresh identities and seed imports);
+///  * the 64-byte MeshCore firmware form `[scalar(32)][prefix(32)]`.
 ///
-/// Identities created from a seed can sign. Identities imported only in the
-/// 64-byte form can advertise, derive their public key, and do ECDH, but cannot
-/// sign (the seed is not recoverable from the expanded form).
+/// Both forms can sign: the 64-byte form is the expanded Ed25519 key, which is
+/// all that is needed for RFC 8032 signing (see
+/// [CryptoUtils.ed25519SignFromExpanded]). This is also the form the device
+/// returns from `CMD_EXPORT_PRIVATE_KEY`.
 class LocalIdentity {
   LocalIdentity._({
     required this.publicKey,
@@ -31,7 +32,9 @@ class LocalIdentity {
   Uint8List? _x25519Private;
 
   /// Whether this identity can produce Ed25519 signatures.
-  bool get canSign => _seed != null;
+  ///
+  /// Both the seed form and the 64-byte expanded form can sign.
+  bool get canSign => _seed != null || _firmwareKey != null;
 
   /// 1-byte identity hash (first byte of the public key).
   int get hashByte => publicKey[0];
@@ -80,8 +83,8 @@ class LocalIdentity {
 
   /// Create an identity from the 64-byte MeshCore firmware key form.
   ///
-  /// The public key is derived from the (clamped) scalar. Signing is not
-  /// supported for this form.
+  /// The public key is derived from the scalar; signing uses the expanded key
+  /// directly (no seed recovery needed).
   static Future<LocalIdentity> fromMeshcore64(Uint8List key) async {
     if (key.length != 64) {
       throw ArgumentError('MeshCore key must be 64 bytes');
@@ -110,13 +113,19 @@ class LocalIdentity {
     return CryptoUtils.ed25519ExpandSeedToMeshcore64(_seed!);
   }
 
-  /// Sign [message] with Ed25519. Throws [UnsupportedError] for 64-byte imports.
+  /// Sign [message] with Ed25519.
+  ///
+  /// Seed identities use the `cryptography` signer; 64-byte identities sign
+  /// directly from the expanded key. Both produce deterministic RFC 8032
+  /// signatures.
   Future<Uint8List> sign(Uint8List message) async {
+    final firmwareKey = _firmwareKey;
+    if (firmwareKey != null) {
+      return CryptoUtils.ed25519SignFromExpanded(firmwareKey, message);
+    }
     final keyPair = _keyPair;
     if (keyPair == null) {
-      throw UnsupportedError(
-        'signing requires a seed-based identity; re-import the 32-byte seed',
-      );
+      throw UnsupportedError('identity has no signing key');
     }
     final signature = await c.Ed25519().sign(message, keyPair: keyPair);
     return Uint8List.fromList(signature.bytes);

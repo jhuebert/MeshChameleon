@@ -32,7 +32,8 @@ logic). See `ATTRIBUTION.md`.
 ## Status
 
 Milestones **M0–M4 are complete**: background execution (foreground service,
-main-isolate sockets + BLE), app skeleton and device link, companion-server MVP,
+main-isolate sockets + BLE, battery-optimization exemption prompt,
+resume-on-launch), app skeleton and device link, companion-server MVP,
 messaging/contacts/channels, and robustness/passthrough (telemetry, trace, radio
 tuning passthrough, stats, reconnect/backoff). **M5 (polish + release) is in
 progress.**

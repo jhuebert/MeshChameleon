@@ -104,6 +104,27 @@ class CryptoUtils {
         0xFFFFFFFF;
   }
 
+  /// 16-bit flood-scope (transport) code for [payloadType]/[payload].
+  ///
+  /// The first two bytes (little-endian) of
+  /// `HMAC-SHA256(scopeKey, [payloadType, ...payload])`, with the reserved
+  /// values `0x0000`/`0xFFFF` nudged inwards. Mirrors firmware
+  /// `TransportKey::calcTransportCode`.
+  static int transportCode(
+    List<int> scopeKey,
+    int payloadType,
+    List<int> payload,
+  ) {
+    final mac = hmacSha256(scopeKey, [payloadType, ...payload]);
+    var code = mac[0] | (mac[1] << 8);
+    if (code == 0) {
+      code = 1;
+    } else if (code == 0xFFFF) {
+      code = 0xFFFE;
+    }
+    return code;
+  }
+
   /// Clamp a 32-byte scalar for X25519 (matches `key_exchange.c`).
   static Uint8List x25519ClampScalar(List<int> scalar) {
     if (scalar.length != 32) {
@@ -185,6 +206,49 @@ class CryptoUtils {
     }
     final point = _edwardsScalarMultBase(s);
     return _encodeEdwardsPoint(point);
+  }
+
+  /// Ed25519 signature (RFC 8032) from the 64-byte MeshCore expanded key form
+  /// `[clamped scalar(32)][prefix(32)]`.
+  ///
+  /// This is the form the firmware returns from `CMD_EXPORT_PRIVATE_KEY` and the
+  /// form [LocalIdentity] persists, so a 64-byte-only identity can sign without
+  /// recovering the original seed.
+  static Uint8List ed25519SignFromExpanded(
+    List<int> expanded64,
+    List<int> message,
+  ) {
+    if (expanded64.length != 64) {
+      throw ArgumentError('expanded key must be 64 bytes');
+    }
+    final scalar = expanded64.sublist(0, 32);
+    final prefix = expanded64.sublist(32, 64);
+    final publicKey = ed25519PublicFromScalar(scalar);
+
+    final r =
+        _leToBigInt(crypto.sha512.convert([...prefix, ...message]).bytes) %
+            _l25519;
+    final rPoint = _encodeEdwardsPoint(_edwardsScalarMultBase(r));
+
+    final k = _leToBigInt(
+          crypto.sha512.convert([...rPoint, ...publicKey, ...message]).bytes,
+        ) %
+        _l25519;
+    final s = (r + k * _leToBigInt(scalar)) % _l25519;
+
+    return Uint8List.fromList([...rPoint, ..._bigIntTo32Le(s)]);
+  }
+
+  /// Ed25519 group order `L = 2^252 + 27742317777372353535851937790883648493`.
+  static final BigInt _l25519 = (BigInt.one << 252) +
+      BigInt.parse('27742317777372353535851937790883648493');
+
+  static BigInt _leToBigInt(List<int> bytes) {
+    var value = BigInt.zero;
+    for (var i = bytes.length - 1; i >= 0; i--) {
+      value = (value << 8) | BigInt.from(bytes[i] & 0xFF);
+    }
+    return value;
   }
 
   static final BigInt _edwardsBaseX = BigInt.parse(

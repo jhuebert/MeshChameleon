@@ -39,6 +39,12 @@ abstract class RadioLink {
 
   /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
   Future<void> runCliCommand(String command);
+
+  /// Ask the device for its 64-byte private key (`CMD_EXPORT_PRIVATE_KEY`).
+  ///
+  /// Returns the expanded key, or null when the firmware disables export
+  /// (`RESP_CODE_DISABLED`). The returned key is secret: never log it.
+  Future<Uint8List?> exportPrivateKey();
 }
 
 /// Frames the proxy sends to the device (the device-facing subset).
@@ -107,6 +113,27 @@ class DeviceFrames {
         cmdRunCliCommand,
         ...(BufferWriter()..writeString(command)).toBytes(),
       ]);
+
+  static Uint8List exportPrivateKey() =>
+      Uint8List.fromList([cmdExportPrivateKey]);
+}
+
+/// Parse a reply to `CMD_EXPORT_PRIVATE_KEY`.
+///
+/// Returns the 64-byte expanded key, or null when the firmware disables export
+/// (`RESP_CODE_DISABLED`). Throws on a truncated or unexpected reply. The key is
+/// secret; callers must not log it.
+Uint8List? parsePrivateKeyReply(Uint8List frame) {
+  if (frame.isNotEmpty && frame[0] == respCodePrivateKey) {
+    if (frame.length < 1 + privateKeySize) {
+      throw StateError('truncated PRIVATE_KEY reply');
+    }
+    return Uint8List.fromList(frame.sublist(1, 1 + privateKeySize));
+  }
+  if (frame.isNotEmpty && frame[0] == respCodeDisabled) return null;
+  throw StateError(
+    'unexpected private-key reply ${frame.isEmpty ? '(empty)' : frame[0]}',
+  );
 }
 
 /// Parsed `RESP_CODE_SELF_INFO` radio parameters and node name.

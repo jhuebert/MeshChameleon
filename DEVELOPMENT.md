@@ -33,12 +33,36 @@ encode frequency in **kHz** (915000) and bandwidth in **Hz** (250000). The Dart
 core normalises `RadioParams.frequencyHz` to true Hz and converts at the wire
 boundary.
 
-## 64-byte identity import
+## Flood scope (regions)
 
-Fresh identities are generated from a 32-byte seed and can sign. Importing only
-the 64-byte MeshCore expanded key (`[scalar][nonce]`) allows advertising,
-public-key derivation, and ECDH, but not signing — the seed is not recoverable
-from the expanded form. Re-import the 32-byte seed to retain signing.
+`CMD_SET_FLOOD_SCOPE (54)` sets a send-scope override for flooded packets
+(`[54, 0, key(16)]` sets it, `[54, 0]` resets it, and `[54, 1]` forces unscoped
+flooding on fw v12+). `CMD_GET/SET_DEFAULT_FLOOD_SCOPE (64/63)` manage a
+persisted default region scope. When a scope is active, flooded
+adverts/direct/group sends are emitted as **transport-flooded** packets carrying
+a 16-bit code: the first two bytes (LE) of
+`HMAC-SHA256(scopeKey, [payloadType, ...payload])`, with `0x0000`/`0xFFFF`
+reserved, matching the firmware's `TransportKey::calcTransportCode`. With no
+scope set, packets are byte-for-byte unchanged. This is not hardware-validated.
+
+## Identity forms and signing
+
+A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form
+(`[scalar(32)][prefix(32)]`) is the expanded Ed25519 key: it is what the app
+persists and what the device returns from `CMD_EXPORT_PRIVATE_KEY`. **Both forms
+can sign** — `LocalIdentity` signs seed identities via `cryptography` and
+64-byte identities directly from the expanded key
+(`CryptoUtils.ed25519SignFromExpanded`, RFC 8032), so no seed recovery is needed.
+
+## Import from the device
+
+On the Identity screen, **Import from connected device** sends
+`CMD_EXPORT_PRIVATE_KEY` (firmware command 23) over the live device link and
+adopts the returned 64-byte key as the proxy identity. It requires a connected
+device and firmware that permits export (enabled by default in the firmware's
+`arduino_base` build flags; hardened builds reply `RESP_CODE_DISABLED`). On
+success the link is dropped so the mesh node is rebuilt under the imported
+identity on the next connect. The key is never logged.
 
 ## Identity storage
 
@@ -46,6 +70,25 @@ The identity is kept in Android Keystore-backed
 `EncryptedSharedPreferences` (AES-256-GCM). Android backup is disabled
 (`allowBackup="false"`). See `SECURITY.md` for the full model and its caveats,
 including the backend-format note if you are upgrading a pre-1.0 install.
+
+## Background execution (Android)
+
+The proxy keeps the device link and the app-facing `ServerSocket` alive under a
+`flutter_foreground_task` service (M0 shape A: the engine runs in the main
+isolate). Two home-screen controls make that reliable:
+
+- **Battery optimization** — prompts for an exemption and re-checks the status
+  whenever the app returns to the foreground. Without it, Doze and OEM battery
+  managers can suspend the background link.
+- **Resume on launch** — when enabled, the app remembers the last device target
+  (TCP host/port or BLE remote id) plus the proxy port in
+  `<app-support>/session.json` (`SessionStore`), and reconnects the device and
+  restarts the proxy on the next launch.
+
+This is a *launch* resume, not a true boot resume. With shape A the engine runs
+in the main isolate, which Android does not start at boot; the proxy cannot come
+back automatically after a reboot until the user opens the app. Boot resume would
+require the shape-B engine-in-task-isolate design (plan §4).
 
 ## Release signing
 

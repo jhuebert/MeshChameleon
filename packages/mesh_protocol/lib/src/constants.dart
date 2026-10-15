@@ -226,6 +226,8 @@ const int phVerMask = 0x03;
 // Sizes
 // ---------------------------------------------------------------------------
 const int pubKeySize = 32;
+/// The MeshCore expanded private key `[scalar(32)][prefix(32)]`.
+const int privateKeySize = 64;
 const int signatureSize = 64;
 const int maxPathSize = 64;
 const int pathHashSize = 1;

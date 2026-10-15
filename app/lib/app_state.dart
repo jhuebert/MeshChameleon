@@ -12,15 +12,19 @@ import 'package:path_provider/path_provider.dart';
 import 'services/ble_device_link.dart';
 import 'services/foreground_service.dart';
 import 'services/identity_store.dart';
+import 'services/session_store.dart';
 
 enum ProxyStatus { stopped, running }
 
 /// Owns the identity, the device link, the mesh node, and the companion server,
 /// and exposes them to the UI.
 class AppState extends ChangeNotifier {
-  AppState({IdentityStore? store}) : store = store ?? IdentityStore();
+  AppState({IdentityStore? store, SessionStore? sessionStore})
+      : store = store ?? IdentityStore(),
+        sessionStore = sessionStore ?? SessionStore();
 
   final IdentityStore store;
+  final SessionStore sessionStore;
 
   /// Foreground service that keeps the process alive while backgrounded.
   final ForegroundService _foreground = ForegroundService();
@@ -35,6 +39,15 @@ class AppState extends ChangeNotifier {
   String? deviceLabel;
   bool deviceConnected = false;
   bool busy = false;
+
+  /// Last device session (device link + proxy port), restored on launch when
+  /// [autoResume] is on.
+  SessionConfig? lastSession;
+  bool autoResume = false;
+
+  /// Whether the OS exempts the app from battery optimizations (null until
+  /// queried; always null on non-Android platforms).
+  bool? batteryOptimizationsIgnored;
 
   final List<String> logs = [];
 
@@ -63,7 +76,11 @@ class AppState extends ChangeNotifier {
 
   Future<void> loadIdentity() async {
     identity = await store.load();
+    final session = await sessionStore.load();
+    lastSession = session;
+    if (session != null) autoResume = session.autoResume;
     notifyListeners();
+    await _maybeResumeSession();
   }
 
   Future<void> generateIdentity() async {
@@ -76,6 +93,33 @@ class AppState extends ChangeNotifier {
     identity = await store.import(key);
     log('Imported identity ${_pubkeyPrefix()}');
     notifyListeners();
+  }
+
+  /// Import the connected device's identity (one-time bootstrap).
+  ///
+  /// Sends `CMD_EXPORT_PRIVATE_KEY` over the live device link. Returns false
+  /// (logging a reason) when no device is connected or the firmware disables
+  /// export. The key is never logged. On success the device link is dropped so
+  /// the next connect builds the mesh node under the imported identity.
+  Future<bool> importIdentityFromDevice() async {
+    final link = this.link;
+    if (link == null || !deviceConnected) {
+      log('Connect a device first');
+      return false;
+    }
+    try {
+      final key = await link.exportPrivateKey();
+      if (key == null) {
+        log('Device firmware disables private-key export');
+        return false;
+      }
+      await importIdentity(key);
+      await disconnectDevice();
+      return true;
+    } catch (e) {
+      log('Import from device failed: $e');
+      return false;
+    }
   }
 
   Future<Uint8List?> exportIdentity() => store.exportKey();
@@ -91,23 +135,45 @@ class AppState extends ChangeNotifier {
   // -------------------------------------------------------------------------
 
   Future<void> connectTcp({required String host, int? tcpPort}) async {
+    final devicePort = tcpPort ?? defaultCompanionPort;
     final link = TcpDeviceLink(
       host: host,
-      port: tcpPort ?? defaultCompanionPort,
+      port: devicePort,
       onLog: log,
     );
-    await _attachLink(link, 'TCP $host:${tcpPort ?? defaultCompanionPort}');
+    final ok = await _attachLink(link, 'TCP $host:$devicePort');
+    if (ok) {
+      await _recordSession(SessionConfig(
+        kind: DeviceTargetKind.tcp,
+        host: host,
+        devicePort: devicePort,
+        proxyPort: port,
+        autoResume: autoResume,
+      ));
+    }
   }
 
   Future<void> connectBle(BluetoothDevice device) async {
     final link = BleDeviceLink(device: device, onLog: log);
-    await _attachLink(link, 'BLE ${device.platformName.isEmpty ? device.remoteId : device.platformName}');
+    final name = device.platformName.isEmpty
+        ? device.remoteId.toString()
+        : device.platformName;
+    final ok = await _attachLink(link, 'BLE $name');
+    if (ok) {
+      await _recordSession(SessionConfig(
+        kind: DeviceTargetKind.ble,
+        bleRemoteId: device.remoteId.str,
+        bleName: name,
+        proxyPort: port,
+        autoResume: autoResume,
+      ));
+    }
   }
 
-  Future<void> _attachLink(RadioLink link, String label) async {
+  Future<bool> _attachLink(RadioLink link, String label) async {
     if (identity == null) {
       log('Generate or import an identity first');
-      return;
+      return false;
     }
     busy = true;
     notifyListeners();
@@ -145,12 +211,90 @@ class AppState extends ChangeNotifier {
       log('Device link ready; mesh node started');
       _watchLink(link);
       await _startForegroundService();
+      return true;
     } catch (e) {
       log('Device connection failed: $e');
       await disconnectDevice();
+      return false;
     } finally {
       busy = false;
       notifyListeners();
+    }
+  }
+
+  /// Persist the last session so it can be restored on the next launch.
+  Future<void> _recordSession(SessionConfig session) async {
+    lastSession = session;
+    await sessionStore.save(session);
+    notifyListeners();
+  }
+
+  /// Toggle automatic session restore (reconnect the last device and restart the
+  /// proxy when the app opens).
+  Future<void> setAutoResume(bool value) async {
+    autoResume = value;
+    final current = lastSession;
+    if (current != null) {
+      final updated = current.copyWith(autoResume: value);
+      lastSession = updated;
+      await sessionStore.save(updated);
+    }
+    notifyListeners();
+  }
+
+  /// Reconnect the saved device and restart the proxy after a launch, if the
+  /// user enabled [autoResume]. Best-effort: failures are logged, not fatal.
+  Future<void> _maybeResumeSession() async {
+    final session = lastSession;
+    if (session == null || !autoResume || identity == null || deviceConnected) {
+      return;
+    }
+    log('Resuming last device session ...');
+    try {
+      switch (session.kind) {
+        case DeviceTargetKind.tcp:
+          final host = session.host;
+          if (host == null) return;
+          await connectTcp(host: host, tcpPort: session.devicePort);
+        case DeviceTargetKind.ble:
+          final remoteId = session.bleRemoteId;
+          if (remoteId == null) return;
+          await connectBle(BluetoothDevice.fromId(remoteId));
+      }
+      if (deviceConnected) {
+        await startProxy(serverPort: session.proxyPort);
+      }
+    } catch (e) {
+      log('Session resume failed: $e');
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Background reliability
+  // -------------------------------------------------------------------------
+
+  /// Refresh whether the OS currently exempts the app from battery
+  /// optimizations. No-op off Android.
+  Future<void> refreshBatteryOptimizationStatus() async {
+    if (!Platform.isAndroid) return;
+    try {
+      batteryOptimizationsIgnored =
+          await _foreground.isIgnoringBatteryOptimizations();
+      notifyListeners();
+    } catch (e) {
+      log('Battery optimization check failed: $e');
+    }
+  }
+
+  /// Ask the OS for a battery-optimization exemption so the background device
+  /// link and proxy are not throttled. Re-checks the status after the prompt.
+  Future<void> requestBatteryOptimizationExemption() async {
+    if (!Platform.isAndroid) return;
+    try {
+      await _foreground.requestBatteryOptimizationExemption();
+      await refreshBatteryOptimizationStatus();
+    } catch (e) {
+      log('Battery optimization request failed: $e');
     }
   }
 

@@ -104,6 +104,42 @@ void main() {
       expect(parsed.path, [0xAA, 0xBB]);
       expect(parsed.payload, [9, 9]);
     });
+
+    test('applyFloodScope adds transport codes for a non-zero key', () {
+      final key = Uint8List(16)..[0] = 5;
+      final p = Packet()
+        ..header = Packet.createHeader(payloadTypeAdvert, routeTypeFlood)
+        ..setPath(const [])
+        ..payload = Uint8List.fromList([9, 8, 7]);
+      expect(p.hasTransportCodes, isFalse);
+      p.applyFloodScope(key);
+      expect(p.hasTransportCodes, isTrue);
+      expect(p.routeType, routeTypeTransportFlood);
+      expect(p.transportCode0,
+          CryptoUtils.transportCode(key, payloadTypeAdvert, [9, 8, 7]));
+      expect(p.transportCode1, 0);
+      // Round trips through the wire codec with the codes intact.
+      final parsed = Packet.readFrom(p.writeTo())!;
+      expect(parsed.hasTransportCodes, isTrue);
+      expect(parsed.transportCode0, p.transportCode0);
+    });
+
+    test('applyFloodScope ignores zero keys and direct packets', () {
+      final zero = Uint8List(16);
+      final flood = Packet()
+        ..header = Packet.createHeader(payloadTypeAdvert, routeTypeFlood)
+        ..setPath(const [])
+        ..payload = Uint8List.fromList([1]);
+      flood.applyFloodScope(zero);
+      expect(flood.hasTransportCodes, isFalse);
+
+      final direct = Packet()
+        ..header = Packet.createHeader(payloadTypeAdvert, routeTypeDirect)
+        ..setPath([0xAA])
+        ..payload = Uint8List.fromList([1]);
+      direct.applyFloodScope(Uint8List(16)..[0] = 1);
+      expect(direct.hasTransportCodes, isFalse);
+    });
   });
 
   group('CryptoUtils', () {
@@ -158,6 +194,34 @@ void main() {
       );
       final reimported = await LocalIdentity.fromMeshcore64(a.meshcore64);
       expect(reimported.publicKey, a.publicKey);
+    });
+
+    test('64-byte import signs identically to the seed identity', () async {
+      final seed =
+          Uint8List.fromList(List.generate(32, (i) => (i * 11 + 3) % 256));
+      final seedId = await LocalIdentity.fromSeed(seed);
+      final imported = await LocalIdentity.fromMeshcore64(seedId.meshcore64);
+      expect(imported.canSign, isTrue);
+
+      final message = Uint8List.fromList([10, 20, 30, 40, 50]);
+      final seedSig = await seedId.sign(message);
+      final importedSig = await imported.sign(message);
+      // Ed25519 (RFC 8032) is deterministic, so both forms must agree exactly.
+      expect(importedSig, seedSig);
+      expect(
+        await LocalIdentity.verify(message, importedSig, imported.publicKey),
+        isTrue,
+      );
+    });
+
+    test('ed25519SignFromExpanded matches the seed-derived signature',
+        () async {
+      final seed = Uint8List.fromList(List.generate(32, (i) => (i * 5) % 256));
+      final identity = await LocalIdentity.fromSeed(seed);
+      final message = Uint8List.fromList([1, 3, 5, 7, 9]);
+      final expected = await identity.sign(message);
+      final expanded = CryptoUtils.ed25519ExpandSeedToMeshcore64(seed);
+      expect(CryptoUtils.ed25519SignFromExpanded(expanded, message), expected);
     });
 
     test('ECDH shared secret is symmetric', () async {
