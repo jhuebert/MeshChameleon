@@ -23,9 +23,6 @@ over **BLE (NUS)** or **TCP**, treating that device as a **raw radio**: it
 transmits arbitrary MeshCore packets with `CMD_SEND_RAW_PACKET` and receives
 every over-air frame via `PUSH_CODE_LOG_RX_DATA`.
 
-> The app is named **MeshChameleon**; the repository is
-> `jhuebert/meshcore-companion-proxy` (they differ for historical reasons).
-
 This repository is a standalone reimplementation. It reuses/ports MIT-licensed
 code from [`meshcore-open`](https://github.com/zjs81/meshcore-open) (framing,
 protocol constants, crypto stack) and

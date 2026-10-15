@@ -7,7 +7,7 @@ protocol TCP endpoint to a client while holding its own identity on the phone
 and using a stock companion device as a raw radio. The app/product name is
 **MeshChameleon**. iOS is deferred.
 
-This is a personal project under `jhuebert/meshcore-companion-proxy`. The
+This is a personal project under `jhuebert/MeshChameleon`. The
 reference projects in the workspace (`meshcore-open/`, `openhop_core/`, and
 `MeshCore/`) are read-only: do not edit them as part of this project. Port or
 adapt only the smallest necessary protocol logic, retain MIT attribution, and
