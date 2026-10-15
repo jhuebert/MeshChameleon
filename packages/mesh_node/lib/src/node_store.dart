@@ -251,6 +251,7 @@ Map<String, Object?> _contactToJson(Contact c) => <String, Object?>{
       'gps_lat': c.gpsLat,
       'gps_lon': c.gpsLon,
       'sync_since': c.syncSince,
+      'raw_advert': c.rawAdvert == null ? null : bytesToHex(c.rawAdvert!),
     };
 
 Contact? _contactFromJson(Map<String, Object?> j) {
@@ -268,6 +269,7 @@ Contact? _contactFromJson(Map<String, Object?> j) {
     gpsLat: _double(j['gps_lat']),
     gpsLon: _double(j['gps_lon']),
     syncSince: _int(j['sync_since']),
+    rawAdvert: j['raw_advert'] == null ? null : _bytes(j['raw_advert']),
   );
 }
 

@@ -388,9 +388,11 @@ class CompanionServer implements CompanionPushSink {
       case cmdGetAdvertPath:
         _cmdGetAdvertPath(data);
       case cmdExportContact:
-        _cmdExportContact(data);
+        await _cmdExportContact(data);
       case cmdImportContact:
-        bridge.importContact(data) ? sendOk() : sendErr(errCodeIllegalArg);
+        await _cmdImportContact(data);
+      case cmdShareContact:
+        await _cmdShareContact(data);
       case cmdSendBinaryReq:
         await _cmdSendBinaryReq(data);
       case cmdSendAnonReq:
@@ -1006,12 +1008,25 @@ class CompanionServer implements CompanionPushSink {
     _sendFrame(w.toBytes());
   }
 
-  void _cmdExportContact(Uint8List data) {
+  Future<void> _cmdExportContact(Uint8List data) async {
     final pubkey =
         data.length >= pubKeySize ? data.sublist(0, pubKeySize) : null;
-    final raw = bridge.exportContact(pubkey);
+    final raw = await bridge.exportContact(pubkey);
     if (raw == null) return sendErr(errCodeNotFound);
     _sendFrame(Uint8List.fromList([respCodeExportContact, ...raw]));
+  }
+
+  Future<void> _cmdImportContact(Uint8List data) async {
+    if (data.isEmpty) return sendErr(errCodeIllegalArg);
+    final ok = await bridge.importContact(Uint8List.fromList(data));
+    ok ? sendOk() : sendErr(errCodeIllegalArg);
+  }
+
+  Future<void> _cmdShareContact(Uint8List data) async {
+    if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
+    final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    final ok = await bridge.shareContact(pubkey);
+    ok ? sendOk() : sendErr(errCodeNotFound);
   }
 
   Future<void> _cmdSendBinaryReq(Uint8List data) async {

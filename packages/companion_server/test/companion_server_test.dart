@@ -152,6 +152,29 @@ class TestBridge extends CompanionBridge {
     return const SentResult(
         success: true, isFlood: false, expectedAck: 0x4242, timeoutMs: 10000);
   }
+
+  Uint8List? contactBlob;
+  Uint8List? exportedFor;
+  Uint8List? importedData;
+  Uint8List? sharedPubkey;
+
+  @override
+  Future<Uint8List?> exportContact(Uint8List? pubkey) async {
+    exportedFor = pubkey;
+    return contactBlob;
+  }
+
+  @override
+  Future<bool> importContact(Uint8List data) async {
+    importedData = data;
+    return true;
+  }
+
+  @override
+  Future<bool> shareContact(Uint8List pubkey) async {
+    sharedPubkey = pubkey;
+    return true;
+  }
 }
 
 /// Minimal framed client for tests.
@@ -532,6 +555,44 @@ void main() {
     final r = BufferReader(resp)..skipBytes(2);
     expect(r.readUInt32Le(), 0x11223344);
     expect(r.readRemainingBytes(), [9, 8]);
+  });
+
+  test('EXPORT_CONTACT returns the advert blob', () async {
+    bridge.contactBlob = Uint8List.fromList([0x04, 1, 2, 3]);
+    client.send([cmdExportContact]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeExportContact);
+    expect(resp.sublist(1), [0x04, 1, 2, 3]);
+    expect(bridge.exportedFor, isNull);
+
+    final pubkey = identity.publicKey;
+    client.send([cmdExportContact, ...pubkey]);
+    await client.frames.next();
+    expect(bridge.exportedFor, pubkey);
+
+    bridge.contactBlob = null;
+    client.send([cmdExportContact, ...pubkey]);
+    final err = await client.frames.next();
+    expect(err[0], respCodeErr);
+    expect(err[1], errCodeNotFound);
+  });
+
+  test('IMPORT_CONTACT forwards the blob', () async {
+    client.send([cmdImportContact, 0x04, 7, 8, 9]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.importedData, [0x04, 7, 8, 9]);
+  });
+
+  test('SHARE_CONTACT forwards the pubkey', () async {
+    final pubkey = identity.publicKey;
+    client.send([cmdShareContact, ...pubkey]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.sharedPubkey, pubkey);
+
+    client.send([cmdShareContact, 1, 2, 3]);
+    final err = await client.frames.next();
+    expect(err[0], respCodeErr);
+    expect(err[1], errCodeIllegalArg);
   });
 }
 

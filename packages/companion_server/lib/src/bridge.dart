@@ -183,9 +183,15 @@ class CompanionBridge {
     int multiAcks,
   ) {}
 
-  Uint8List? exportContact(Uint8List? pubkey) => null;
+  /// The raw advert packet blob for [pubkey], or a freshly built self advert
+  /// when [pubkey] is null (`CMD_EXPORT_CONTACT`). Backs the `meshcore://` URI.
+  Future<Uint8List?> exportContact(Uint8List? pubkey) async => null;
 
-  bool importContact(Uint8List data) => false;
+  /// Import a raw advert packet blob (`CMD_IMPORT_CONTACT`) as if received.
+  Future<bool> importContact(Uint8List data) async => false;
+
+  /// Re-transmit a contact's saved advert zero-hop (`CMD_SHARE_CONTACT`).
+  Future<bool> shareContact(Uint8List pubkey) async => false;
 
   QueuedMessage? syncNextMessage() => null;
 

@@ -717,6 +717,71 @@ void main() {
     expect(anonResp.sublist(1, 5), [5, 6, 7, 8]);
   });
 
+  test('exportContact(self) returns a valid advert blob', () async {
+    final blob = await alice.exportContact(null);
+    expect(blob, isNotNull);
+    final pkt = Packet.readFrom(blob!)!;
+    expect(pkt.payloadType, payloadTypeAdvert);
+    expect(pkt.payload.sublist(0, pubKeySize), alice.identity.publicKey);
+    expect(await PacketBuilder.verifyAdvert(pkt.payload), isTrue);
+  });
+
+  test('exportContact returns the received raw advert blob', () async {
+    await alice.advertise();
+    await pump();
+
+    final blob = await bob.exportContact(alice.identity.publicKey);
+    expect(blob, isNotNull);
+    final pkt = Packet.readFrom(blob!)!;
+    expect(pkt.payloadType, payloadTypeAdvert);
+    expect(pkt.payload.sublist(0, pubKeySize), alice.identity.publicKey);
+
+    expect(await bob.exportContact(Uint8List(32)..[0] = 99), isNull);
+  });
+
+  test('importContact adds a contact from a shared blob', () async {
+    await alice.advertise();
+    await pump();
+
+    final blob = await bob.exportContact(alice.identity.publicKey);
+    final carolLink = FakeDeviceLink(bus: bus);
+    await carolLink.connect();
+    final carol = MeshNode(
+      identity: await LocalIdentity.fromSeed(Uint8List(32)..[0] = 3),
+      link: carolLink,
+      prefs: NodePrefs(nodeName: 'carol'),
+    )..start();
+    final carolSink = RecordingSink()..let((s) => carol.setPushSink(s));
+
+    expect(await carol.importContact(blob!), isTrue);
+    await pump();
+    expect(carol.contacts.length, 1);
+    expect(carol.contacts.first.publicKey, alice.identity.publicKey);
+    expect(carolSink.newAdverts.length, 1);
+
+    // A non-advert blob is rejected.
+    expect(await carol.importContact(Uint8List.fromList([1, 2, 3])), isFalse);
+    carol.stop();
+  });
+
+  test('shareContact re-transmits the saved advert zero-hop', () async {
+    await alice.advertise();
+    await pump();
+
+    final bobLink = bob.link as FakeDeviceLink;
+    bobLink.transmitted.clear();
+    expect(await bob.shareContact(alice.identity.publicKey), isTrue);
+    await pump();
+
+    expect(bobLink.transmitted.length, 1);
+    final pkt = Packet.readFrom(bobLink.transmitted.single)!;
+    expect(pkt.payloadType, payloadTypeAdvert);
+    expect(pkt.isRouteDirect, isTrue);
+    expect(pkt.path, isEmpty);
+
+    expect(await bob.shareContact(Uint8List(32)..[0] = 99), isFalse);
+  });
+
   test('telemetry request encodes the inverse permission mask', () async {
     await bob.advertise();
     await pump();

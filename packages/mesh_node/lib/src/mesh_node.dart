@@ -864,15 +864,44 @@ class MeshNode extends CompanionBridge {
       _advertPaths[bytesToHex(prefix)];
 
   @override
-  Uint8List? exportContact(Uint8List? pubkey) {
-    final contact = pubkey == null ? null : getContactByKey(pubkey);
-    if (contact == null) return null;
-    return Uint8List.fromList([
-      ...contact.publicKey,
-      ...(BufferWriter()..writeCString(contact.name, 32)).toBytes(),
-      ...(BufferWriter()..writeInt32Le((contact.gpsLat * 1e6).round())).toBytes(),
-      ...(BufferWriter()..writeInt32Le((contact.gpsLon * 1e6).round())).toBytes(),
-    ]);
+  @override
+  Future<Uint8List?> exportContact(Uint8List? pubkey) async {
+    if (pubkey == null) {
+      // Export SELF: a freshly built advert packet blob (the `meshcore://` URI).
+      final packet = await PacketBuilder.createAdvert(
+        identity: identity,
+        name: prefs.nodeName,
+        lat: prefs.latitude,
+        lon: prefs.longitude,
+        flags: prefs.advType,
+        flood: true,
+      );
+      return packet.writeTo();
+    }
+    return getContactByKey(pubkey)?.rawAdvert;
+  }
+
+  @override
+  Future<bool> importContact(Uint8List data) async {
+    final packet = Packet.readFrom(data);
+    if (packet == null || packet.payloadType != payloadTypeAdvert) return false;
+    // Simulate receiving it flood-mode (the firmware loops it back as received).
+    packet.header = (packet.header & ~phRouteMask) | routeTypeFlood;
+    await _onAdvert(packet);
+    return true;
+  }
+
+  @override
+  Future<bool> shareContact(Uint8List pubkey) async {
+    final blob = getContactByKey(pubkey)?.rawAdvert;
+    if (blob == null) return false;
+    final packet = Packet.readFrom(blob);
+    if (packet == null) return false;
+    // Zero-hop: direct route with an empty path (firmware sendZeroHop).
+    packet.header = (packet.header & ~phRouteMask) | routeTypeDirect;
+    packet.setPath(const []);
+    await _transmit(packet, flood: false);
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -1081,6 +1110,7 @@ class MeshNode extends CompanionBridge {
     contact.lastmod = now;
     contact.outPath = packet.path;
     contact.outPathLen = packet.path.isEmpty ? -1 : packet.pathLenByte;
+    contact.rawAdvert = packet.writeTo();
 
     _advertPaths[bytesToHex(pubkey.sublist(0, 7))] = AdvertPath(
       publicKeyPrefix: pubkey.sublist(0, 7),

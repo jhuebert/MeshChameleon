@@ -17,7 +17,9 @@ class Contact {
     this.gpsLat = 0.0,
     this.gpsLon = 0.0,
     this.syncSince = 0,
+    Uint8List? rawAdvert,
   })  : outPath = Uint8List.fromList(outPath),
+        rawAdvert = rawAdvert == null ? null : Uint8List.fromList(rawAdvert),
         assert(publicKey.length == pubKeySize, 'public key must be 32 bytes');
 
   final Uint8List publicKey;
@@ -35,6 +37,11 @@ class Contact {
   /// cursor), sent on room login.
   int syncSince;
 
+  /// The last raw advert packet received from this contact (or built for self),
+  /// used for `CMD_EXPORT_CONTACT`/`CMD_SHARE_CONTACT`. Mirrors the firmware's
+  /// per-contact saved advert blob. Null until an advert is seen.
+  Uint8List? rawAdvert;
+
   String get publicKeyHex => bytesToHex(publicKey);
 
   Uint8List get publicKeyPrefix6 => Uint8List.sublistView(publicKey, 0, 6);
@@ -51,6 +58,7 @@ class Contact {
         gpsLat: gpsLat,
         gpsLon: gpsLon,
         syncSince: syncSince,
+        rawAdvert: rawAdvert,
       );
 }
 

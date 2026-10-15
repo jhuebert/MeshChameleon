@@ -56,6 +56,16 @@ screens). An anonymous request for an unknown target registers a zero-hop
 contact first, mirroring the firmware. As with telemetry, the decrypted payload
 is AES-block-padded, so a trailing partial block may be zero-filled.
 
+## Contact sharing
+
+Each `Contact` stores the last raw advert packet it was learned from
+(`rawAdvert`), persisted with the contact. `CMD_EXPORT_CONTACT (17)` returns that
+blob — or a freshly built self advert when no public key is supplied — which is
+the `meshcore://<hex>` contact URI form. `CMD_SHARE_CONTACT (16)` re-transmits a
+contact's saved advert zero-hop so nearby nodes can learn it, and
+`CMD_IMPORT_CONTACT (18)` parses a blob and processes it as if it had just been
+received (flood). Not hardware-validated.
+
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form
