@@ -111,6 +111,15 @@ class TestBridge extends CompanionBridge {
       const SentResult(
           success: true, isFlood: true, expectedAck: 0, timeoutMs: 5000);
 
+  QueuedMessage? nextMessage;
+
+  @override
+  QueuedMessage? syncNextMessage() {
+    final msg = nextMessage;
+    nextMessage = null;
+    return msg;
+  }
+
   @override
   Future<Uint8List> sign(Uint8List message) => identity.sign(message);
 
@@ -398,6 +407,36 @@ void main() {
     client.send([cmdSyncNextMessage]);
     final resp = await client.frames.next();
     expect(resp[0], respCodeNoMoreMessages);
+  });
+
+  test('SYNC_NEXT_MESSAGE returns a queued direct message (V3)', () async {
+    // Select the V3 message layout via DEVICE_QUERY.
+    client.send([cmdDeviceQuery, 3]);
+    await client.frames.next();
+
+    final sender = Uint8List(32)..[0] = 7;
+    bridge.nextMessage = QueuedMessage(
+      senderKey: sender,
+      txtType: txtTypePlain,
+      timestamp: 0x11223344,
+      text: 'hello',
+      pathLen: 2,
+      snr: 4.0,
+    );
+
+    client.send([cmdSyncNextMessage]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeContactMsgRecvV3);
+    final r = BufferReader(resp)..skipBytes(4); // code, snr, reserved, reserved
+    expect(r.readBytes(6), sender.sublist(0, 6));
+    expect(r.readByte(), 2); // path length
+    expect(r.readByte(), txtTypePlain);
+    expect(r.readUInt32Le(), 0x11223344);
+    expect(r.readRemainingBytes(), utf8Bytes('hello'));
+
+    // The bridge advances its cursor: the queue is now empty.
+    client.send([cmdSyncNextMessage]);
+    expect((await client.frames.next())[0], respCodeNoMoreMessages);
   });
 
   test('SIGN_START/DATA/FINISH returns a 64-byte signature', () async {
