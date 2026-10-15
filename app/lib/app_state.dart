@@ -229,7 +229,7 @@ class AppState extends ChangeNotifier {
   Future<void> _startForegroundService() async {
     try {
       await _foreground.start(
-        title: 'Companion Proxy',
+        title: 'MeshChameleon',
         text: _notificationText(),
       );
     } catch (e) {
@@ -240,7 +240,7 @@ class AppState extends ChangeNotifier {
   Future<void> _updateNotification() async {
     try {
       await _foreground.update(
-        title: 'Companion Proxy',
+        title: 'MeshChameleon',
         text: _notificationText(),
       );
     } catch (e) {

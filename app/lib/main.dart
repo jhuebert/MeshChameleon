@@ -21,7 +21,7 @@ class ProxyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => AppState()..loadIdentity(),
       child: MaterialApp(
-        title: 'MeshCore Companion Proxy',
+        title: 'MeshChameleon',
         theme: ThemeData(
           colorSchemeSeed: Colors.teal,
           brightness: Brightness.light,
@@ -48,7 +48,7 @@ class HomeScreen extends StatelessWidget {
     final identity = app.identity;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Companion Proxy'),
+        title: const Text('MeshChameleon'),
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long),

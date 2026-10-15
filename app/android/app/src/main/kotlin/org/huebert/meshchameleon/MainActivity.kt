@@ -1,4 +1,4 @@
-package com.example.meshcore_companion_proxy
+package org.huebert.meshchameleon
 
 import io.flutter.embedding.android.FlutterActivity
 

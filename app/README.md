@@ -1,17 +1,8 @@
-# meshcore_companion_proxy
+# MeshChameleon (app)
 
-A new Flutter project.
+The Flutter app. Holds the MeshCore identity (secure storage), links to the
+companion device over BLE/TCP, runs the mesh node, and serves the
+companion-protocol TCP endpoint to client apps.
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+See the repository root `README.md` for the full picture and `DEVELOPMENT.md`
+for build/release notes.

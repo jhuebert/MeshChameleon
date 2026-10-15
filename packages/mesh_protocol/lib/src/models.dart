@@ -157,8 +157,8 @@ class DeviceInfo {
     this.maxChannels = 8,
     this.blePin = 0,
     this.buildDate = '',
-    this.manufacturer = 'MeshCore Companion Proxy',
-    this.version = 'meshcore-companion-proxy 0.1.0',
+    this.manufacturer = 'MeshChameleon',
+    this.version = 'meshchameleon 0.1.0',
     this.clientRepeat = 0,
     this.pathHashMode = 0,
   });

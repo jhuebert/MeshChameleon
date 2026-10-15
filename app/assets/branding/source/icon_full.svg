@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3AE8B6"/>
+      <stop offset="1" stop-color="#0E9E8C"/>
+    </linearGradient>
+    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#25C8A0"/>
+      <stop offset="1" stop-color="#0B8C7C"/>
+    </linearGradient>
+    <radialGradient id="bg" cx="0.5" cy="0.34" r="0.78">
+      <stop offset="0" stop-color="#123C35"/>
+      <stop offset="1" stop-color="#081814"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1024" height="1024" fill="url(#bg)"/>
+
+  <g transform="translate(512,512) scale(0.86) translate(-512,-512)">
+    <!-- radio waves -->
+    <g stroke="#37E0B4" stroke-width="20" stroke-linecap="round" fill="none">
+      <path d="M 792 318 A 132 132 0 0 1 792 542"/>
+      <path d="M 848 272 A 205 205 0 0 1 848 588"/>
+      <path d="M 904 226 A 278 278 0 0 1 904 634"/>
+    </g>
+
+    <!-- tail spiral -->
+    <path d="M 372 560
+             C 250 588 210 712 300 774
+             C 392 838 512 780 496 690
+             C 484 620 404 606 372 662"
+          fill="none" stroke="url(#tail)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- back leg -->
+    <g stroke="#12A594" stroke-width="46" stroke-linecap="round" fill="none">
+      <path d="M 372 596 L 340 690"/>
+      <path d="M 340 690 L 300 704"/>
+      <path d="M 340 690 L 344 722"/>
+    </g>
+
+    <!-- body -->
+    <ellipse cx="470" cy="470" rx="238" ry="162" fill="url(#body)" transform="rotate(-7 470 470)"/>
+
+    <!-- front leg -->
+    <g stroke="#12A594" stroke-width="46" stroke-linecap="round" fill="none">
+      <path d="M 560 600 L 586 696"/>
+      <path d="M 586 696 L 548 712"/>
+      <path d="M 586 696 L 592 728"/>
+    </g>
+
+    <!-- head + casque -->
+    <g fill="url(#body)">
+      <path d="M 660 336 L 706 236 L 770 336 Z"/>
+      <ellipse cx="716" cy="438" rx="132" ry="132"/>
+    </g>
+
+    <!-- mesh nodes on the flank -->
+    <g fill="#0A5C52">
+      <path d="M 408 400 l 23 -13 l 23 13 l 0 26 l -23 13 l -23 -13 Z"/>
+      <path d="M 508 452 l 23 -13 l 23 13 l 0 26 l -23 13 l -23 -13 Z"/>
+      <path d="M 352 482 l 21 -12 l 21 12 l 0 24 l -21 12 l -21 -12 Z"/>
+    </g>
+    <g stroke="#0A5C52" stroke-width="9" stroke-linecap="round">
+      <path d="M 454 420 L 508 466"/>
+      <path d="M 394 490 L 432 428"/>
+    </g>
+
+    <!-- eye -->
+    <circle cx="724" cy="408" r="46" fill="#081814"/>
+    <circle cx="724" cy="408" r="35" fill="#EAFBF5"/>
+    <circle cx="731" cy="409" r="15" fill="#081814"/>
+    <circle cx="742" cy="398" r="6" fill="#EAFBF5"/>
+
+    <!-- mouth -->
+    <path d="M 800 500 Q 840 512 872 498" fill="none" stroke="#081814" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>

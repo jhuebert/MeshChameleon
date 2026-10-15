@@ -28,9 +28,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
     <application
-        android:label="meshcore_companion_proxy"
+        android:label="MeshChameleon"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

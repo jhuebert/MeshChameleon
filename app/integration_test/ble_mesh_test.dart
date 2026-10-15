@@ -28,7 +28,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
-import 'package:meshcore_companion_proxy/services/ble_device_link.dart';
+import 'package:meshchameleon/services/ble_device_link.dart';
 
 const _bleName = String.fromEnvironment('BLE_NAME', defaultValue: 'nc1v');
 const _doTx = bool.fromEnvironment('DO_TX');

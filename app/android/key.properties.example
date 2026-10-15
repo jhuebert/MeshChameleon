@@ -1,0 +1,14 @@
+# Release signing for the companion proxy app.
+#
+# Copy this file to `key.properties` (git-ignored) and fill in the values for a
+# keystore you control. Without `key.properties`, release builds fall back to
+# the debug key so local `flutter build` still works.
+#
+# Generate a keystore with:
+#   keytool -genkeypair -v -keystore upload-keystore.jks \
+#     -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+
+storePassword=changeme
+keyPassword=changeme
+keyAlias=upload
+storeFile=/absolute/path/to/upload-keystore.jks

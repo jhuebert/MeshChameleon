@@ -17,8 +17,8 @@ class ForegroundService {
     if (!_isAndroid || _initialized) return;
     FlutterForegroundTask.init(
       androidNotificationOptions: AndroidNotificationOptions(
-        channelId: 'companion_proxy',
-        channelName: 'Companion Proxy',
+        channelId: 'meshchameleon',
+        channelName: 'MeshChameleon',
         channelDescription: 'Keeps the device link and proxy server running.',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,

@@ -1,10 +1,11 @@
-# Agent Guide — MeshCore Companion Proxy
+# Agent Guide — MeshChameleon (MeshCore companion proxy)
 
 ## Project
 
 Standalone Android-first Flutter/Dart app that presents a MeshCore companion
 protocol TCP endpoint to a client while holding its own identity on the phone
-and using a stock companion device as a raw radio. iOS is deferred.
+and using a stock companion device as a raw radio. The app/product name is
+**MeshChameleon**. iOS is deferred.
 
 This is a personal project under `jhuebert/meshcore-companion-proxy`. The
 reference projects in the workspace (`meshcore-open/`, `openhop_core/`, and

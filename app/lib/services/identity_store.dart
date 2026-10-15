@@ -5,9 +5,21 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// Stores the MeshCore identity (64-byte expanded key) in Android
 /// Keystore-backed secure storage.
+///
+/// On Android the value is kept in Jetpack Security `EncryptedSharedPreferences`
+/// (AES-256-GCM, with the master key held in the hardware-backed Android
+/// Keystore). The 64-byte identity is never written to plaintext storage, logs,
+/// or the app UI unless the user explicitly reveals it (see [exportKey]).
 class IdentityStore {
   IdentityStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ?? _defaultStorage();
+
+  /// `EncryptedSharedPreferences` requires API 23+; the app's `minSdk` is 24.
+  /// Prefer it over the legacy RSA/AES-CBC backend, which the plugin still
+  /// defaults to.
+  static FlutterSecureStorage _defaultStorage() => const FlutterSecureStorage(
+        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      );
 
   static const _key = 'meshcore_identity_v1';
   final FlutterSecureStorage _storage;
