@@ -15,6 +15,12 @@ void main() {
     expect(frame.sublist(2), packet);
   });
 
+  test('DeviceFrames.reboot encodes CMD_REBOOT + "reboot"', () {
+    final frame = DeviceFrames.reboot();
+    expect(frame[0], cmdReboot);
+    expect(String.fromCharCodes(frame.sublist(1)), 'reboot');
+  });
+
   test('DeviceFrames.setRadioParams encodes kHz frequency', () {
     final frame = DeviceFrames.setRadioParams(
       const RadioParams(

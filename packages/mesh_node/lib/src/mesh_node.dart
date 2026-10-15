@@ -806,6 +806,11 @@ class MeshNode extends CompanionBridge {
     _seenPackets.clear();
     _floodScopeOverride = null;
     _floodUnscoped = false;
+    // Also reboot the device (as the firmware's CMD_REBOOT does), so saved
+    // radio-pref changes actually take effect. Best-effort: the link may drop.
+    if (link.currentState == LinkState.connected) {
+      unawaited(link.reboot().catchError((_) {}));
+    }
   }
 
   void _startKeepAlive(Uint8List pubkey, int keepAliveSecs) {

@@ -192,6 +192,19 @@ class TcpDeviceLink implements RadioLink {
   }
 
   @override
+  Future<void> reboot() async {
+    // The firmware reboots the hardware without sending a reply, so this is a
+    // fire-and-forget write (not a request/response exchange).
+    await _runExclusive(() async {
+      final socket = _socket;
+      if (socket == null) throw StateError('device link not connected');
+      socket.add(
+        _codec.encodeFrame(DeviceFrames.reboot(), prefix: frameInboundPrefix),
+      );
+    });
+  }
+
+  @override
   Future<TuningParams> tuningParams() async {
     final frame = await _request(
       DeviceFrames.getTuningParams(),

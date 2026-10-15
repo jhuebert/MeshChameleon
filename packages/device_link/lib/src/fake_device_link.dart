@@ -145,6 +145,11 @@ class FakeDeviceLink implements RadioLink {
   Future<void> setTxPower(int dbm) async {}
 
   @override
+  Future<void> reboot() async {
+    rebootRequests++;
+  }
+
+  @override
   Future<TuningParams> tuningParams() async => _tuning;
 
   @override
@@ -174,6 +179,7 @@ class FakeDeviceLink implements RadioLink {
 
   /// Number of `CMD_EXPORT_PRIVATE_KEY` requests received (for tests).
   int exportPrivateKeyRequests = 0;
+  int rebootRequests = 0;
 
   TuningParams _tuning = const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
 

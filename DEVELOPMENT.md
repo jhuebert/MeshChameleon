@@ -33,6 +33,19 @@ encode frequency in **kHz** (915000) and bandwidth in **Hz** (250000). The Dart
 core normalises `RadioParams.frequencyHz` to true Hz and converts at the wire
 boundary.
 
+## Radio changes and device reboot
+
+`CMD_SET_RADIO_PARAMS (11)` **saves** the new radio prefs but does not retune the
+live radio until the device reboots; `SELF_INFO` reports the saved prefs, so it
+can read back the new values while the radio is still on the old channel. A real
+client therefore sends `CMD_REBOOT (19)` after changing radio settings.
+
+`CMD_REBOOT` matches the firmware: it reboots the **device** (the firmware reboots
+the hardware so saved prefs take effect). The proxy does that on
+`RadioLink.reboot()` (a fire-and-forget `[19]["reboot"]` frame — the firmware
+reboots without replying) in addition to its soft node-engine restart. The device
+link will drop and the app reconnects it.
+
 ## Flood scope (regions)
 
 `CMD_SET_FLOOD_SCOPE (54)` sets a send-scope override for flooded packets

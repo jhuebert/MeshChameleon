@@ -26,6 +26,12 @@ abstract class RadioLink {
   Future<RadioParams> radioParams();
   Future<void> setRadioParams(RadioParams params);
   Future<void> setTxPower(int dbm);
+
+  /// Reboot the device (`CMD_REBOOT`).
+  ///
+  /// The firmware reboots the hardware — needed for saved radio-pref changes
+  /// (`CMD_SET_RADIO_PARAMS`) to take effect — and does not send a reply.
+  Future<void> reboot();
   Future<BatteryReading?> battery();
 
   /// Read the device's radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
@@ -100,6 +106,9 @@ class DeviceFrames {
 
   static Uint8List setTxPower(int dbm) =>
       Uint8List.fromList([cmdSetRadioTxPower, dbm & 0xFF]);
+
+  static Uint8List reboot() =>
+      Uint8List.fromList([cmdReboot, ...'reboot'.codeUnits]);
 
   static Uint8List getTuningParams() =>
       Uint8List.fromList([cmdGetTuningParams]);

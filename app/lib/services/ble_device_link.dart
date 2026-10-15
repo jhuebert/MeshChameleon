@@ -40,6 +40,7 @@ class BleDeviceLink implements RadioLink {
   BluetoothCharacteristic? _rx;
   BluetoothCharacteristic? _tx;
   StreamSubscription<List<int>>? _notifySub;
+  StreamSubscription<BluetoothConnectionState>? _connSub;
   RawRxListener? _rawRxListener;
 
   Completer<Uint8List>? _pending;
@@ -81,6 +82,17 @@ class BleDeviceLink implements RadioLink {
       _notifySub = _tx!.onValueReceived.listen(
         (data) => _onFrame(Uint8List.fromList(data)),
       );
+      // Surface an unexpected drop (e.g. the device rebooting) so the app's
+      // link watcher can reconnect.
+      await _connSub?.cancel();
+      _connSub = device.connectionState.listen((s) {
+        if (s == BluetoothConnectionState.disconnected &&
+            _state == LinkState.connected) {
+          onLog?.call('[BleDeviceLink] device disconnected');
+          _failAll(StateError('BLE disconnected'));
+          _setState(LinkState.disconnected);
+        }
+      });
       _setState(LinkState.connected);
     } catch (e) {
       _setState(LinkState.disconnected);
@@ -92,6 +104,8 @@ class BleDeviceLink implements RadioLink {
   Future<void> disconnect() async {
     await _notifySub?.cancel();
     _notifySub = null;
+    await _connSub?.cancel();
+    _connSub = null;
     _failAll(StateError('disconnected'));
     try {
       await device.disconnect();
@@ -192,6 +206,22 @@ class BleDeviceLink implements RadioLink {
   @override
   Future<void> setTxPower(int dbm) async {
     await _request(DeviceFrames.setTxPower(dbm), {respCodeOk, respCodeErr});
+  }
+
+  @override
+  Future<void> reboot() async {
+    final rx = _rx;
+    if (rx == null) throw StateError('BLE not connected');
+    // The firmware reboots immediately, so the characteristic write usually
+    // fails with a disconnect before it is acknowledged. That is the expected
+    // outcome of a reboot, not an error.
+    await _runExclusive(() async {
+      try {
+        await rx.write(DeviceFrames.reboot(), withoutResponse: false);
+      } catch (_) {
+        // Expected: the device disconnected to reboot.
+      }
+    });
   }
 
   @override

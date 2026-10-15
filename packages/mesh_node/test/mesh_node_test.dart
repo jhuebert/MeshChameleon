@@ -651,6 +651,9 @@ void main() {
 
     // reboot clears the override/unscoped flags: back to the default scope.
     alice.reboot();
+    // It also reboots the device (CMD_REBOOT), so saved radio-pref changes take
+    // effect in the firmware.
+    expect((alice.link as FakeDeviceLink).rebootRequests, 1);
     await alice.sendChannelMessage(0, 'hi4');
     await pump();
     pkt = await lastPacket();
