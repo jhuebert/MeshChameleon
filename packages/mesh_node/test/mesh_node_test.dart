@@ -816,6 +816,20 @@ void main() {
     expect(pkt.payload, [9, 8, 7, 6]);
   });
 
+  test('sendRawPacket transmits the packet verbatim with its route', () async {
+    final aliceLink = alice.link as FakeDeviceLink;
+    aliceLink.transmitted.clear();
+
+    final packet = Packet()
+      ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeDirect)
+      ..payload = Uint8List.fromList([1, 2, 3, 4]);
+    packet.setPath([0xAA, 0xBB]);
+
+    expect(await alice.sendRawPacket(packet, 0), isTrue);
+    await pump();
+    expect(aliceLink.transmitted.single, packet.writeTo());
+  });
+
   test('telemetry request encodes the inverse permission mask', () async {
     await bob.advertise();
     await pump();

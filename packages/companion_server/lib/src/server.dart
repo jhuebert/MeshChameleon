@@ -411,6 +411,8 @@ class CompanionServer implements CompanionPushSink {
         await _cmdSendStatusReq(data);
       case cmdSendRawData:
         await _cmdSendRawData(data);
+      case cmdSendRawPacket:
+        await _cmdSendRawPacket(data);
       case cmdLogout:
         _cmdLogout(data);
       case cmdHasConnection:
@@ -1078,6 +1080,17 @@ class CompanionServer implements CompanionPushSink {
     final path = Uint8List.fromList(data.sublist(1, 1 + pathBytes));
     final payload = Uint8List.fromList(data.sublist(1 + pathBytes));
     final ok = await bridge.sendRawData(payload, path, pathLenByte);
+    ok ? sendOk() : sendErr(errCodeTableFull);
+  }
+
+  Future<void> _cmdSendRawPacket(Uint8List data) async {
+    // [priority][full packet bytes] — transmitted verbatim (route type and path
+    // encoded in the packet header).
+    if (data.length < 3) return sendErr(errCodeIllegalArg);
+    final priority = data[0];
+    final packet = Packet.readFrom(Uint8List.fromList(data.sublist(1)));
+    if (packet == null) return sendErr(errCodeIllegalArg);
+    final ok = await bridge.sendRawPacket(packet, priority);
     ok ? sendOk() : sendErr(errCodeTableFull);
   }
 

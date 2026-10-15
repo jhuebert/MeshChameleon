@@ -202,6 +202,10 @@ class CompanionBridge {
   Future<bool> sendRawData(Uint8List payload, Uint8List path, int pathLenByte) async =>
       false;
 
+  /// Transmit an already-formed packet verbatim (`CMD_SEND_RAW_PACKET`).
+  /// [priority] is accepted for protocol compatibility; the transport ignores it.
+  Future<bool> sendRawPacket(Packet packet, int priority) async => false;
+
   QueuedMessage? syncNextMessage() => null;
 
   Map<String, Object?> getStats(int statsType) => const {};

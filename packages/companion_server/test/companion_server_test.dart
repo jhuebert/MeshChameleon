@@ -193,6 +193,16 @@ class TestBridge extends CompanionBridge {
     rawPathLenByte = pathLenByte;
     return true;
   }
+
+  Packet? rawPacket;
+  int? rawPriority;
+
+  @override
+  Future<bool> sendRawPacket(Packet packet, int priority) async {
+    rawPacket = packet;
+    rawPriority = priority;
+    return true;
+  }
 }
 
 /// Minimal framed client for tests.
@@ -640,6 +650,24 @@ void main() {
     final err2 = await client.frames.next();
     expect(err2[0], respCodeErr);
     expect(err2[1], errCodeUnsupportedCmd);
+  });
+
+  test('SEND_RAW_PACKET parses and forwards the packet verbatim', () async {
+    final packet = Packet()
+      ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeDirect)
+      ..payload = Uint8List.fromList([1, 2, 3, 4]);
+    packet.setPath([0xAA, 0xBB]);
+
+    client.send([cmdSendRawPacket, 7, ...packet.writeTo()]);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.rawPriority, 7);
+    expect(bridge.rawPacket!.writeTo(), packet.writeTo());
+
+    // Malformed packet bytes are rejected.
+    client.send([cmdSendRawPacket, 0, 0xFF, 0xFF]);
+    final err = await client.frames.next();
+    expect(err[0], respCodeErr);
+    expect(err[1], errCodeIllegalArg);
   });
 }
 

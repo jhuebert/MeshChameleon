@@ -81,6 +81,11 @@ ranges by forwarding command 60 to the device link
 hash-width encoding is rejected with `ERR_CODE_UNSUPPORTED_CMD`), and the path
 is used verbatim without adding an ACK.
 
+`CMD_SEND_RAW_PACKET (65)` takes `[priority][packet bytes]`, parses the packet
+and transmits it verbatim — the route type and path are whatever the packet's
+header encodes, so no scope or route rewriting is applied. The priority byte is
+accepted for protocol compatibility but the transport does not use it.
+
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form
