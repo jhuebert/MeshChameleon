@@ -207,14 +207,26 @@ The app/product name is **MeshChameleon**. Source artwork lives in
 
 Configuration is in two files at `app/`:
 
-- `flutter_launcher_icons.yaml` — launcher/adaptive/monochrome icons.
+- `flutter_launcher_icons.yaml` — launcher/adaptive/monochrome icons. The
+  foreground/monochrome SVGs already keep the art inside the adaptive-icon safe
+  zone, so `adaptive_icon_foreground_inset` is `0`.
 - `flutter_native_splash.yaml` — native splash (dark brand color `#0C1E1B`,
   logo + wordmark, Android 12 splash).
 
-Regenerate after editing the source art:
+Regenerate after editing the source art. First render the derived PNGs from the
+SVGs with `rsvg-convert` and ImageMagick, then run the two Dart tools:
 
 ```sh
 cd app
+rsvg-convert -w 1024 -h 1024 assets/branding/source/icon_full.svg -o assets/branding/icon.png
+rsvg-convert -w 1024 -h 1024 assets/branding/source/background.svg -o assets/branding/icon_background.png
+rsvg-convert -w 1024 -h 1024 assets/branding/source/foreground.svg -o assets/branding/icon_foreground.png
+rsvg-convert -w 1024 -h 1024 assets/branding/source/monochrome.svg -o assets/branding/icon_monochrome.png
+# mark.svg is tightly cropped, so centre it on a padded 1152×1152 canvas
+# (620×408 keeps the art inside the Android 12 splash safe circle).
+rsvg-convert -w 620 -h 408 assets/branding/source/mark.svg -o /tmp/mark.png
+magick -size 1152x1152 xc:none /tmp/mark.png -gravity center -composite assets/branding/splash_logo.png
+
 ~/dev/flutter/bin/dart run flutter_launcher_icons -f flutter_launcher_icons.yaml
 ~/dev/flutter/bin/dart run flutter_native_splash:create --path=flutter_native_splash.yaml
 ```
