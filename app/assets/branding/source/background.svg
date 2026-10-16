@@ -1,9 +1,17 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>MeshChameleon icon background</title>
   <defs>
-    <radialGradient id="bg" cx="0.5" cy="0.34" r="0.8">
-      <stop offset="0" stop-color="#123C35"/>
-      <stop offset="1" stop-color="#081814"/>
+    <radialGradient id="bg" cx="0.5" cy="0.42" r="0.72">
+      <stop offset="0" stop-color="#15433A"/>
+      <stop offset="0.6" stop-color="#0C1E1B"/>
+      <stop offset="1" stop-color="#07120F"/>
     </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#3FE6BA" stop-opacity="0.14"/>
+      <stop offset="1" stop-color="#3FE6BA" stop-opacity="0"/>
+    </radialGradient>
+
   </defs>
   <rect width="1024" height="1024" fill="url(#bg)"/>
+  <circle cx="512" cy="492" r="420" fill="url(#glow)"/>
 </svg>

@@ -196,8 +196,14 @@ The app/product name is **MeshChameleon**. Source artwork lives in
 - `icon_foreground.png`, `icon_monochrome.png`, `icon_background.png` — adaptive
   icon layers (foreground, themed-monochrome, background).
 - `splash_logo.png` — splash logo; `wordmark.png` — splash wordmark.
-- `source/` — the editable SVGs (`mark.svg` is the chameleon mark; render with
-  `rsvg-convert`). These are the source of truth; the PNGs are derived.
+- `source/` — the editable SVGs (render with `rsvg-convert`). These are the
+  source of truth; the PNGs are derived:
+  - `mark.svg` — the chameleon mark on transparent, tightly cropped
+    (`splash_logo.png`).
+  - `icon_full.svg` — full-bleed square icon (`icon.png`).
+  - `background.svg`, `foreground.svg`, `monochrome.svg` — adaptive icon
+    layers at 1024×1024; the foreground/monochrome art sits inside the 66/108
+    safe-zone circle.
 
 Configuration is in two files at `app/`:
 
