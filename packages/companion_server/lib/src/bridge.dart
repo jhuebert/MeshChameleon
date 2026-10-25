@@ -63,6 +63,9 @@ abstract class CompanionPushSink {
   /// A raw over-air packet was received, matching `PUSH_CODE_LOG_RX_DATA`.
   void pushRawRxData(double snr, int rssi, Uint8List raw);
 
+  /// A direct raw-custom payload was received, matching `PUSH_CODE_RAW_DATA`.
+  void pushRawData(double snr, int rssi, Uint8List payload);
+
   /// A raw control-data packet was received.
   void pushControlData(double snr, int rssi, int pathLen, Uint8List data);
 

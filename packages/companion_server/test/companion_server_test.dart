@@ -737,6 +737,13 @@ void main() {
     expect(await client.frames.next(), [pushCodeLogRxData, 24, 186, ...raw]);
   });
 
+  test('raw custom data uses 0x84 with reserved 0xFF', () async {
+    final payload = Uint8List.fromList([9, 8, 7]);
+    server.pushRawData(6.0, -70, payload);
+    expect(await client.frames.next(),
+        [pushCodeRawData, 24, 186, 0xFF, ...payload]);
+  });
+
   test('SET_CHANNEL then GET_CHANNEL round trips', () async {
     final psk = Uint8List.fromList(List.generate(16, (i) => i));
     final w = BufferWriter()

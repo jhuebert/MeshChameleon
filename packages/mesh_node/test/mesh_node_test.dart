@@ -35,6 +35,12 @@ class RecordingSink implements CompanionPushSink {
   void pushRawRxData(double snr, int rssi, Uint8List raw) =>
       rawRxFrames.add(Uint8List.fromList(raw));
 
+  final List<List<int>> rawData = [];
+
+  @override
+  void pushRawData(double snr, int rssi, Uint8List payload) =>
+      rawData.add([(snr * 4).round(), rssi, 0xFF, ...payload]);
+
   @override
   void pushNewAdvert(Uint8List contactFrame) {
     newAdverts.add(contactFrame);

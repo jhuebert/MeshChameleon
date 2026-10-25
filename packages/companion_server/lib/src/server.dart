@@ -292,6 +292,19 @@ class CompanionServer implements CompanionPushSink {
   }
 
   @override
+  void pushRawData(double snr, int rssi, Uint8List payload) {
+    final snrByte = (snr * 4).round().clamp(-128, 127) & 0xFF;
+    final rssiByte = rssi.clamp(-128, 127);
+    _sendPushFrame(Uint8List.fromList([
+      pushCodeRawData,
+      snrByte,
+      rssiByte & 0xFF,
+      0xFF,
+      ...payload,
+    ]));
+  }
+
+  @override
   void pushPathDiscoveryResponse(Uint8List pubkeyPrefix6, int outPathLen,
       Uint8List outPath, int inPathLen, Uint8List inPath) {
     final w = BufferWriter()

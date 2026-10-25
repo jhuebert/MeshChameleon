@@ -25,8 +25,28 @@ class FakeRadioBus {
     }
     for (final link in _links) {
       if (identical(link, from)) continue;
-      link.deliver(snr, rssi, packet);
+      link.deliver(snr, rssi, _consumeDirectRoute(packet));
     }
+  }
+
+  /// Model the final direct-route hop: a receiving endpoint sees the path hash
+  /// count decremented. Trace uses its path field for SNR accumulation and is
+  /// exempt. Flood routes accumulate paths and are left untouched.
+  static Uint8List _consumeDirectRoute(Uint8List raw) {
+    final packet = Packet.readFrom(raw);
+    if (packet == null ||
+        packet.payloadType == payloadTypeTrace ||
+        !packet.isRouteDirect ||
+        packet.pathHashCount == 0) {
+      return packet?.writeTo() ?? raw;
+    }
+    final hashSize = packet.pathHashSize;
+    final count = packet.pathHashCount - 1;
+    final base = packet.pathLenByte & 0xC0;
+    packet
+      ..path = Uint8List.fromList(packet.path.sublist(hashSize))
+      ..pathLenByte = base | count;
+    return packet.writeTo();
   }
 }
 
@@ -112,6 +132,9 @@ class FakeDeviceLink implements RadioLink {
   /// Every packet this link transmitted (for test assertions).
   final List<Uint8List> transmitted = [];
 
+  /// Priority argument for each [sendRawPacket], parallel to [transmitted].
+  final List<int> transmitPriorities = [];
+
   /// Names of every [RadioLink] method invoked on this fake, in order. Lets a
   /// test distinguish handshake/query calls from state-changing writes.
   final List<String> calls = [];
@@ -182,6 +205,7 @@ class FakeDeviceLink implements RadioLink {
   Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) async {
     calls.add('sendRawPacket');
     transmitted.add(Uint8List.fromList(packet));
+    transmitPriorities.add(priority);
     bus?.transmit(this, packet, snr, rssi);
     if (echoSelf) deliver(snr, rssi, packet);
     await _wait(rawTxAck);

@@ -373,6 +373,36 @@ class PacketBuilder {
     return pkt;
   }
 
+  /// Build an encrypted `PAYLOAD_TYPE_RESPONSE` datagram for [contact].
+  ///
+  /// [data] is the already-tagged response body (for telemetry this is
+  /// `tag u32 + LPP`). Direct responses use the contact's known outbound route;
+  /// when that route is unknown the response is flooded.
+  static Future<Packet> createProtocolResponse({
+    required Contact contact,
+    required LocalIdentity identity,
+    required List<int> data,
+    bool? flood,
+  }) async {
+    final secret = await identity.sharedSecret(contact.publicKey);
+    final aesKey = secret.sublist(0, 16);
+    final cipher =
+        CryptoUtils.encryptThenMac(aesKey, secret, Uint8List.fromList(data));
+    final payload = Uint8List.fromList([
+      contact.publicKey[0],
+      identity.publicKey[0],
+      ...cipher,
+    ]);
+    final useFlood = flood ?? !contact.hasDirectRoute;
+    final pkt = _packet(
+      Packet.createHeader(
+          payloadTypeResponse, useFlood ? routeTypeFlood : routeTypeDirect),
+      payload,
+    );
+    if (!useFlood) pkt.setPath(contact.outPath, contact.outPathLen);
+    return pkt;
+  }
+
   /// Build a `PAYLOAD_TYPE_ANON_REQ` datagram (used for repeater login). The
   /// sender's full public key is embedded so the recipient can reply without
   /// knowing the sender as a contact.

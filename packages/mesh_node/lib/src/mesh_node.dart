@@ -1241,9 +1241,17 @@ class MeshNode extends CompanionBridge {
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
     final flood = !contact.hasDirectRoute;
-    await _transmit(packet, flood: flood, identityGeneration: generation);
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     _pendingBinary[tag] = Uint8List.fromList(pubkey);
+    try {
+      await _transmit(packet, flood: flood, identityGeneration: generation);
+    } catch (_) {
+      _pendingBinary.remove(tag);
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      _pendingBinary.remove(tag);
+      return const SentResult.failure();
+    }
     return SentResult(
         success: true, isFlood: flood, expectedAck: tag, timeoutMs: 10000);
   }
@@ -1274,9 +1282,17 @@ class MeshNode extends CompanionBridge {
       flood: flood,
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
-    await _transmit(packet, flood: flood, identityGeneration: generation);
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     _pendingBinary[tag] = Uint8List.fromList(pubkey);
+    try {
+      await _transmit(packet, flood: flood, identityGeneration: generation);
+    } catch (_) {
+      _pendingBinary.remove(tag);
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      _pendingBinary.remove(tag);
+      return const SentResult.failure();
+    }
     return SentResult(
         success: true, isFlood: flood, expectedAck: tag, timeoutMs: 10000);
   }
@@ -1357,9 +1373,17 @@ class MeshNode extends CompanionBridge {
       flood: true,
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
-    await _transmit(packet, flood: true, identityGeneration: generation);
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     _pendingDiscovery[tag] = Uint8List.fromList(pubkey);
+    try {
+      await _transmit(packet, flood: true, identityGeneration: generation);
+    } catch (_) {
+      _pendingDiscovery.remove(tag);
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      _pendingDiscovery.remove(tag);
+      return const SentResult.failure();
+    }
     return SentResult(
       success: true,
       isFlood: true,
@@ -1396,9 +1420,17 @@ class MeshNode extends CompanionBridge {
       flood: flood,
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
-    await _transmit(packet, flood: flood, identityGeneration: generation);
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     _pendingTelemetry[tag] = Uint8List.fromList(pubkey);
+    try {
+      await _transmit(packet, flood: flood, identityGeneration: generation);
+    } catch (_) {
+      _pendingTelemetry.remove(tag);
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      _pendingTelemetry.remove(tag);
+      return const SentResult.failure();
+    }
     return SentResult(
       success: true,
       isFlood: flood,
@@ -1452,6 +1484,7 @@ class MeshNode extends CompanionBridge {
       packet,
       flood: packet.isRouteFlood,
       preservePath: true,
+      priority: priority,
       identityGeneration: generation,
     );
     return _identityCurrent(generation);
@@ -1482,9 +1515,17 @@ class MeshNode extends CompanionBridge {
       flood: flood,
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
-    await _transmit(packet, flood: flood, identityGeneration: generation);
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     _pendingLogin = Uint8List.fromList(pubkey.sublist(0, 4));
+    try {
+      await _transmit(packet, flood: flood, identityGeneration: generation);
+    } catch (_) {
+      _pendingLogin = null;
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      _pendingLogin = null;
+      return const SentResult.failure();
+    }
     return SentResult(
       success: true,
       isFlood: flood,
@@ -1515,9 +1556,17 @@ class MeshNode extends CompanionBridge {
       flood: flood,
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
-    await _transmit(packet, flood: flood, identityGeneration: generation);
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     _pendingStatus = Uint8List.fromList(pubkey.sublist(0, 4));
+    try {
+      await _transmit(packet, flood: flood, identityGeneration: generation);
+    } catch (_) {
+      _pendingStatus = null;
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      _pendingStatus = null;
+      return const SentResult.failure();
+    }
     return SentResult(
       success: true,
       isFlood: flood,
@@ -2284,6 +2333,7 @@ class MeshNode extends CompanionBridge {
     required bool flood,
     bool scoped = false,
     bool preservePath = false,
+    int priority = 0,
     int? identityGeneration,
   }) async {
     // Suppress new semantic transmissions while an identity switch is paused
@@ -2312,7 +2362,7 @@ class MeshNode extends CompanionBridge {
     _txAirMicros += _airtimeMicrosFor(bytes.length);
     _activePhysicalTx++;
     try {
-      await link.sendRawPacket(bytes);
+      await link.sendRawPacket(bytes, priority);
     } finally {
       _activePhysicalTx--;
       if (_activePhysicalTx == 0) {
@@ -2341,7 +2391,37 @@ class MeshNode extends CompanionBridge {
     _lastRxRssi = rssi;
     _lastRxSnrScaled = (snr * 4).round();
 
+    // Trace routes carry accumulated SNR bytes in the path field, not remaining
+    // route hashes. The trace handler validates that the requested path is
+    // complete before surfacing it.
+    if (packet.payloadType == payloadTypeTrace) {
+      _onTrace(packet);
+      return;
+    }
+
+    // Control discovery raw packets preserve this path for diagnostics, but
+    // semantic delivery at this endpoint requires a fully consumed direct route.
+    final endpointConsumed =
+        packet.isRouteFlood || packet.pathHashCount == 0;
+    if (!endpointConsumed) {
+      // Stock endpoints can still observe early ACKs before the route is
+      // consumed; everything else remains raw-logged only.
+      switch (packet.payloadType) {
+        case payloadTypeAck:
+          _onAck(packet);
+        case payloadTypeMultipart:
+          _onMultipart(packet);
+        default:
+          break;
+      }
+      return;
+    }
+
     switch (packet.payloadType) {
+      case payloadTypeReq:
+        await _onRequest(packet, generation);
+      case payloadTypeRawCustom:
+        _onRawCustom(packet);
       case payloadTypeAdvert:
         await _onAdvert(packet, generation);
       case payloadTypeTxtMsg:
@@ -2893,8 +2973,154 @@ class MeshNode extends CompanionBridge {
     );
   }
 
+  Future<void> _onRequest(Packet packet, int generation) async {
+    if (packet.payload.length < 2) return;
+    if (packet.payload[0] != _selfHash) return;
+    final decrypted = await _decryptFromSource(
+      packet.payload[1],
+      packet.payload.sublist(2),
+      generation,
+    );
+    if (decrypted == null) return;
+    final (sender, plaintext) = decrypted;
+    // tag u32 + protocol code are the minimum request body.
+    if (plaintext.length < 5) return;
+    final tag = BufferReader(plaintext).readUInt32Le();
+    final protocolCode = plaintext[4];
+    if (protocolCode != reqTypeGetTelemetryData) return;
+    // Validate the inverse-mask byte before reading it.
+    if (plaintext.length < 6) return;
+    final inverseMask = plaintext[5];
+    if (!_isPersistentContact(sender)) return;
+
+    final permissions = _grantedTelemetryPermissions(sender, inverseMask);
+    if ((permissions & telemPermBase) == 0) return;
+
+    final millivolts = await battery.refresh(force: true);
+    if (!_identityCurrent(generation)) return;
+    final lpp = _encodeTelemetryLpp(
+      millivolts,
+      includeLocation: (permissions & telemPermLocation) != 0,
+    );
+    final reply = Uint8List.fromList([
+      ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
+      ...lpp,
+    ]);
+    final senderCopy = sender.clone();
+    final requestPath = Uint8List.fromList(packet.path);
+    final requestPathLen = packet.pathLenByte;
+    final requestWasFlood = packet.isRouteFlood;
+    _scheduleAck(const Duration(milliseconds: 300), () {
+      unawaited(_sendTelemetryReply(
+        senderCopy,
+        reply,
+        requestWasFlood: requestWasFlood,
+        requestPath: requestPath,
+        requestPathLen: requestPathLen,
+        generation: generation,
+      ));
+    });
+  }
+
+  int _grantedTelemetryPermissions(Contact sender, int inverseMask) {
+    var permissions = 0;
+    final baseFlag = (sender.flags & 0x02) != 0;
+    final locationFlag = (sender.flags & 0x04) != 0;
+    final envFlag = (sender.flags & 0x08) != 0;
+    if (prefs.telemetryModeBase == teleModeAllowAll ||
+        (prefs.telemetryModeBase == teleModeAllowFlags && baseFlag)) {
+      permissions |= telemPermBase;
+    }
+    if (prefs.telemetryModeLocation == teleModeAllowAll ||
+        (prefs.telemetryModeLocation == teleModeAllowFlags && locationFlag)) {
+      permissions |= telemPermLocation;
+    }
+    if (prefs.telemetryModeEnvironment == teleModeAllowAll ||
+        (prefs.telemetryModeEnvironment == teleModeAllowFlags && envFlag)) {
+      permissions |= telemPermEnvironment;
+    }
+    return permissions & (~inverseMask & 0xFF);
+  }
+
+  Uint8List _encodeTelemetryLpp(
+    int millivolts, {
+    required bool includeLocation,
+  }) {
+    final w = BufferWriter()
+      ..writeByte(telemChannelSelf)
+      ..writeByte(0x74) // CayenneLPP voltage, 0.01 V
+      ..writeUInt16Be((millivolts / 10).round().clamp(0, 0xFFFF));
+    if (includeLocation) {
+      w
+        ..writeByte(telemChannelSelf)
+        ..writeByte(0x88); // CayenneLPP GPS
+      _writeSigned24(w, (prefs.latitude * 10000).round());
+      _writeSigned24(w, (prefs.longitude * 10000).round());
+      _writeSigned24(w, 0); // altitude
+    }
+    return w.toBytes();
+  }
+
+  void _writeSigned24(BufferWriter w, int value) {
+    final clamped = value.clamp(-0x800000, 0x7FFFFF);
+    final encoded = clamped < 0 ? clamped + 0x1000000 : clamped;
+    w
+      ..writeByte((encoded >> 16) & 0xFF)
+      ..writeByte((encoded >> 8) & 0xFF)
+      ..writeByte(encoded & 0xFF);
+  }
+
+  Future<void> _sendTelemetryReply(
+    Contact sender,
+    Uint8List data, {
+    required bool requestWasFlood,
+    required Uint8List requestPath,
+    required int requestPathLen,
+    required int generation,
+  }) async {
+    if (!_identityCurrent(generation) || _semanticBlocked) return;
+    if (requestWasFlood) {
+      final secret = await identity.sharedSecret(sender.publicKey);
+      if (!_identityCurrent(generation)) return;
+      final pathReturn = PacketBuilder.createPathReturn(
+        destHashByte: sender.publicKey[0],
+        srcHashByte: identity.publicKey[0],
+        secret: secret,
+        path: requestPath,
+        pathLenEncoded: requestPathLen,
+        extraType: payloadTypeResponse,
+        extra: data,
+      );
+      await _transmit(
+        pathReturn,
+        flood: true,
+        scoped: true,
+        identityGeneration: generation,
+      );
+      return;
+    }
+
+    final flood = !sender.hasDirectRoute;
+    final response = await PacketBuilder.createProtocolResponse(
+      contact: sender,
+      identity: identity,
+      data: data,
+      flood: flood,
+    );
+    if (!_identityCurrent(generation)) return;
+    await _transmit(
+      response,
+      flood: flood,
+      scoped: flood,
+      identityGeneration: generation,
+    );
+  }
+
   void _onControlData(Packet packet) {
     if (packet.payload.isEmpty) return;
+    // Discovery/probe control payloads are zero-hop direct. Flooded or
+    // still-in-transit control data is not delivered as a local discovery event.
+    if (!packet.isRouteDirect || packet.pathHashCount != 0) return;
     if (_isDuplicate(packet.calculatePacketHash())) return;
     pushSink?.pushControlData(
       packet.snr,
@@ -2902,6 +3128,14 @@ class MeshNode extends CompanionBridge {
       packet.pathLenByte,
       packet.payload,
     );
+  }
+
+  void _onRawCustom(Packet packet) {
+    // Raw custom delivery is direct-route zero-hop only. Flooded/raw-in-transit
+    // packets remain available through the full 0x88 raw RX log.
+    if (!packet.isRouteDirect || packet.pathHashCount != 0) return;
+    if (_isDuplicate(packet.calculatePacketHash())) return;
+    pushSink?.pushRawData(packet.snr, packet.rssi, packet.payload);
   }
 
   /// Handle a returned trace packet (`PAYLOAD_TYPE_TRACE`, route direct). The
@@ -3069,11 +3303,14 @@ class MeshNode extends CompanionBridge {
     final prefix4 = Uint8List.fromList(senderPubkey.sublist(0, 4));
     _markConnectionActive(senderPubkey);
 
+    final discoveryTarget = _pendingDiscovery[tag];
     if (outPath != null &&
         outPathLen != null &&
         inPath != null &&
         inPathLen != null &&
-        _pendingDiscovery.remove(tag) != null) {
+        discoveryTarget != null &&
+        _bytesEqual(discoveryTarget, senderPubkey)) {
+      _pendingDiscovery.remove(tag);
       pushSink?.pushPathDiscoveryResponse(
         Uint8List.fromList(senderPubkey.sublist(0, 6)),
         outPathLen,
@@ -3084,7 +3321,11 @@ class MeshNode extends CompanionBridge {
       return;
     }
 
-    if (_pendingTelemetry.remove(tag) != null && data.length > 4) {
+    final telemetryTarget = _pendingTelemetry[tag];
+    if (telemetryTarget != null &&
+        _bytesEqual(telemetryTarget, senderPubkey) &&
+        data.length > 4) {
+      _pendingTelemetry.remove(tag);
       pushSink?.pushTelemetryResponse(
         Uint8List.fromList(senderPubkey.sublist(0, 6)),
         Uint8List.fromList(data.sublist(4)),
@@ -3092,7 +3333,9 @@ class MeshNode extends CompanionBridge {
       return;
     }
 
-    if (_pendingBinary.remove(tag) != null) {
+    final binaryTarget = _pendingBinary[tag];
+    if (binaryTarget != null && _bytesEqual(binaryTarget, senderPubkey)) {
+      _pendingBinary.remove(tag);
       pushSink?.pushBinaryResponse(
         tag,
         Uint8List.fromList(data.length > 4 ? data.sublist(4) : const []),
@@ -3114,7 +3357,16 @@ class MeshNode extends CompanionBridge {
           Uint8List.fromList(data.sublist(4)),
         );
       }
+      return;
     }
+
+    // Valid authenticated responses that match no pending request are
+    // unsolicited pushes (for example sensor telemetry), not virtual requests.
+    // Preserve tag + payload bytes exactly, including their timestamp/LPP.
+    pushSink?.pushBinaryResponse(
+      tag,
+      Uint8List.fromList(data.length > 4 ? data.sublist(4) : const []),
+    );
   }
 
   void _handleLoginResponse(Uint8List senderPubkey, Uint8List data) {
