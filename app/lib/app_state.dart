@@ -95,6 +95,7 @@ class AppState extends ChangeNotifier {
   String? get batteryDiagnostic => node?.batteryDiagnostic;
 
   final List<String> logs = [];
+  bool _disposed = false;
 
   // -------------------------------------------------------------------------
   // Identity-facing state
@@ -104,7 +105,6 @@ class AppState extends ChangeNotifier {
   IdentitySummary? get activeIdentity => _manager?.activeSummary;
   String? get identityDatabaseError => _manager?.databaseError;
   bool get identitiesLoaded => _manager?.loaded ?? false;
-  bool get identitiesLive => _manager?.deviceAttached ?? false;
 
   /// The active virtual identity exposed to the companion client.
   LocalIdentity? get identity => _manager?.activeIdentity;
@@ -115,13 +115,22 @@ class AppState extends ChangeNotifier {
   String? get activeIdentityId => _manager?.activeId;
 
   void log(String message) {
+    if (_disposed) return;
     logs.add('${DateTime.now().toIso8601String()}  $message');
     if (logs.length > 500) logs.removeAt(0);
     notifyListeners();
   }
 
+  bool _foregroundStarted = false;
+  String? _lastNotificationText;
+
   void _onManagerChanged() {
+    if (_disposed) return;
     notifyListeners();
+    final text = _notificationText();
+    if (_foregroundStarted && text != _lastNotificationText) {
+      unawaited(_updateNotification());
+    }
   }
 
   Future<IdentityManager> _ensureManager() async {
@@ -363,10 +372,12 @@ class AppState extends ChangeNotifier {
         radioParams: selfInfo.radioParams,
         devicePublicKey: selfInfo.publicKey,
       );
+      final liveCount =
+          manager.runtimes.where((runtime) => runtime.live).length;
       if (manager.activeNode == null) {
-        log('Active identity is unavailable; other identities remain live');
+        log('Active identity is unavailable; $liveCount other identities live');
       } else {
-        log('Device link ready; all identities live');
+        log('Device link ready; $liveCount identities live');
       }
       _watchLink(link);
       await _startForegroundService();
@@ -595,6 +606,8 @@ class AppState extends ChangeNotifier {
     } catch (_) {
       // The service may already be gone after the device powered off.
     }
+    _foregroundStarted = false;
+    _lastNotificationText = null;
     notifyListeners();
   }
 
@@ -619,6 +632,8 @@ class AppState extends ChangeNotifier {
       } catch (_) {
         // The service may already be stopped.
       }
+      _foregroundStarted = false;
+      _lastNotificationText = null;
       _disconnecting = false;
       notifyListeners();
     }
@@ -645,6 +660,8 @@ class AppState extends ChangeNotifier {
         title: 'MeshChameleon',
         text: _notificationText(),
       );
+      _foregroundStarted = true;
+      _lastNotificationText = _notificationText();
     } catch (e) {
       log('Foreground service unavailable: $e');
     }
@@ -652,10 +669,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> _updateNotification() async {
     try {
-      await _foreground.update(
-        title: 'MeshChameleon',
-        text: _notificationText(),
-      );
+      final text = _notificationText();
+      await _foreground.update(title: 'MeshChameleon', text: text);
+      _lastNotificationText = text;
     } catch (e) {
       log('Foreground service update failed: $e');
     }
@@ -688,6 +704,8 @@ class AppState extends ChangeNotifier {
       await _updateNotification();
     } catch (e) {
       log('Failed to start proxy: $e');
+      await server?.stop();
+      server = null;
     }
     notifyListeners();
   }
@@ -702,6 +720,7 @@ class AppState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _reconnectTimer?.cancel();
     unawaited(_linkStateSub?.cancel());
     unawaited(server?.stop());

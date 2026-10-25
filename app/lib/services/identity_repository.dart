@@ -144,13 +144,6 @@ class IdentityRepository {
     return null;
   }
 
-  Future<NodeState> loadStateOrDefault(
-    String id, {
-    required String fallbackName,
-  }) async {
-    return await loadState(id) ?? defaultNodeState(fallbackName);
-  }
-
   Future<void> saveState(String id, NodeState state) =>
       openNodeStore(id).save(state);
 
@@ -375,20 +368,30 @@ class IdentityRepository {
     final known = {for (final record in index.identities) record.id};
     final dir = identitiesDirectory;
     try {
-      if (!await dir.exists()) return;
-      await for (final entity in dir.list()) {
-        if (entity is! Directory) continue;
-        final name = entity.path.split(Platform.pathSeparator).last;
-        if (known.contains(name)) continue;
-        try {
-          await entity.delete(recursive: true);
-          onLog?.call('Removed orphaned identity state directory');
-        } catch (e) {
-          onLog?.call('Could not remove orphaned identity state: $e');
+      if (await dir.exists()) {
+        await for (final entity in dir.list()) {
+          if (entity is! Directory) continue;
+          final name = entity.path.split(Platform.pathSeparator).last;
+          if (known.contains(name)) continue;
+          try {
+            await entity.delete(recursive: true);
+            onLog?.call('Removed orphaned identity state directory');
+          } catch (e) {
+            onLog?.call('Could not remove orphaned identity state: $e');
+          }
         }
       }
     } on FileSystemException catch (e) {
       onLog?.call('Could not scan identity state directories: $e');
+    }
+    try {
+      for (final id in await _secureStore.storedIds()) {
+        if (known.contains(id)) continue;
+        await _secureStore.deleteById(id);
+        onLog?.call('Removed orphaned identity key slot');
+      }
+    } catch (e) {
+      onLog?.call('Could not scan identity key slots: $e');
     }
   }
 }

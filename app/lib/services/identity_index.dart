@@ -22,6 +22,8 @@ class IdentityIndexException implements Exception {
   String toString() => 'IdentityIndexException($message)';
 }
 
+final RegExp _idPattern = RegExp(r'^[0-9a-f]{32}$');
+
 /// Non-secret metadata for one virtual companion identity.
 ///
 /// The private key lives only in secure storage, keyed by [id]. [publicKey] and
@@ -63,7 +65,7 @@ class IdentityRecord {
     final keyHex = json['public_key'];
     final name = json['name'];
     final createdAt = json['created_at'];
-    if (id is! String || id.isEmpty) return null;
+    if (id is! String || !_idPattern.hasMatch(id)) return null;
     if (keyHex is! String || name is! String || createdAt is! num) return null;
     try {
       final key = hexToBytes(keyHex);
@@ -103,12 +105,11 @@ class IdentityIndex {
 
   IdentityIndex copyWith({
     String? activeId,
-    bool clearActive = false,
     List<IdentityRecord>? identities,
   }) =>
       IdentityIndex(
         version: version,
-        activeId: clearActive ? null : (activeId ?? this.activeId),
+        activeId: activeId ?? this.activeId,
         identities: identities ?? this.identities,
       );
 
@@ -170,6 +171,7 @@ class IdentityIndexStore {
 
   File get _backupFile => File('${file.path}.bak');
   File get _tempFile => File('${file.path}.tmp');
+  Future<void> _tail = Future<void>.value();
 
   Future<IdentityIndex?> load() async {
     final primary = await _read(file);
@@ -203,11 +205,29 @@ class IdentityIndexStore {
     }
   }
 
-  Future<void> save(IdentityIndex index) async {
+  Future<void> save(IdentityIndex index) {
+    // Serialise writes so two catalog mutations can never share the temp file.
+    final write = _tail.then(
+      (_) => _write(index),
+      onError: (Object _) => _write(index),
+    );
+    _tail = write.then((_) {}, onError: (Object _) {});
+    return write;
+  }
+
+  Future<void> _write(IdentityIndex index) async {
     await file.parent.create(recursive: true);
     final encoded = jsonEncode(index.toJson());
     await _tempFile.writeAsString(encoded, flush: true);
-    if (await file.exists()) {
+    // Rotate only a readable catalog into the backup slot. A corrupt primary
+    // must never overwrite the last good recovery copy.
+    var primaryReadable = false;
+    try {
+      primaryReadable = await _read(file) != null;
+    } on IdentityIndexException {
+      primaryReadable = false;
+    }
+    if (primaryReadable) {
       try {
         await file.copy(_backupFile.path);
       } catch (_) {
@@ -217,10 +237,6 @@ class IdentityIndexStore {
     }
     await _tempFile.rename(file.path);
   }
-
-  /// Create a fresh index. The caller has already verified that no catalog
-  /// exists; this helper exists so first-run creation can be retried.
-  Future<void> saveFirst(IdentityIndex index) => save(index);
 
   /// New stable 16-byte hex identity id, avoiding [taken].
   static String newId({Set<String> taken = const {}}) {

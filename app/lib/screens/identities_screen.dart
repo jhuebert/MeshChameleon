@@ -28,7 +28,13 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
   Future<void> _create() async {
     final app = context.read<AppState>();
     if (app.busy || app.identityDatabaseError != null) return;
-    final suggestion = await app.suggestIdentityName();
+    final String suggestion;
+    try {
+      suggestion = await app.suggestIdentityName();
+    } catch (_) {
+      if (mounted) _snack('Could not read the identity database');
+      return;
+    }
     if (!mounted) return;
     final name = await _askForName(suggestion);
     if (name == null || !mounted) return;
@@ -293,6 +299,15 @@ class _IdentityCard extends StatelessWidget {
   final VoidCallback onClear;
   final VoidCallback onDelete;
 
+  String get _deleteLabel {
+    if (canDelete) return 'Delete identity';
+    if (summary.active) {
+      return 'Activate another identity before deleting this one';
+    }
+    if (isLast) return 'At least one identity must remain';
+    return 'Delete identity';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -377,15 +392,7 @@ class _IdentityCard extends StatelessWidget {
                 PopupMenuItem(
                   value: 'delete',
                   enabled: canDelete,
-                  child: Text(
-                    canDelete
-                        ? 'Delete identity'
-                        : summary.active
-                            ? 'Activate another identity before deleting this one'
-                            : isLast
-                                ? 'At least one identity must remain'
-                                : 'Delete identity',
-                  ),
+                  child: Text(_deleteLabel),
                 ),
               ],
             ),

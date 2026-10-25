@@ -11,21 +11,6 @@ import 'identity_repository.dart';
 import 'identity_runtime.dart';
 import 'local_mesh_router.dart';
 
-/// Shared physical radio values applied to every live identity.
-class SharedPhysicalSnapshot {
-  const SharedPhysicalSnapshot({
-    required this.radioParams,
-    required this.tuningParams,
-    required this.capabilities,
-  });
-
-  final RadioParams radioParams;
-  final TuningParams tuningParams;
-  final PhysicalCapabilities capabilities;
-
-  int get clientRepeat => capabilities.clientRepeat;
-}
-
 /// Owns the identity catalog, all live runtimes, the shared radio hub, and the
 /// local mirror between virtual identities.
 class IdentityManager {
@@ -57,10 +42,9 @@ class IdentityManager {
   RadioParams? _radioParams;
   TuningParams? _tuning;
   List<IdentitySummary> _summaries = const [];
-  Timer? _notifyTimer;
+  Timer? _summaryTimer;
 
   bool get loaded => _loaded;
-  bool get deviceAttached => _hub != null;
   String? get databaseError => _databaseError;
   String? get activeId => _activeId;
   List<IdentitySummary> get summaries => List.unmodifiable(_summaries);
@@ -73,18 +57,6 @@ class IdentityManager {
 
   MeshNode? get activeNode => activeRuntime?.node;
   LocalIdentity? get activeIdentity => activeRuntime?.identity;
-
-  SharedPhysicalSnapshot? get physicalSnapshot {
-    final params = _radioParams;
-    final capabilities = _physical;
-    if (params == null || capabilities == null) return null;
-    return SharedPhysicalSnapshot(
-      radioParams: params,
-      tuningParams: _tuning ??
-          const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0),
-      capabilities: capabilities,
-    );
-  }
 
   IdentitySummary? get activeSummary {
     for (final summary in _summaries) {
@@ -281,7 +253,7 @@ class IdentityManager {
         ),
         onIdentityChanged: (changed) =>
             _handleIdentityChanged(runtime, changed),
-        onStateChanged: () => _handleStateChanged(runtime),
+        onStateChanged: _handleStateChanged,
         onPhysicalConfigChanged: () => _handlePhysicalConfigChanged(runtime),
         onPoweredOff: onPoweredOff,
         localRouter: _router,
@@ -299,8 +271,6 @@ class IdentityManager {
     runtime
       ..identity = identity
       ..node = node
-      ..store = store
-      ..linkView = linkView
       ..unavailableReason = null;
     await _reconcileName(runtime);
     node.start();
@@ -360,6 +330,7 @@ class IdentityManager {
     LocalIdentity identity,
   ) async {
     runtime.identity = identity;
+    await _reconcileName(runtime);
     try {
       final updated = await repository.updatePublicKey(
         runtime.record.id,
@@ -373,7 +344,7 @@ class IdentityManager {
       onLog?.call('Could not update the identity index after a key import: $e');
     }
     if (_loaded) await refreshSummaries();
-    _scheduleNotify();
+    _notifyNow();
   }
 
   Future<void> _validateImportedKey(
@@ -409,15 +380,19 @@ class IdentityManager {
     }
   }
 
-  void _handleStateChanged(IdentityRuntime runtime) {
-    if (runtime.node != null) {
-      unawaited(_reconcileName(runtime).then((_) {
-        if (_loaded) {
-          unawaited(refreshSummaries().then((_) => _scheduleNotify()));
-        }
-      }));
-    }
-    _scheduleNotify();
+  void _handleStateChanged() {
+    _summaryTimer?.cancel();
+    late final Timer timer;
+    timer = Timer(notifyDebounce, () async {
+      if (!identical(_summaryTimer, timer)) return;
+      _summaryTimer = null;
+      for (final runtime in List<IdentityRuntime>.of(_runtimes)) {
+        await _reconcileName(runtime);
+      }
+      if (_loaded) await refreshSummaries();
+      _emitChanged();
+    });
+    _summaryTimer = timer;
   }
 
   void _handlePhysicalConfigChanged(IdentityRuntime runtime) {
@@ -530,6 +505,15 @@ class IdentityManager {
     final node = runtime?.node;
     if (node != null) {
       await node.resetVirtualData(preserveName: true);
+      // RF configuration is physical/shared, not identity data. Re-apply the
+      // current snapshot after the reset's fresh virtual defaults.
+      final physical = _physical;
+      final params = _radioParams;
+      if (physical != null && params != null) {
+        node.adoptPhysicalCapabilities(physical);
+        node.syncRadioParams(params);
+        if (_tuning != null) node.syncPhysicalState(tuning: _tuning);
+      }
       await _reconcileName(runtime!);
     } else {
       await repository.clearLocalData(id);
@@ -571,29 +555,20 @@ class IdentityManager {
     return true;
   }
 
-  /// Update the active selection without touching live nodes (used on startup).
-  Future<void> selectPersistedActive() async {
-    _index = await repository.loadOrCreate();
-    _activeId = _index!.activeId;
-    await refreshSummaries();
-    _notifyNow();
-  }
-
-  void _scheduleNotify() {
-    _notifyTimer?.cancel();
-    _notifyTimer = Timer(notifyDebounce, _notifyNow);
-  }
-
   void _notifyNow() {
-    _notifyTimer?.cancel();
-    _notifyTimer = null;
+    _summaryTimer?.cancel();
+    _summaryTimer = null;
+    _emitChanged();
+  }
+
+  void _emitChanged() {
     try {
       onChanged?.call();
     } catch (_) {}
   }
 
   Future<void> dispose() async {
-    _notifyTimer?.cancel();
+    _summaryTimer?.cancel();
     await stopLive(notify: false);
   }
 }

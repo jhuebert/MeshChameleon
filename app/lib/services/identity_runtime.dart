@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:device_link/device_link.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
@@ -41,7 +40,6 @@ class IdentitySummary {
         publicKey.sublist(0, publicKey.length < 4 ? publicKey.length : 4),
       ).toUpperCase();
 
-  int get queuedTotal => queuedDirect + queuedChannel;
 }
 
 /// Live objects for one identity while a device is attached.
@@ -51,8 +49,6 @@ class IdentityRuntime {
   IdentityRecord record;
   LocalIdentity? identity;
   MeshNode? node;
-  NodeStore? store;
-  RadioLink? linkView;
   String? unavailableReason;
 
   bool get live => node != null;
@@ -61,7 +57,5 @@ class IdentityRuntime {
   void clear() {
     node = null;
     identity = null;
-    store = null;
-    linkView = null;
   }
 }

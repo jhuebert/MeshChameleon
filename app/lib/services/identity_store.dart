@@ -25,10 +25,10 @@ class IdentityStore {
   static const _prefix = 'meshcore_identity_v2/';
   final FlutterSecureStorage _storage;
 
-  static String storageKey(String id) => '$_prefix$id';
+  static String _storageKey(String id) => '$_prefix$id';
 
   Future<LocalIdentity?> loadById(String id) async {
-    final hex = await _storage.read(key: storageKey(id));
+    final hex = await _storage.read(key: _storageKey(id));
     if (hex == null || hex.isEmpty) return null;
     try {
       final bytes = hexToBytes(hex);
@@ -44,17 +44,26 @@ class IdentityStore {
 
   /// Whether a non-empty key slot exists, without validating the key material.
   Future<bool> hasById(String id) async {
-    final value = await _storage.read(key: storageKey(id));
+    final value = await _storage.read(key: _storageKey(id));
     return value != null && value.isNotEmpty;
   }
 
   Future<void> saveById(String id, LocalIdentity identity) =>
       _storage.write(
-        key: storageKey(id),
+        key: _storageKey(id),
         value: bytesToHex(identity.meshcore64),
       );
 
-  Future<void> deleteById(String id) => _storage.delete(key: storageKey(id));
+  Future<void> deleteById(String id) => _storage.delete(key: _storageKey(id));
+
+  /// Ids with a per-identity secure slot. Values are never returned.
+  Future<List<String>> storedIds() async {
+    final all = await _storage.readAll();
+    return [
+      for (final key in all.keys)
+        if (key.startsWith(_prefix)) key.substring(_prefix.length),
+    ];
+  }
 
   /// A [VirtualIdentityPersistence] scoped to one identity record.
   ///

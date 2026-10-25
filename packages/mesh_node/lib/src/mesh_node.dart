@@ -196,10 +196,6 @@ class MeshNode extends CompanionBridge {
   final Map<String, int> _sentGroupPacketHashes = {};
   static const int _seenPacketTtlSecs = 300;
   static const int _seenPacketMax = 1000;
-  String? _localRoutingDiagnostic;
-
-  /// Last in-process mirror failure (never contains key material).
-  String? get localRoutingDiagnostic => _localRoutingDiagnostic;
   int _lastRequestTag = 0;
   int _lastPacketTimestamp = 0;
 
@@ -493,6 +489,7 @@ class MeshNode extends CompanionBridge {
     stop();
     await _waitForPhysicalTxIdle();
     try {
+      await _configTail;
       await _identityTail;
       await _stateTail;
       await store?.flush();
@@ -1878,7 +1875,6 @@ class MeshNode extends CompanionBridge {
       _advertPaths[bytesToHex(prefix)];
 
   @override
-  @override
   Future<Uint8List?> exportContact(Uint8List? pubkey) async {
     if (pubkey == null) {
       // Export SELF: a freshly built advert packet blob (the `meshcore://` URI).
@@ -2007,7 +2003,6 @@ class MeshNode extends CompanionBridge {
       _physicalDiagnostic = null;
       _persist();
       await _readBackSelfInfo();
-      _notifyPhysicalConfigChanged();
     });
   }
 
@@ -2039,7 +2034,6 @@ class MeshNode extends CompanionBridge {
       _physicalDiagnostic = null;
       _persist();
       await _readBackSelfInfo();
-      _notifyPhysicalConfigChanged();
     });
   }
 
@@ -2066,6 +2060,7 @@ class MeshNode extends CompanionBridge {
       _needsReconcile = markReconcile;
       _physicalDiagnostic = e.message ?? e.toString();
     }
+    _notifyPhysicalConfigChanged();
   }
 
   /// Adopt the connected device's actual radio parameters as the node's own
@@ -2115,6 +2110,7 @@ class MeshNode extends CompanionBridge {
         _tuningCacheVerified = true;
         _physicalDiagnostic = null;
         _persist();
+        _notifyPhysicalConfigChanged();
         return params;
       } on DeviceCommandError catch (e) {
         if (_hasTuningCache) {
@@ -2473,7 +2469,11 @@ class MeshNode extends CompanionBridge {
         if (idle != null && !idle.isCompleted) idle.complete();
       }
     }
-    await _mirrorOutbound(bytes);
+    // A successful RF dispatch still mirrors, but never under a newer identity
+    // generation than the one that built the packet.
+    if (identityGeneration == null || _identityCurrent(identityGeneration)) {
+      await _mirrorOutbound(bytes);
+    }
   }
 
   Future<void> _mirrorOutbound(Uint8List bytes) async {
@@ -2484,10 +2484,9 @@ class MeshNode extends CompanionBridge {
         bytes,
         fromPublicKey: identity.publicKey,
       );
-      _localRoutingDiagnostic = null;
-    } catch (e) {
+    } catch (_) {
       // A mirror failure must never turn a successful RF send into a failure.
-      _localRoutingDiagnostic = 'local mirror failed: $e';
+      // The router isolates and reports per-peer failures.
     }
   }
 
@@ -3697,6 +3696,7 @@ class MeshNode extends CompanionBridge {
   }
 
   void _notifyStateChanged() {
+    if (_retired) return;
     try {
       onStateChanged?.call();
     } catch (_) {
@@ -3705,6 +3705,7 @@ class MeshNode extends CompanionBridge {
   }
 
   void _notifyPhysicalConfigChanged() {
+    if (_retired) return;
     try {
       onPhysicalConfigChanged?.call();
     } catch (_) {

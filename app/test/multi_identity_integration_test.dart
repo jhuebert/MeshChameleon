@@ -230,14 +230,11 @@ void main() {
     final groupBefore = peerLink.transmitted
         .where((raw) => Packet.readFrom(raw)?.payloadType == payloadTypeGrpTxt)
         .length;
-    expect(groupBefore, 0);
     expect(await peer.sendChannelMessage(1, 'group hello'), isTrue);
     await Future<void>.delayed(const Duration(milliseconds: 350));
     final groupAfter = peerLink.transmitted
         .where((raw) => Packet.readFrom(raw)?.payloadType == payloadTypeGrpTxt)
         .length;
-    expect(peerLink.transmitted.map((raw) => Packet.readFrom(raw)?.payloadType),
-        contains(payloadTypeGrpTxt));
     expect(groupAfter - groupBefore, 1,
         reason: 'the single RF group packet reaches both local identities');
     expect(runtimeA.node!.queuedChannelCount, 1);

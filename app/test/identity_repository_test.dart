@@ -73,6 +73,21 @@ void main() {
     );
   });
 
+  test('index_rejects_non_hex_identity_ids', () async {
+    final key = (await LocalIdentity.generate()).publicKey;
+    for (final id in ['../escape', '', 'A' * 32, 'a' * 31]) {
+      expect(
+        IdentityRecord.fromJson({
+          'id': id,
+          'public_key': bytesToHex(key),
+          'name': 'Bad',
+          'created_at': 1,
+        }),
+        isNull,
+      );
+    }
+  });
+
   test('corrupt_primary_recovers_from_last_good_backup', () async {
     final first = IdentityIndex();
     final file = File('${dir.path}/identities/index.json');
@@ -301,9 +316,13 @@ void main() {
     await orphan.create(recursive: true);
     await File('${orphan.path}/node_state.json').writeAsString('{}');
 
+    final orphanIdentity = await LocalIdentity.generate();
+    await IdentityStore().saveById('f' * 32, orphanIdentity);
+
     await repo.cleanupOrphans();
 
     expect(await orphan.exists(), isFalse);
+    expect(await IdentityStore().loadById('f' * 32), isNull);
   });
 
   test('first_run_key_write_failure_does_not_create_a_catalog', () async {
@@ -331,8 +350,8 @@ void main() {
         .list()
         .where((e) => e.path.contains('node_state.json.corrupt-'));
     expect(await quarantined.length, 1);
-    final fresh = await repo.loadStateOrDefault(record.id,
-        fallbackName: record.name);
+    final fresh = await repo.loadState(record.id) ??
+        defaultNodeState(record.name);
     expect(fresh.prefs.nodeName, record.name);
   });
 }

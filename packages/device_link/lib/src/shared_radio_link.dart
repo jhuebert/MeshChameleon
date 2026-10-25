@@ -72,8 +72,6 @@ class SharedRadioHub {
     base.setRawRxListener(null);
   }
 
-  bool get isAttached => _attached;
-
   void _subscribe(_SharedRadioLinkView view) {
     if (!_subscribed.contains(view)) _subscribed.add(view);
   }

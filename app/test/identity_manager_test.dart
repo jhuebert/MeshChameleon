@@ -409,7 +409,11 @@ void main() {
 
     expect(manager.activeNode!.prefs.nodeName, 'Keep Me');
     expect(manager.activeNode!.contacts, isEmpty);
-    expect(manager.activeSummary!.queuedTotal, 0);
+    expect(manager.activeNode!.radioParams.frequencyHz,
+        link.initialRadioParams.frequencyHz,
+        reason: 'shared RF values are re-applied after clear');
+    expect(manager.activeSummary!.queuedDirect, 0);
+    expect(manager.activeSummary!.queuedChannel, 0);
     expect(await repository.loadKey(id), isNotNull);
   });
 
