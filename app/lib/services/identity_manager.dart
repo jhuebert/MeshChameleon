@@ -33,12 +33,14 @@ class IdentityManager {
     required this.repository,
     this.onChanged,
     this.onLog,
+    this.onPoweredOff,
     this.notifyDebounce = const Duration(milliseconds: 250),
   });
 
   final IdentityRepository repository;
   final void Function()? onChanged;
   final void Function(String message)? onLog;
+  final Future<void> Function()? onPoweredOff;
   final Duration notifyDebounce;
 
   IdentityIndex? _index;
@@ -281,6 +283,7 @@ class IdentityManager {
             _handleIdentityChanged(runtime, changed),
         onStateChanged: () => _handleStateChanged(runtime),
         onPhysicalConfigChanged: () => _handlePhysicalConfigChanged(runtime),
+        onPoweredOff: onPoweredOff,
         localRouter: _router,
       );
       await node.load();

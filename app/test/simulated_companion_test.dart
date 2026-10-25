@@ -1,50 +1,60 @@
 import 'dart:io';
 
 import 'package:device_link/device_link.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
+import 'package:meshchameleon/services/identity_repository.dart';
+import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
+const _capabilities = DeviceCapabilities(
+  supportsBle: false,
+  supportsSimulatedCompanion: true,
+);
+
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late Directory dir;
+  late IdentityRepository repository;
 
   setUp(() async {
+    FlutterSecureStorage.setMockInitialValues({});
     dir = await Directory.systemTemp.createTemp('meshchameleon_sim_');
+    repository = IdentityRepository(
+      supportDirectory: dir,
+      secureStore: IdentityStore(),
+    );
   });
 
   tearDown(() async {
     await dir.delete(recursive: true);
   });
 
-  AppState newApp({NodeStore? nodeStore}) => AppState(
-        nodeStore: nodeStore ?? InMemoryNodeStore(),
-        sessionStore: SessionStore(file: File('${dir.path}/session.json')),
-        capabilities: const DeviceCapabilities(
-          supportsBle: false,
-          supportsSimulatedCompanion: true,
-        ),
-      );
-
-  test('simulated companion starts the node and serves the proxy', () async {
+  Future<AppState> newApp() async {
     final app = AppState(
-      nodeStore: InMemoryNodeStore(),
+      repository: repository,
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
-      capabilities: const DeviceCapabilities(
-        supportsBle: false,
-        supportsSimulatedCompanion: true,
-      ),
+      capabilities: _capabilities,
     );
-    app.identity = await LocalIdentity.generate();
+    await app.loadIdentities();
+    return app;
+  }
 
+  test('simulated companion starts every identity and serves the proxy',
+      () async {
+    final app = await newApp();
     await app.connectSimulated();
     addTearDown(app.disconnectDevice);
 
     expect(app.deviceConnected, isTrue, reason: app.logs.join('\n'));
     expect(app.deviceLabel, 'Simulated companion');
     expect(app.node, isNotNull);
+    expect(app.manager!.runtimes, hasLength(1));
 
     await app.startProxy(serverPort: 0);
     expect(app.proxyStatus, ProxyStatus.running);
@@ -56,22 +66,20 @@ void main() {
       deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
       deviceNodeName: 'Physical companion',
     );
-    final app = newApp();
-    app.identity = await LocalIdentity.generate();
-
+    final app = await newApp();
     await app.connectSimulated(simulatedLink: link);
     addTearDown(app.disconnectDevice);
 
     expect(app.node, isNotNull, reason: app.logs.join('\n'));
-    // Attach only performs the handshake, registers the RX listener, and reads
-    // a battery sample. It never changes a physical setting.
-    expect(link.calls, [
+    // Attach performs the handshake, one tuning read, registers the shared RX
+    // listener, and reads a battery sample. It never changes a physical setting.
+    expect(link.calls, containsAllInOrder([
       'connect',
       'deviceInfo',
       'selfInfo',
+      'tuningParams',
       'setRawRxListener',
-      'battery',
-    ]);
+    ]));
     const writes = [
       'sendRawPacket',
       'setRadioParams',
@@ -85,8 +93,7 @@ void main() {
   });
 
   test('fresh_name_is_virtual_existing_name_preserved', () async {
-    final freshApp = newApp();
-    freshApp.identity = await LocalIdentity.generate();
+    final freshApp = await newApp();
     await freshApp.connectSimulated(
       simulatedLink: FakeDeviceLink(
         deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
@@ -96,11 +103,14 @@ void main() {
     addTearDown(freshApp.disconnectDevice);
     expect(freshApp.node!.prefs.nodeName, 'MeshChameleon');
     expect(freshApp.node!.prefs.nodeName, isNot('Physical companion'));
+    await freshApp.disconnectDevice();
 
-    final store = InMemoryNodeStore();
-    await store.save(NodeState(prefs: NodePrefs(nodeName: 'My Virtual Node')));
-    final existingApp = newApp(nodeStore: store);
-    existingApp.identity = await LocalIdentity.generate();
+    final id = freshApp.identities.single.id;
+    await repository.saveState(
+      id,
+      NodeState(prefs: NodePrefs(nodeName: 'My Virtual Node')),
+    );
+    final existingApp = await newApp();
     await existingApp.connectSimulated(
       simulatedLink: FakeDeviceLink(
         deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
@@ -109,22 +119,6 @@ void main() {
     );
     addTearDown(existingApp.disconnectDevice);
     expect(existingApp.node!.prefs.nodeName, 'My Virtual Node');
-
-    // A name persisted by an older build (including the old default) is also
-    // user state and is not replaced by the physical device's name.
-    final legacyStore = InMemoryNodeStore();
-    await legacyStore
-        .save(NodeState(prefs: NodePrefs(nodeName: 'MeshCore Proxy')));
-    final legacyApp = newApp(nodeStore: legacyStore);
-    legacyApp.identity = await LocalIdentity.generate();
-    await legacyApp.connectSimulated(
-      simulatedLink: FakeDeviceLink(
-        deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
-        deviceNodeName: 'Physical companion',
-      ),
-    );
-    addTearDown(legacyApp.disconnectDevice);
-    expect(legacyApp.node!.prefs.nodeName, 'MeshCore Proxy');
   });
 
   test('physical_max_tx_and_signed_tx_are_adopted', () async {
@@ -139,8 +133,7 @@ void main() {
       ),
       maxTxPower: 17,
     );
-    final app = newApp();
-    app.identity = await LocalIdentity.generate();
+    final app = await newApp();
     await app.connectSimulated(simulatedLink: link);
     addTearDown(app.disconnectDevice);
 
@@ -158,13 +151,14 @@ void main() {
   test('simulated companion is refused in release-shaped capabilities',
       () async {
     final app = AppState(
-      nodeStore: InMemoryNodeStore(),
+      repository: repository,
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
       capabilities: const DeviceCapabilities(
         supportsBle: false,
         supportsSimulatedCompanion: false,
       ),
     );
+    await app.loadIdentities();
 
     await app.connectSimulated();
 

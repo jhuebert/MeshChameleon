@@ -2,11 +2,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mesh_node/mesh_node.dart';
-import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/screens/connect_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
+import 'package:meshchameleon/services/identity_repository.dart';
+import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
@@ -64,12 +65,17 @@ void main() {
 
     await tester.runAsync(() async {
       dir = await Directory.systemTemp.createTemp('meshchameleon_ui_');
+      FlutterSecureStorage.setMockInitialValues({});
+      final repository = IdentityRepository(
+        supportDirectory: dir,
+        secureStore: IdentityStore(),
+      );
       app = AppState(
-        nodeStore: InMemoryNodeStore(),
+        repository: repository,
         sessionStore: SessionStore(file: File('${dir.path}/session.json')),
         capabilities: capabilities,
       );
-      app.identity = await LocalIdentity.generate();
+      await app.loadIdentities();
     });
     addTearDown(() async {
       await app.disconnectDevice();

@@ -12,26 +12,30 @@ import 'package:path_provider/path_provider.dart';
 import 'services/ble_device_link.dart';
 import 'services/device_capabilities.dart';
 import 'services/foreground_service.dart';
+import 'services/identity_index.dart';
+import 'services/identity_manager.dart';
+import 'services/identity_repository.dart';
+import 'services/identity_runtime.dart';
 import 'services/identity_store.dart';
 import 'services/session_store.dart';
 
 enum ProxyStatus { stopped, running }
 
-/// Owns the identity, the device link, the mesh node, and the companion server,
-/// and exposes them to the UI.
+/// Owns the device session, identity manager, proxy server, and navigation
+/// state, and exposes them to the UI.
 class AppState extends ChangeNotifier {
   AppState({
-    IdentityStore? store,
+    IdentityRepository? repository,
+    IdentityStore? identityStore,
     SessionStore? sessionStore,
-    NodeStore? nodeStore,
     DeviceCapabilities? capabilities,
     this.reconnectDelay = const Duration(seconds: 3),
-  })  : store = store ?? IdentityStore(),
+  })  : _repository = repository,
+        identityStore = identityStore ?? IdentityStore(),
         sessionStore = sessionStore ?? SessionStore(),
-        _nodeStoreInstance = nodeStore,
         capabilities = capabilities ?? DeviceCapabilities.current();
 
-  final IdentityStore store;
+  final IdentityStore identityStore;
   final SessionStore sessionStore;
 
   /// What this build can do; gates the BLE UI and session restore.
@@ -43,9 +47,25 @@ class AppState extends ChangeNotifier {
   /// Foreground service that keeps the process alive while backgrounded.
   final ForegroundService _foreground = ForegroundService();
 
-  LocalIdentity? identity;
+  IdentityRepository? _repository;
+  IdentityManager? _manager;
+
+  IdentityManager? get manager => _manager;
+
+  Future<IdentityRepository> _ensureRepository() async {
+    final existing = _repository;
+    if (existing != null) return existing;
+    final dir = await getApplicationSupportDirectory();
+    final created = IdentityRepository(
+      supportDirectory: dir,
+      secureStore: identityStore,
+      onLog: log,
+    );
+    _repository = created;
+    return created;
+  }
+
   RadioLink? link;
-  MeshNode? node;
   CompanionServer? server;
 
   int port = defaultCompanionPort;
@@ -76,18 +96,23 @@ class AppState extends ChangeNotifier {
 
   final List<String> logs = [];
 
-  NodeStore? _nodeStoreInstance;
+  // -------------------------------------------------------------------------
+  // Identity-facing state
+  // -------------------------------------------------------------------------
 
-  /// Lazily create the on-disk node-state store (contacts, channels, queue,
-  /// prefs) under the app's support directory.
-  Future<NodeStore> _nodeStore() async {
-    final existing = _nodeStoreInstance;
-    if (existing != null) return existing;
-    final dir = await getApplicationSupportDirectory();
-    final store = JsonNodeStore(file: File('${dir.path}/node_state.json'));
-    _nodeStoreInstance = store;
-    return store;
-  }
+  List<IdentitySummary> get identities => _manager?.summaries ?? const [];
+  IdentitySummary? get activeIdentity => _manager?.activeSummary;
+  String? get identityDatabaseError => _manager?.databaseError;
+  bool get identitiesLoaded => _manager?.loaded ?? false;
+  bool get identitiesLive => _manager?.deviceAttached ?? false;
+
+  /// The active virtual identity exposed to the companion client.
+  LocalIdentity? get identity => _manager?.activeIdentity;
+
+  /// The active identity's live node (null without a device or when unavailable).
+  MeshNode? get node => _manager?.activeNode;
+
+  String? get activeIdentityId => _manager?.activeId;
 
   void log(String message) {
     logs.add('${DateTime.now().toIso8601String()}  $message');
@@ -95,12 +120,30 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  // -------------------------------------------------------------------------
-  // Identity
-  // -------------------------------------------------------------------------
+  void _onManagerChanged() {
+    notifyListeners();
+  }
 
-  Future<void> loadIdentity() async {
-    identity = await store.load();
+  Future<IdentityManager> _ensureManager() async {
+    final existing = _manager;
+    if (existing != null) return existing;
+    final created = IdentityManager(
+      repository: await _ensureRepository(),
+      onChanged: _onManagerChanged,
+      onLog: log,
+      onPoweredOff: _onNodePoweredOff,
+    );
+    _manager = created;
+    return created;
+  }
+
+  /// Load the identity catalog and the last session.
+  ///
+  /// A fresh install auto-creates and activates one identity. A corrupt
+  /// catalog is surfaced through [identityDatabaseError] rather than replaced.
+  Future<void> loadIdentities() async {
+    final manager = await _ensureManager();
+    await manager.load();
     final session = await sessionStore.load();
     lastSession = session;
     if (session != null) {
@@ -112,157 +155,103 @@ class AppState extends ChangeNotifier {
     await _maybeResumeSession();
   }
 
-  Future<void> generateIdentity() async {
-    final runningNode = node;
-    if (runningNode != null) {
-      await runningNode.replaceIdentity(await LocalIdentity.generate());
-      log('Generated identity ${_pubkeyPrefix()}');
-      notifyListeners();
-      return;
-    }
-    identity = await store.generate();
-    log('Generated identity ${_pubkeyPrefix()}');
-    final connectedLink = link;
-    if (connectedLink != null) {
-      await _initializeNode(connectedLink);
-    }
+  /// Create an additional identity. It is inactive; the active selection does
+  /// not change.
+  Future<IdentityRecord?> createIdentity({String? name}) async {
+    if (busy) return null;
+    if (identityDatabaseError != null) return null;
+    busy = true;
     notifyListeners();
-  }
-
-  Future<void> importIdentity(Uint8List key) async {
-    final runningNode = node;
-    if (runningNode != null) {
-      await runningNode.replaceIdentity(await LocalIdentity.import(key));
-      log('Imported identity ${_pubkeyPrefix()}');
-      notifyListeners();
-      return;
-    }
-    identity = await store.import(key);
-    log('Imported identity ${_pubkeyPrefix()}');
-    final connectedLink = link;
-    if (connectedLink != null) {
-      await _initializeNode(connectedLink);
-    }
-    notifyListeners();
-  }
-
-  Future<Uint8List?> exportIdentity() async {
-    final runningNode = node;
-    if (runningNode != null) return runningNode.exportPrivateKey();
-    return store.exportKey();
-  }
-
-  /// Staged app-only virtual data reset. This never disconnects the radio,
-  /// reboots it, or changes device-target/proxy settings.
-  ///
-  /// The durable state reset happens first. When [rotateIdentity] is requested,
-  /// a validated new key is persisted only after that succeeds; a key failure
-  /// returns a partial result with the old identity still active.
-  Future<VirtualResetResult> resetVirtualData({
-    bool rotateIdentity = false,
-  }) async {
-    final runningNode = node;
-    if (runningNode != null) {
-      final result = await runningNode.resetVirtualData(
-        rotateIdentity: rotateIdentity,
-      );
-      if (result.dataReset) server?.clearSigningBuffer();
-      notifyListeners();
-      return result;
-    }
-
-    LocalIdentity? candidate;
-    if (rotateIdentity) {
-      candidate = await LocalIdentity.generate();
-      if (!await LocalIdentity.validateMeshcore64(candidate.meshcore64)) {
-        throw const CompanionOperationError(
-          errCodeIllegalArg,
-          message: 'generated identity failed validation',
-        );
-      }
-    }
-
-    final nodeStore = await _nodeStore();
-    await nodeStore.flush();
     try {
-      await nodeStore.save(freshVirtualState());
+      final manager = await _ensureManager();
+      final record = await manager.create(name: name);
+      log('Created identity ${record.name}');
+      await _updateNotification();
+      return record;
     } catch (e) {
-      throw CompanionOperationError(
-        errCodeFileIoError,
-        message: 'virtual reset persistence failed: $e',
-      );
+      log('Could not create identity: $e');
+      return null;
+    } finally {
+      busy = false;
+      notifyListeners();
     }
-
-    if (candidate != null) {
-      try {
-        await store.save(candidate);
-        identity = candidate;
-      } catch (e) {
-        LocalIdentity? readBack;
-        try {
-          readBack = await store.load();
-        } catch (_) {
-          readBack = null;
-        }
-        if (readBack != null &&
-            readBack.meshcore64.length == 64 &&
-            bytesToHex(readBack.meshcore64) ==
-                bytesToHex(candidate.meshcore64)) {
-          identity = readBack;
-        } else {
-          notifyListeners();
-          return VirtualResetResult(
-            dataReset: true,
-            identityRotated: false,
-            keyError: CompanionOperationError(
-              errCodeFileIoError,
-              message: 'new identity persistence failed: $e',
-            ),
-          );
-        }
-      }
-    }
-    notifyListeners();
-    return VirtualResetResult(
-      dataReset: true,
-      identityRotated: candidate != null,
-    );
   }
 
-  void _onNodeIdentityChanged(LocalIdentity changed) {
-    identity = changed;
-    log('Active identity changed to ${_pubkeyPrefix()}');
+  /// Make [id] the identity served to the MeshCore app.
+  Future<bool> activateIdentity(String id) async {
+    if (busy) return false;
+    final manager = _manager;
+    if (manager == null) return false;
+    if (manager.activeId == id) return true;
+    busy = true;
     notifyListeners();
-  }
-
-  Future<void> _onNodePoweredOff() async {
-    _intentionalOff = true;
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    deviceConnected = false;
-    log('Device powered off; automatic reconnect suppressed');
-    final current = lastSession;
-    if (current != null) {
-      final updated = current.copyWith(intentionallyOff: true);
-      lastSession = updated;
-      try {
-        await sessionStore.save(updated);
-      } catch (e) {
-        log('Could not persist intentional shutdown: $e');
-      }
-    }
     try {
-      await _foreground.stop();
-    } catch (_) {
-      // The service may already be gone after the device powered off.
+      final runningServer =
+          server != null && proxyStatus == ProxyStatus.running ? server : null;
+      final ok = await manager.activate(
+        id,
+        switchBridge: runningServer?.switchBridge,
+      );
+      if (ok) {
+        final name = manager.activeSummary?.name ?? id;
+        log('Activated identity $name');
+        await _updateNotification();
+      }
+      return ok;
+    } catch (e) {
+      log('Identity activation failed: $e');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
     }
-    notifyListeners();
   }
 
-  String _pubkeyPrefix() {
-    final key = identity?.publicKey;
-    if (key == null) return '(none)';
-    return bytesToHex(key.sublist(0, 4));
+  /// Delete an inactive identity. The manager and repository enforce the
+  /// active/last-identity rules.
+  Future<bool> deleteIdentity(String id) async {
+    if (busy) return false;
+    final manager = _manager;
+    if (manager == null) return false;
+    busy = true;
+    notifyListeners();
+    try {
+      await manager.delete(id);
+      log('Deleted one identity');
+      await _updateNotification();
+      return true;
+    } catch (e) {
+      log('Could not delete identity: $e');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Clear contacts, channels, messages, advert paths, and non-name prefs for
+  /// one identity while keeping its key and current name.
+  Future<bool> clearLocalData(String id) async {
+    if (busy) return false;
+    final manager = _manager;
+    if (manager == null) return false;
+    busy = true;
+    notifyListeners();
+    try {
+      final wasActive = manager.activeId == id;
+      await manager.clearLocalData(id);
+      if (wasActive && (server?.hasClient ?? false)) {
+        await server!.disconnectClient(reason: 'local data cleared');
+      }
+      log('Cleared local data for one identity');
+      return true;
+    } catch (e) {
+      log('Could not clear local identity data: $e');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -311,10 +300,9 @@ class AppState extends ChangeNotifier {
 
   /// Attach the in-memory simulated companion (development builds only).
   ///
-  /// Exercises the mesh node, the companion server, and the UI without any
-  /// radio: [FakeDeviceLink] answers device queries and radio-parameter
-  /// requests, and its transmissions never leave the process. Tests may pass
-  /// their own [simulatedLink] to observe the attach sequence.
+  /// Exercises every live identity, the companion server, and the UI without
+  /// any radio: [FakeDeviceLink] answers device queries and radio-parameter
+  /// requests, and its transmissions never leave the process.
   Future<void> connectSimulated({RadioLink? simulatedLink}) async {
     if (!capabilities.supportsSimulatedCompanion) {
       log('The simulated companion is only available in development builds');
@@ -340,6 +328,11 @@ class AppState extends ChangeNotifier {
     try {
       await disconnectDevice();
       if (_connectCancelled) return false;
+      final manager = await _ensureManager();
+      if (!manager.loaded) {
+        log(identityDatabaseError ?? 'Identity database unavailable');
+        return false;
+      }
       log('Connecting to $label ...');
       await connectWithBackoff(
         link,
@@ -359,17 +352,20 @@ class AppState extends ChangeNotifier {
       );
       log('Device: fw ${deviceInfo.firmwareVerCode}, '
           '${deviceInfo.manufacturer} ${deviceInfo.version}');
-      if (identity != null) {
-        await _initializeNode(
-          link,
-          physical: physical,
-          params: selfInfo.radioParams,
-        );
+      await manager.startLive(
+        base: link,
+        physical: physical,
+        radioParams: selfInfo.radioParams,
+        devicePublicKey: selfInfo.publicKey,
+      );
+      if (manager.activeNode == null) {
+        log('Active identity is unavailable; other identities remain live');
       } else {
-        log('Device link ready; import its identity or create one');
-        _watchLink(link);
-        await _startForegroundService();
+        log('Device link ready; all identities live');
       }
+      _watchLink(link);
+      await _startForegroundService();
+      await _updateNotification();
       return true;
     } catch (e) {
       if (!_connectCancelled) log('Device connection failed: $e');
@@ -396,42 +392,6 @@ class AppState extends ChangeNotifier {
     } catch (e) {
       log('Connection cancellation failed: $e');
     }
-  }
-
-  Future<void> _initializeNode(
-    RadioLink link, {
-    PhysicalCapabilities? physical,
-    RadioParams? params,
-  }) async {
-    final currentIdentity = identity;
-    if (currentIdentity == null) return;
-    if (physical == null || params == null) {
-      final selfInfo = await link.selfInfo();
-      physical ??= PhysicalCapabilities.fromDeviceInfo(
-        await link.deviceInfo(),
-        maxTxPower: selfInfo.maxTxPower,
-      );
-      params ??= selfInfo.radioParams;
-    }
-    final node = MeshNode(
-      identity: currentIdentity,
-      link: link,
-      physical: physical,
-      store: await _nodeStore(),
-      identityPersistence: store,
-      onIdentityChanged: _onNodeIdentityChanged,
-      onPoweredOff: _onNodePoweredOff,
-    );
-    await node.load();
-    // The device is the source of truth for RF parameters at connect time.
-    // Name, location, path-hash mode and other preferences stay virtual.
-    node.adoptPhysicalCapabilities(physical);
-    node.syncRadioParams(params);
-    node.start();
-    this.node = node;
-    log('Device link ready; mesh node started');
-    _watchLink(link);
-    await _startForegroundService();
   }
 
   Future<bool> setProxyPort(int value) async {
@@ -474,7 +434,11 @@ class AppState extends ChangeNotifier {
   /// user enabled [autoResume]. Best-effort: failures are logged, not fatal.
   Future<void> _maybeResumeSession() async {
     final session = lastSession;
-    if (session == null || !autoResume || identity == null || deviceConnected) {
+    if (session == null ||
+        !autoResume ||
+        identities.isEmpty ||
+        identityDatabaseError != null ||
+        deviceConnected) {
       return;
     }
     if (session.intentionallyOff) {
@@ -566,13 +530,13 @@ class AppState extends ChangeNotifier {
     });
   }
 
-  /// Reconnect the device link and re-arm the mesh node without disturbing the
-  /// app-facing proxy server or its client. Retries again on failure.
+  /// Reconnect the device link and re-apply the shared physical snapshot
+  /// without disturbing the live runtimes, the proxy server, or its client.
   Future<void> _reconnect() async {
     final curLink = link;
-    final curNode = node;
+    final manager = _manager;
     if (curLink == null ||
-        curNode == null ||
+        manager == null ||
         _disconnecting ||
         _intentionalOff) {
       return;
@@ -582,18 +546,51 @@ class AppState extends ChangeNotifier {
       await connectWithBackoff(curLink, onLog: log);
       final deviceInfo = await curLink.deviceInfo();
       final selfInfo = await curLink.selfInfo();
-      curNode.adoptPhysicalCapabilities(PhysicalCapabilities.fromDeviceInfo(
+      final physical = PhysicalCapabilities.fromDeviceInfo(
         deviceInfo,
         maxTxPower: selfInfo.maxTxPower,
-      ));
-      curNode.syncRadioParams(selfInfo.radioParams);
-      curNode.start();
+      );
+      await manager.reapplyPhysical(
+        physical: physical,
+        radioParams: selfInfo.radioParams,
+      );
       log('Device link reconnected');
       notifyListeners();
     } catch (e) {
       log('Reconnect failed: $e');
       _scheduleReconnect();
     }
+  }
+
+  Future<void> _onNodePoweredOff() async {
+    _intentionalOff = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    final manager = _manager;
+    await manager?.stopLive();
+    deviceConnected = false;
+    log('Device powered off; automatic reconnect suppressed');
+    final current = lastSession;
+    if (current != null) {
+      final updated = current.copyWith(intentionallyOff: true);
+      lastSession = updated;
+      try {
+        await sessionStore.save(updated);
+      } catch (e) {
+        log('Could not persist intentional shutdown: $e');
+      }
+    }
+    try {
+      await server?.stop();
+      server = null;
+      proxyStatus = ProxyStatus.stopped;
+    } catch (_) {}
+    try {
+      await _foreground.stop();
+    } catch (_) {
+      // The service may already be gone after the device powered off.
+    }
+    notifyListeners();
   }
 
   Future<void> disconnectDevice() async {
@@ -605,8 +602,7 @@ class AppState extends ChangeNotifier {
     _reconnectTimer = null;
     await _linkStateSub?.cancel();
     _linkStateSub = null;
-    node?.stop();
-    node = null;
+    await _manager?.stopLive();
     try {
       await link?.disconnect();
     } finally {
@@ -623,13 +619,19 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Persistent-notification text reflecting the current link/server state.
+  /// Persistent-notification text reflecting the live identity count and state.
   String _notificationText() {
+    final count = identities.length;
+    final active = activeIdentity?.name;
+    final identityPart = count == 0
+        ? 'no identity'
+        : '$count ${count == 1 ? 'identity' : 'identities'}'
+            '${active == null ? '' : ' · $active'}';
     final linkPart = deviceConnected ? 'device linked' : 'no device';
     final serverPart = proxyStatus == ProxyStatus.running
         ? 'serving :$port'
         : 'server stopped';
-    return '$linkPart · $serverPart';
+    return '$identityPart · $linkPart · $serverPart';
   }
 
   Future<void> _startForegroundService() async {
@@ -659,14 +661,17 @@ class AppState extends ChangeNotifier {
   // -------------------------------------------------------------------------
 
   Future<void> startProxy({int? serverPort}) async {
-    if (node == null) {
-      log(identity == null
-          ? 'Generate or import an identity first'
-          : 'Connect a device first');
+    final active = node;
+    if (active == null) {
+      log(identities.isEmpty
+          ? 'No identity available'
+          : deviceConnected
+              ? 'The active identity is unavailable'
+              : 'Connect a device first');
       return;
     }
     server ??= CompanionServer(
-      bridge: node!,
+      bridge: active,
       config: CompanionServerConfig(port: serverPort ?? port),
       onLog: log,
     );
@@ -695,7 +700,7 @@ class AppState extends ChangeNotifier {
     _reconnectTimer?.cancel();
     unawaited(_linkStateSub?.cancel());
     unawaited(server?.stop());
-    node?.stop();
+    unawaited(_manager?.dispose());
     unawaited(link?.disconnect());
     super.dispose();
   }
