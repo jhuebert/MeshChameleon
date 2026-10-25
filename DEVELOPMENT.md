@@ -233,29 +233,16 @@ byte is passed through to the device transport.
 derived prefix and symmetric non-zero ECDH with the upstream test keypair, then
 persists before switching. Neither sends key material to or reads it from the
 physical companion. This is a deliberate local protocol operation with no extra
-app confirmation, so treat the TCP/BLE endpoint as trusted. The Identity screen
-also offers an explicit **Import from connected device** action, which *does*
-read the physical device's exported key and adopts it as the virtual identity.
+app confirmation, so treat the TCP/BLE endpoint as trusted.
 
 ## Identity forms and signing
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form
 (`[scalar(32)][prefix(32)]`) is the expanded Ed25519 key: it is what the app
-persists and what the device returns from `CMD_EXPORT_PRIVATE_KEY`. **Both forms
-can sign** — `LocalIdentity` signs seed identities via `cryptography` and
-64-byte identities directly from the expanded key
-(`CryptoUtils.ed25519SignFromExpanded`, RFC 8032), so no seed recovery is needed.
-
-## Import from the device
-
-On the Identity screen, **Import from connected device** sends
-`CMD_EXPORT_PRIVATE_KEY` (firmware command 23) over the live device link and
-adopts the returned 64-byte key as the proxy identity. It requires a connected
-device and firmware that permits export (enabled by default in the firmware's
-`arduino_base` build flags; hardened builds reply `RESP_CODE_DISABLED`). On
-success it uses the same validated virtual replacement/persistence path as a
-manual import, keeps the device link and connected clients up, and never logs the
-key. The device's own identity is not exposed in SELF_INFO.
+persists and what the local companion endpoint exports. **Both forms can sign**
+— `LocalIdentity` signs seed identities via `cryptography` and 64-byte identities
+directly from the expanded key (`CryptoUtils.ed25519SignFromExpanded`, RFC 8032),
+so no seed recovery is needed.
 
 ## Local endpoint and credential exposure
 

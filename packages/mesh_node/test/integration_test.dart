@@ -650,9 +650,9 @@ void main() {
           ]))[0],
           respCodeOk);
       expect(
-        aliceLink.calls
-            .where((c) => c == 'exportPrivateKey' || c == 'importPrivateKey'),
+        aliceLink.calls,
         isEmpty,
+        reason: 'virtual key commands must not touch the radio',
       );
       final replacedInfo = await command([cmdDeviceQuery, appProtocolVersion]);
       expect(replacedInfo[1], targetFirmwareVerCode);
@@ -707,8 +707,7 @@ void main() {
             c == 'setPathHashMode' ||
             c == 'reboot' ||
             c == 'shutdown' ||
-            c == 'runCliCommand' ||
-            c == 'exportPrivateKey'),
+            c == 'runCliCommand'),
         isEmpty,
         reason: 'V/X commands must not mutate physical radio state',
       );

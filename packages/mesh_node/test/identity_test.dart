@@ -74,17 +74,14 @@ class _LeakyScheduler implements MeshScheduler {
 }
 
 void main() {
-  test('export_returns_virtual64_not_different_physical64', () async {
+  test('export_returns_virtual64_without_radio_calls', () async {
     final active = await _seed(1);
-    final physical = await _seed(99);
-    final link = FakeDeviceLink(devicePrivateKey: physical.meshcore64);
+    final link = FakeDeviceLink();
     final node = MeshNode(identity: active, link: link);
 
     final exported = await node.exportPrivateKey();
     expect(exported, active.meshcore64);
-    expect(exported, isNot(physical.meshcore64));
-    expect(link.exportPrivateKeyRequests, 0);
-    expect(link.calls, isNot(contains('exportPrivateKey')));
+    expect(link.calls, isEmpty);
   });
 
   test('network_import_rejects_short32_prefix00_ff_and_ecdh_invalid_keys',
@@ -119,7 +116,6 @@ void main() {
       expect(node.identityGeneration, 0);
     }
     expect(link.calls.where((c) => c.startsWith('sendRaw')), isEmpty);
-    expect(link.calls, isNot(contains('exportPrivateKey')));
   });
 
   test('storage_failure_keeps_old_active_key_and_returns_err5', () async {
@@ -405,9 +401,7 @@ void main() {
   test('all client key commands make zero radio calls', () async {
     final old = await _seed(10);
     final candidate = await _seed(11);
-    final link = FakeDeviceLink(
-      devicePrivateKey: (await _seed(12)).meshcore64,
-    );
+    final link = FakeDeviceLink();
     final persistence = _FakeIdentityPersistence(old);
     final node = MeshNode(
       identity: old,
@@ -418,6 +412,5 @@ void main() {
     await node.exportPrivateKey();
     await node.importPrivateKey(candidate.meshcore64);
     expect(link.calls, before);
-    expect(link.exportPrivateKeyRequests, 0);
   });
 }

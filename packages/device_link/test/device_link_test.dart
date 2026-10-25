@@ -113,31 +113,6 @@ void main() {
     expect(link.currentState, LinkState.disconnected);
   });
 
-  test('parsePrivateKeyReply returns the key or null when disabled', () {
-    final key = Uint8List.fromList(List.generate(64, (i) => i));
-    final reply = Uint8List.fromList([respCodePrivateKey, ...key]);
-    expect(parsePrivateKeyReply(reply), key);
-    expect(
-        parsePrivateKeyReply(Uint8List.fromList([respCodeDisabled])), isNull);
-    expect(
-      () =>
-          parsePrivateKeyReply(Uint8List.fromList([respCodePrivateKey, 1, 2])),
-      throwsA(isA<StateError>()),
-    );
-  });
-
-  test('FakeDeviceLink exposes a configurable private key', () async {
-    final key = Uint8List.fromList(List.generate(64, (i) => (i * 3) % 256));
-    final link = FakeDeviceLink(devicePrivateKey: key);
-    await link.connect();
-    expect(await link.exportPrivateKey(), key);
-    expect(link.exportPrivateKeyRequests, 1);
-
-    final disabled = FakeDeviceLink(exportPrivateKeyDisabled: true);
-    await disabled.connect();
-    expect(await disabled.exportPrivateKey(), isNull);
-  });
-
   test('FakeDeviceLink exposes allowed repeat frequencies', () async {
     final ranges = Uint8List.fromList([1, 0, 0, 0, 2, 0, 0, 0]);
     final link = FakeDeviceLink(allowedRepeatFreq: ranges);
@@ -330,44 +305,6 @@ void main() {
     expect(frames.single[0], cmdSendRawPacket);
     expect(frames.single[1], 1);
     expect(frames.single.sublist(2), packet);
-
-    await link.disconnect();
-    await server.close();
-  });
-
-  test('TcpDeviceLink requests and parses the exported private key', () async {
-    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final key = Uint8List.fromList(List.generate(64, (i) => (i * 7 + 1) % 256));
-    final requested = Completer<Uint8List>();
-    server.listen((socket) {
-      final buffer = <int>[];
-      socket.listen((data) {
-        buffer.addAll(data);
-        while (buffer.length >= 3) {
-          final length = buffer[1] | (buffer[2] << 8);
-          if (buffer.length < 3 + length) break;
-          final frame = Uint8List.fromList(buffer.sublist(3, 3 + length));
-          buffer.removeRange(0, 3 + length);
-          if (!requested.isCompleted) requested.complete(frame);
-          final reply = Uint8List.fromList([respCodePrivateKey, ...key]);
-          socket.add(Uint8List.fromList([
-            frameOutboundPrefix,
-            reply.length & 0xFF,
-            reply.length >> 8,
-            ...reply,
-          ]));
-        }
-      });
-    });
-
-    final link = TcpDeviceLink(
-      host: '127.0.0.1',
-      port: server.port,
-      requestTimeout: const Duration(seconds: 2),
-    );
-    await link.connect();
-    expect(await link.exportPrivateKey(), key);
-    expect((await requested.future)[0], cmdExportPrivateKey);
 
     await link.disconnect();
     await server.close();

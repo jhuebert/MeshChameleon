@@ -101,6 +101,7 @@ class HomeScreen extends StatelessWidget {
                   .push(MaterialPageRoute(builder: (_) => const IdentityScreen())),
             ),
           ),
+          _ProxyPortCard(port: app.port),
           Card(
             child: SwitchListTile(
               title: const Text('Proxy server'),
@@ -132,7 +133,6 @@ class HomeScreen extends StatelessWidget {
                   app.busy ? null : (value) => app.setAutoResume(value),
             ),
           ),
-          _ProxyPortCard(port: app.port),
           const _BatteryOptimizationCard(),
           if (app.busy) const LinearProgressIndicator(),
         ],

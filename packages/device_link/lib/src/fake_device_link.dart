@@ -76,8 +76,6 @@ class FakeDeviceLink implements RadioLink {
     this.deviceNodeName = 'Fake companion',
     this.maxTxPower = 22,
     this.connectFailures = 0,
-    this.devicePrivateKey,
-    this.exportPrivateKeyDisabled = false,
     this.rebootDisconnects = false,
     this.shutdownDisconnects = true,
     Uint8List? allowedRepeatFreq,
@@ -91,12 +89,6 @@ class FakeDeviceLink implements RadioLink {
   final double snr;
   final int rssi;
   final FakeRadioBus? bus;
-
-  /// The 64-byte expanded key this simulated device exports, if any.
-  final Uint8List? devicePrivateKey;
-
-  /// When true, `CMD_EXPORT_PRIVATE_KEY` answers `RESP_CODE_DISABLED`.
-  final bool exportPrivateKeyDisabled;
 
   /// Model the device dropping the link while rebooting.
   final bool rebootDisconnects;
@@ -325,21 +317,11 @@ class FakeDeviceLink implements RadioLink {
   }
 
   @override
-  Future<Uint8List?> exportPrivateKey() async {
-    calls.add('exportPrivateKey');
-    exportPrivateKeyRequests++;
-    if (exportPrivateKeyDisabled) return null;
-    return devicePrivateKey;
-  }
-
-  @override
   Future<Uint8List> getAllowedRepeatFreq() async {
     calls.add('getAllowedRepeatFreq');
     return allowedRepeatFreq;
   }
 
-  /// Number of `CMD_EXPORT_PRIVATE_KEY` requests received (for tests).
-  int exportPrivateKeyRequests = 0;
   int rebootRequests = 0;
   int shutdownRequests = 0;
 

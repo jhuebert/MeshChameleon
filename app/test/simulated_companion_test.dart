@@ -80,7 +80,6 @@ void main() {
       'setTuningParams',
       'setPathHashMode',
       'runCliCommand',
-      'exportPrivateKey',
     ];
     expect(link.calls.where(writes.contains), isEmpty);
   });

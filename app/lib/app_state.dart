@@ -146,32 +146,6 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Import the connected device's identity (one-time bootstrap).
-  ///
-  /// Sends `CMD_EXPORT_PRIVATE_KEY` over the live device link. Returns false
-  /// (logging a reason) when no device is connected or the firmware disables
-  /// export. The key is never logged. On success it follows the same shared
-  /// virtual replacement path as manual import, keeping the device link up.
-  Future<bool> importIdentityFromDevice() async {
-    final link = this.link;
-    if (link == null || !deviceConnected) {
-      log('Connect a device first');
-      return false;
-    }
-    try {
-      final key = await link.exportPrivateKey();
-      if (key == null) {
-        log('Device firmware disables private-key export');
-        return false;
-      }
-      await importIdentity(key);
-      return true;
-    } catch (e) {
-      log('Import from device failed: $e');
-      return false;
-    }
-  }
-
   Future<Uint8List?> exportIdentity() async {
     final runningNode = node;
     if (runningNode != null) return runningNode.exportPrivateKey();

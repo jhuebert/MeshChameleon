@@ -344,15 +344,6 @@ class BleDeviceLink implements RadioLink {
   }
 
   @override
-  Future<Uint8List?> exportPrivateKey() async {
-    final frame = await _request(
-      DeviceFrames.exportPrivateKey(),
-      {respCodePrivateKey, respCodeDisabled, respCodeErr},
-    );
-    return parsePrivateKeyReply(frame);
-  }
-
-  @override
   Future<Uint8List> getAllowedRepeatFreq() async {
     final frame = await _request(
       DeviceFrames.getAllowedRepeatFreq(),

@@ -94,9 +94,9 @@ package checks, then the full script before finishing.
 - The device identity is not the proxy identity. Do not expose it in `SELF_INFO`
   or use its high-level contact/message stack.
 - Never log private or expanded identity key material. The private identity is
-  stored through `flutter_secure_storage`; app UI reveal and import-from-device
-  are explicit user actions, while the local companion protocol also exposes
-  explicit export/import commands (the endpoint is trusted-network/plaintext).
+  stored through `flutter_secure_storage`; app UI reveal is an explicit user
+  action, while the local companion protocol also exposes explicit export/import
+  commands (the endpoint is trusted-network/plaintext).
 - Firmware raw TX and path preservation, direct-route delivery, and Android
   background behavior remain empirical risks: keep their tests/spike outcomes
   documented and avoid presenting assumptions as verified facts.

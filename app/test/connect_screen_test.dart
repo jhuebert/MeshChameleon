@@ -23,7 +23,8 @@ void main() {
       supportsSimulatedCompanion: true,
     )));
 
-    expect(find.text('BLE companion (NUS)'), findsNothing);
+    expect(find.text('Bluetooth companion'), findsNothing);
+    expect(find.text('Network companion'), findsOneWidget);
     expect(find.text('Scan for MeshCore devices'), findsNothing);
     expect(find.text('Connect over TCP'), findsOneWidget);
     expect(find.text('Connect simulated companion'), findsOneWidget);
@@ -35,7 +36,7 @@ void main() {
       supportsSimulatedCompanion: true,
     )));
 
-    expect(find.text('BLE companion (NUS)'), findsOneWidget);
+    expect(find.text('Bluetooth companion'), findsOneWidget);
     expect(find.text('Scan for MeshCore devices'), findsOneWidget);
   });
 

@@ -10,7 +10,7 @@ personal project and has not been independently audited.
 |---|---|---|
 | MeshCore identity private key (64-byte expanded key: 32-byte scalar + 32-byte nonce) | **Secret.** Whoever holds it can sign adverts/messages as this node and decrypt direct traffic. | Android Keystore-backed secure storage in the app; headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can also export it over the local companion endpoint. |
 | Contacts, channels, message queue, adverts, prefs | Private-ish. Reveals who/how you communicate. | `node_state.json` in the app support dir (not encrypted at rest). |
-| The device's own identity | Not ours by default. It is read only by the explicit **Import from connected device** action, then used as the virtual identity. It is never reported in SELF_INFO. | Stays on the companion device except during explicit import. |
+| The device's own identity | Not ours. The proxy never reads or adopts it. | Stays on the companion device; it is never reported in SELF_INFO. |
 
 ## Identity storage review
 
@@ -58,12 +58,9 @@ pre-1.0 change; release installs start clean.
 - **Rooted/compromised device or a malicious local app with the same UID** can
   read anything the app can.
 - **No key material is sent off-device.** There is no analytics, telemetry
-  upload, or cloud component. (Import-from-device does move the *device's* key
-  from the companion to the phone over the local BLE/TCP link; that link is the
-  OS transport, not an end-to-end-encrypted channel we control.) The local
-  app-facing companion endpoint can export/import the *virtual* key; it has no
-  additional authentication beyond the TCP/BLE transport, so do not expose it
-  beyond trusted networks.
+  upload, or cloud component. The local app-facing companion endpoint can
+  export/import the *virtual* key; it has no additional authentication beyond the
+  TCP/BLE transport, so do not expose it beyond trusted networks.
 - **Headless identity file is plaintext.** `--identity-file` stores the expanded
   key as hex in a mode-0600 file, replaced atomically through a private empty
   temp file. Without that flag the identity is memory-only and network imports
@@ -105,10 +102,3 @@ unconsumed routes remain in the raw RX log but are not executed locally.
   can sign now: the 64-byte form is the expanded Ed25519 key, which is all that
   RFC 8032 signing needs (`CryptoUtils.ed25519SignFromExpanded`). See
   `DEVELOPMENT.md`.
-- **Import from the device (implemented)** — the Identity screen's **Import from
-  connected device** sends `CMD_EXPORT_PRIVATE_KEY` (command 23) over the live
-  device link and adopts the device's 64-byte key. The firmware enables export
-  by default (its `arduino_base` build flags); hardened firmware replies
-  `RESP_CODE_DISABLED`, which the app reports and ignores. The exported key is
-  handled in memory only, never logged, and replaces the proxy identity through
-  the shared running-node controller, so connected clients stay attached.

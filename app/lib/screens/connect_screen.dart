@@ -104,7 +104,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
                   ),
                 ),
               ),
-            const Text('WiFi / Ethernet companion', style: TextStyle(fontWeight: FontWeight.bold)),
+            const Text('Network companion',
+                style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             TextField(
               controller: _hostController,
@@ -122,7 +123,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
             ),
             if (_capabilities.supportsBle) ...[
               const Divider(height: 40),
-              const Text('BLE companion (NUS)',
+              const Text('Bluetooth companion',
                   style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               if (!_scanning)
