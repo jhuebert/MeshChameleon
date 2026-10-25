@@ -18,6 +18,69 @@ DART=~/dev/flutter/bin/dart FLUTTER=~/dev/flutter/bin/flutter ./scripts/check.sh
 The same simulator is also reachable without writing a test: from the Linux
 desktop app's **Simulated companion** entry, or from the headless CLI below.
 
+If `meshcli` is installed, the optional external-client smoke test is:
+
+```sh
+cd packages/mesh_node
+dart run tool/proxy_cli.dart --simulated --proxy-port 5099
+# in another shell
+meshcli -t 127.0.0.1 -p 5099 infos ver clock
+```
+
+The 1.18 signoff used `meshcore-cli v1.6.6` against this simulated proxy. It
+reported firmware code 14 / `v1.18.0` and the virtual board. This is a client
+handshake check, not radio or hardware validation.
+
+## Compatibility target and intentional differences
+
+The virtual companion advertises MeshCore 1.18 (`DEVICE_INFO` fw code 14,
+version `v1.18.0`) with the virtual board string, 350-contact/40-channel
+capacities, 4 MiB virtual storage, and the virtual identity/capabilities. The
+following differences from a bare physical companion are intentional and are
+not bugs:
+
+- No automatic physical state writes: virtual preferences, contacts, channels,
+  paths, queues, malformed inputs and storage errors never silently reconfigure
+  the radio.
+- Physical setters await device confirmation. `SET_RADIO_PARAMS` saves firmware
+  prefs; saved values are not the live channel until the device reboots. Read
+  back SELF_INFO and treat `saved-only` state separately from active RF.
+- The virtual clock is host-derived. SET_DEVICE_TIME and timezone changes never
+  touch the phone/radio RTC.
+- Only a minimal telemetry surface is synthesized: fresh physical voltage plus
+  virtual GPS when permitted. No physical GPS, MCU temperature, environment
+  sensors, or sensor-node subscription server is fabricated.
+- PIN and factory reset remain disabled; there is no remote or binary reset
+  alias. The only reset is the explicit app-only virtual reset.
+- Remote physical administration is denied. A remote CLI peer can run virtual
+  commands only when its contact has flag `0x10`.
+- Decoders reject truncated/oversized/unsafe values rather than reproducing
+  `atoi`/`atof` acceptance. Persistence failures return honest errors.
+
+Other deliberate limits: no dependency upgrades, no multi-virtual-companion
+support, no iOS/USB transport work, no virtual repeater routing/forwarding, no
+mandatory authentication redesign, and no sensor-node implementation.
+
+## Co-client and raw-modem limitations
+
+The proxy requires the physical companion to behave as an exclusive raw-radio
+modem. A second app/BLE/TCP client talking to the same stock companion can
+receive or consume replies concurrently, and the firmware broadcasts CLI replies
+to every enabled interface. The proxy cannot serialize an external client. Do not
+run another configuration client against the same radio during a session.
+
+Direct-route semantic delivery requires a consumed zero-hop route; flooded or
+still-in-transit packets are raw-logged but not executed locally. This is not a
+repeater: no packet forwarding is implemented.
+
+## Virtual storage and quota
+
+Contacts (350), channels (40), queued messages, advert blobs/path cache and
+sensor preferences share a deterministic 4 MiB virtual partition enforced before
+publish. Quota failures are reported as storage/table-full errors; the app does
+not delete broad directories or physical radio state to recover. See
+`SECURITY.md` for at-rest storage.
+
 ## Linux desktop and headless proxy
 
 Two hardware-free targets share the pure-Dart core:
@@ -157,16 +220,22 @@ is used verbatim without adding an ACK.
 
 `CMD_SEND_RAW_PACKET (65)` takes `[priority][packet bytes]`, parses the packet
 and transmits it verbatim — the route type and path are whatever the packet's
-header encodes, so no scope or route rewriting is applied. The priority byte is
-accepted for protocol compatibility but the transport does not use it.
+header encodes, so no scope or route rewriting is applied. The supplied priority
+byte is passed through to the device transport.
 
-## Disabled sensitive commands
+## Disabled and key commands
 
-`SET_DEVICE_PIN (37)`, `FACTORY_RESET (51)`, and client-facing
-`EXPORT/IMPORT_PRIVATE_KEY (23/24)` each receive the one-byte
-`RESP_CODE_DISABLED (15)` response. They do not alter device settings or proxy
-state and do not expose or replace the proxy identity. The app's separate
-user-initiated **import from connected device** flow remains available.
+`SET_DEVICE_PIN (37)` and `FACTORY_RESET (51)` receive the one-byte
+`RESP_CODE_DISABLED (15)` response and never alter the device or app state.
+
+`EXPORT_PRIVATE_KEY (23)` and `IMPORT_PRIVATE_KEY (24)` operate only on the
+**virtual** identity. Export returns the active 64-byte key; import validates the
+derived prefix and symmetric non-zero ECDH with the upstream test keypair, then
+persists before switching. Neither sends key material to or reads it from the
+physical companion. This is a deliberate local protocol operation with no extra
+app confirmation, so treat the TCP/BLE endpoint as trusted. The Identity screen
+also offers an explicit **Import from connected device** action, which *does*
+read the physical device's exported key and adopts it as the virtual identity.
 
 ## Identity forms and signing
 
@@ -184,8 +253,29 @@ On the Identity screen, **Import from connected device** sends
 adopts the returned 64-byte key as the proxy identity. It requires a connected
 device and firmware that permits export (enabled by default in the firmware's
 `arduino_base` build flags; hardened builds reply `RESP_CODE_DISABLED`). On
-success the link is dropped so the mesh node is rebuilt under the imported
-identity on the next connect. The key is never logged.
+success it uses the same validated virtual replacement/persistence path as a
+manual import, keeps the device link and connected clients up, and never logs the
+key. The device's own identity is not exposed in SELF_INFO.
+
+## Local endpoint and credential exposure
+
+The app-facing companion endpoint has **no authentication or transport
+encryption** beyond the local TCP/BLE link. Anything that can reach it can read
+the virtual identity, import a replacement, add/remove contacts, send mesh
+traffic, run virtual CLI commands, and—on physical firmware v14+—run the
+allowlisted physical CLI subset. That subset includes WiFi SSID/password reads
+and radio preference changes. WiFi passwords are forwarded as CLI text and are
+never logged, cached, or truncated by the proxy, but they are still exposed to a
+trusted-network client and to the radio firmware. Do not expose the listener on
+an untrusted network.
+
+## Hardware validation
+
+Simulator/byte-level conformance does not prove hardware behavior. BLE/TCP
+transports, RF immediate-vs-reboot application, WiFi reconfiguration, client
+repeat, independent physical DMs, remote CLI, sensor telemetry, and Android
+background/Doze survival remain a separate **PENDING** hardware matrix. No live
+adverts/TX or firmware flashing is part of the default test gate.
 
 ## Identity storage
 

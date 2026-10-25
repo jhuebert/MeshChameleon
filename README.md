@@ -31,19 +31,33 @@ logic). See `ATTRIBUTION.md`.
 
 ## Status
 
-Milestones **M0–M4 are complete**: background execution (foreground service,
-main-isolate sockets + BLE, battery-optimization exemption prompt,
-resume-on-launch), app skeleton and device link, companion-server MVP,
-messaging/contacts/channels, and robustness/passthrough (telemetry, trace, radio
-tuning passthrough, stats, reconnect/backoff). **M5 (polish + release) is in
+Milestones **M0–M4 are complete** and the **MeshCore 1.18 virtual-companion
+handoff (T01–T16) is implemented**: strict 176-byte framing, virtual
+identity/capabilities/state, contacts/channels/adverts, persistence and quota,
+battery/storage, key import/export, allowlisted CLI, lifecycle, app-only reset,
+remote CLI, telemetry and raw endpoints. **M5 (polish + release) remains in
 progress.**
 
 The pure-Dart core is fully unit-testable without hardware via the included
-device simulator. BLE device links and on-air messaging have been validated
-against real hardware; telemetry/trace/tuning and the M4 additions have not yet
-been validated on hardware. See `PROGRESS.md` for details.
+device simulator. The conformance suite drives a real TCP session against the
+proxy and a peer node on a simulated radio bus. The 1.18 additions are
+simulator/byte-level validated; the hardware matrix (BLE/TCP, RF, WiFi, repeat,
+background survival, remote CLI, sensor telemetry) remains **pending** and is
+not inferred from a green test suite. See `PROGRESS.md` and `DEVELOPMENT.md`.
 
 Identity storage and the threat model are described in `SECURITY.md`.
+
+## Compatibility notes
+
+The advertised virtual `DEVICE_INFO` baseline is firmware code **14** /
+**`v1.18.0`**, with the virtual board, 350-contact/40-channel capacities, a
+4 MiB virtual storage partition, and the physical radio's repeat byte and real
+max TX/RF values. Intentional differences from bare firmware are documented in
+`DEVELOPMENT.md`: no automatic physical state writes, saved-vs-active radio
+settings, a host-derived virtual clock, a minimal virtual sensor subset, blocked
+PIN/factory reset, remote physical administration denial, and honest persistence
+errors. The app-facing TCP endpoint is **plaintext and unauthenticated**; keep it
+on trusted networks.
 
 ## Repository layout
 

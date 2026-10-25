@@ -149,7 +149,8 @@ void main() {
     expect(app.node!.physical.maxTxPower, 17);
     expect(app.node!.prefs.maxTxPower, 17);
     expect(app.node!.prefs.txPowerDbm, -3);
-    expect(app.node!.getDeviceInfo().firmwareVerCode, defaultFirmwareVerCode);
+    expect(app.node!.getDeviceInfo().firmwareVerCode, targetFirmwareVerCode);
+    expect(app.node!.getDeviceInfo().version, targetCompatibilityVersion);
     expect(app.node!.getDeviceInfo().maxContacts, virtualMaxContacts);
     expect(app.node!.getDeviceInfo().maxChannels, virtualMaxChannels);
     expect(app.node!.getDeviceInfo().clientRepeat, 1);

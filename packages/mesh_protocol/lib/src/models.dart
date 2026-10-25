@@ -264,13 +264,13 @@ class PhysicalCapabilities {
 /// Build the virtual companion's advertised capabilities.
 ///
 /// [clientRepeat] is the physical modem's repeat byte (S2); [pathHashMode] is
-/// virtual state. [targetBaseline] selects the T16 MeshCore 1.18 baseline for
-/// golden tests; the active advertised baseline stays at
-/// [defaultFirmwareVerCode]/[activeDeviceVersion] until then.
+/// virtual state. The default is the activated MeshCore 1.18 baseline
+/// ([targetFirmwareVerCode]/[targetCompatibilityVersion]); set
+/// [targetBaseline] to false only for historical/golden comparisons.
 DeviceInfo buildVirtualDeviceInfo({
   int clientRepeat = 0,
   int pathHashMode = 0,
-  bool targetBaseline = false,
+  bool targetBaseline = true,
 }) =>
     DeviceInfo(
       firmwareVerCode:

@@ -270,11 +270,13 @@ const int maxChannelDataLength =
 /// Channel-data type 0 is reserved/invalid (`DATA_TYPE_RESERVED`).
 const int dataTypeReserved = 0x0000;
 
-/// Firmware version code currently advertised in `RESP_CODE_DEVICE_INFO`.
-/// T16 activates [targetFirmwareVerCode] instead.
+/// Generic/default firmware code for test and physical-device models. The
+/// virtual companion advertises [targetFirmwareVerCode] through
+/// [buildVirtualDeviceInfo].
 const int defaultFirmwareVerCode = 11;
 
-/// MeshCore 1.18 compatibility firmware code (activated in T16).
+/// MeshCore 1.18 compatibility firmware code advertised by the virtual
+/// companion.
 const int targetFirmwareVerCode = 14;
 
 /// Virtual product version. Must match the app `pubspec.yaml` version.
@@ -283,7 +285,8 @@ const String productVersion = '0.1.0';
 /// Virtual board/manufacturer string for the 40-byte DEVICE_INFO slot.
 const String virtualBoardName = 'MeshChameleon Virtual Companion';
 
-/// DEVICE_INFO version currently advertised. T16 switches to the target string.
+/// Historical pre-1.18 DEVICE_INFO version string retained for comparison
+/// tests. The virtual companion advertises [targetCompatibilityVersion].
 const String activeDeviceVersion = 'meshchameleon $productVersion';
 
 /// MeshCore 1.18 compatibility version for the 20-byte DEVICE_INFO slot.

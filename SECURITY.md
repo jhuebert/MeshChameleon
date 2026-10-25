@@ -10,7 +10,7 @@ personal project and has not been independently audited.
 |---|---|---|
 | MeshCore identity private key (64-byte expanded key: 32-byte scalar + 32-byte nonce) | **Secret.** Whoever holds it can sign adverts/messages as this node and decrypt direct traffic. | Android Keystore-backed secure storage in the app; headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can also export it over the local companion endpoint. |
 | Contacts, channels, message queue, adverts, prefs | Private-ish. Reveals who/how you communicate. | `node_state.json` in the app support dir (not encrypted at rest). |
-| The device's own identity | Not ours to hold; never read or exposed. | Stays on the companion device. |
+| The device's own identity | Not ours by default. It is read only by the explicit **Import from connected device** action, then used as the virtual identity. It is never reported in SELF_INFO. | Stays on the companion device except during explicit import. |
 
 ## Identity storage review
 
@@ -74,6 +74,28 @@ pre-1.0 change; release installs start clean.
   reads and radio preference changes). Keep the endpoint on trusted networks.
   WiFi passwords are forwarded as CLI text but are never logged or cached by the
   proxy.
+- **The companion endpoint is plaintext and unauthenticated.** The TCP listener
+  has no TLS, password, or pairing layer, and BLE NUS is likewise local-only
+  transport security. A client that can reach it can export/import the virtual
+  identity, mutate virtual state, run virtual CLI, and use the allowlisted
+  physical CLI subset. Bind/expose it only on trusted networks.
+- **Co-client ambiguity is not fixable in the proxy.** A second app talking
+  directly to the physical companion can race replies on the shared radio link;
+  the proxy cannot serialize external clients. Use one configuration client at a
+  time.
+- **Virtual storage is quota-limited, not confidential.** The 4 MiB partition
+  bounds durable virtual state and returns explicit storage errors; it does not
+  encrypt `node_state.json`.
+
+## Remote CLI and telemetry exposure
+
+Remote CLI requires an authenticated/decrypted type-3 message from a persistent
+virtual contact with flag `0x10`. Physical administration (radio, WiFi, reboot,
+poweroff) is always denied remotely. Packet-hash dedup prevents duplicate
+execution but is not a comprehensive anti-replay authorization scheme. Incoming
+telemetry permissions use the owner's mode plus contact class flags and the
+requester's inverse mask; a base grant is required. Raw/control packets from
+unconsumed routes remain in the raw RX log but are not executed locally.
 
 ## Identity entry points
 

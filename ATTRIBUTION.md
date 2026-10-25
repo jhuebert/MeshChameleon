@@ -12,6 +12,9 @@ Original copyright notices are retained below.
 - Command/response/push code constants and frame layouts adapted from
   `lib/connector/meshcore_protocol.dart`.
 - MeshCore 64-byte key handling adapted from `lib/utils/keys.dart`.
+- Companion contact flags, message/push layouts, and response semantics adapted
+  from `lib/connector/meshcore_protocol.dart` and
+  `lib/connector/meshcore_connector.dart`.
 
 ## openhop_core
 
@@ -24,7 +27,15 @@ Original copyright notices are retained below.
 
 <https://github.com/meshcore-dev/MeshCore> — MIT
 
-- Protocol ground truth for the companion radio command set
-  (`examples/companion_radio/MyMesh.cpp`, `docs/companion_protocol.md`).
+- Protocol ground truth for the companion radio command set and packet routing
+  (`examples/companion_radio/MyMesh.cpp`, `src/helpers/BaseChatMesh.cpp`,
+  `src/helpers/ContactInfo.h`, `src/Mesh.cpp`, `docs/payloads.md`,
+  `docs/companion_protocol.md`).
 - 64-byte private-key validation algorithm and its known test keypair
   (`src/Identity.cpp:67-109`).
+- Remote CLI type-3 dispatch, endpoint ACK/CLI/telemetry return-path behavior,
+  contact permission bits, and discovery/raw-custom push layouts adapted from
+  `BaseChatMesh.cpp`/`MyMesh.cpp`.
+- CayenneLPP telemetry encoding and sensor subscribe/unsubscribe request shapes
+  adapted from `src/helpers/SensorManager.h` and
+  `examples/simple_sensor/SensorMesh.cpp`.

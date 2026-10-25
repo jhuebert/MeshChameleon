@@ -593,7 +593,7 @@ class CompanionServer implements CompanionPushSink {
       ..writeUInt32Le(prefs.bandwidthHz)
       ..writeByte(prefs.spreadingFactor)
       ..writeByte(prefs.codingRate)
-      ..writeCString(prefs.nodeName, utf8.encode(prefs.nodeName).length + 1);
+      ..writeString(prefs.nodeName);
     _sendFrame(w.toBytes());
   }
 

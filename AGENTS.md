@@ -44,15 +44,14 @@ belongs in `app/`.
 
 ## Current state and next milestone
 
-M1 app skeleton/device link and the M2 companion-server core are implemented.
-The pure-Dart simulator supports a hardware-free full-stack integration test.
-See `PROGRESS.md` for detail and known limitations.
-
-The next planned work is the M0 Android background-execution spike: test a
-listening `ServerSocket` and persistent BLE link under a foreground service,
-including background/Doze behavior, then record the choice between a main-isolate
-engine and a foreground-task-isolate engine. Continue with M3 persistence and
-remaining companion handlers after that feasibility work.
+The MeshCore 1.18 virtual-companion handoff (T01–T16) is implemented: strict
+176-byte framing, virtual routing/capabilities/state, persistence and quota,
+battery/storage, validated identity import/export, allowlisted CLI, lifecycle,
+app-only reset, permission-controlled remote CLI, telemetry, and raw/control
+endpoints. The pure-Dart simulator drives a hardware-free full-stack TCP test;
+the external hardware matrix remains pending. The Android background-execution
+shape is still the main-isolate foreground-service design, and background/Doze
+survival has not been hardware-validated.
 
 Do not claim hardware validation unless it was run against real hardware. BLE
 and background execution are currently not hardware-validated.
@@ -95,7 +94,9 @@ package checks, then the full script before finishing.
 - The device identity is not the proxy identity. Do not expose it in `SELF_INFO`
   or use its high-level contact/message stack.
 - Never log private or expanded identity key material. The private identity is
-  stored through `flutter_secure_storage`; exports must be explicit user actions.
+  stored through `flutter_secure_storage`; app UI reveal and import-from-device
+  are explicit user actions, while the local companion protocol also exposes
+  explicit export/import commands (the endpoint is trusted-network/plaintext).
 - Firmware raw TX and path preservation, direct-route delivery, and Android
   background behavior remain empirical risks: keep their tests/spike outcomes
   documented and avoid presenting assumptions as verified facts.

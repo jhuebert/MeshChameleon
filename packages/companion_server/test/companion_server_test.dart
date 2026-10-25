@@ -731,6 +731,13 @@ void main() {
     expect((await client.frames.next())[0], respCodeEndOfContacts);
   });
 
+  test('unlisted command IDs return ERR unsupported', () async {
+    for (final id in [44, 45, 46, 47, 48, 49, 53]) {
+      client.send([id]);
+      expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    }
+  });
+
   test('raw RX frames are forwarded as PUSH_CODE_LOG_RX_DATA', () async {
     final raw = Uint8List.fromList([1, 2, 3, 4]);
     server.pushRawRxData(6.0, -70, raw);
@@ -1583,7 +1590,7 @@ void main() {
 
     client.send([cmdAppStart, appProtocolVersion]);
     final self = await client.frames.next();
-    expect(self.sublist(58), [...utf8Bytes('café'), 0]);
+    expect(self.sublist(58), utf8Bytes('café'));
 
     client.send((BufferWriter()
           ..writeByte(cmdSetAdvertLatLon)

@@ -79,10 +79,10 @@ void main() {
   });
 
   group('virtual DEVICE_INFO', () {
-    test('active baseline stays below the T16 target', () {
+    test('advertised baseline is the T16 MeshCore 1.18 target', () {
       final active = buildVirtualDeviceInfo(clientRepeat: 1, pathHashMode: 2);
-      expect(active.firmwareVerCode, defaultFirmwareVerCode);
-      expect(active.version, activeDeviceVersion);
+      expect(active.firmwareVerCode, targetFirmwareVerCode);
+      expect(active.version, targetCompatibilityVersion);
       expect(active.manufacturer, virtualBoardName);
       expect(active.maxContacts, 350);
       expect(active.maxChannels, 40);
@@ -90,11 +90,11 @@ void main() {
       expect(active.clientRepeat, 1);
       expect(active.pathHashMode, 2);
 
-      final target = buildVirtualDeviceInfo(targetBaseline: true);
-      expect(target.firmwareVerCode, targetFirmwareVerCode);
-      expect(target.version, targetCompatibilityVersion);
-      expect(utf8.encode(target.manufacturer).length, lessThanOrEqualTo(40));
-      expect(utf8.encode(target.version).length, lessThanOrEqualTo(20));
+      final historical = buildVirtualDeviceInfo(targetBaseline: false);
+      expect(historical.firmwareVerCode, defaultFirmwareVerCode);
+      expect(historical.version, activeDeviceVersion);
+      expect(utf8.encode(active.manufacturer).length, lessThanOrEqualTo(40));
+      expect(utf8.encode(active.version).length, lessThanOrEqualTo(20));
     });
   });
 

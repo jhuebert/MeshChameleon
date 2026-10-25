@@ -1538,7 +1538,8 @@ void main() {
     await node.setPathHashMode(1);
 
     final before = node.getDeviceInfo();
-    expect(before.firmwareVerCode, defaultFirmwareVerCode);
+    expect(before.firmwareVerCode, targetFirmwareVerCode);
+    expect(before.version, targetCompatibilityVersion);
     expect(before.manufacturer, virtualBoardName);
     expect(before.maxContacts, virtualMaxContacts);
     expect(before.maxChannels, virtualMaxChannels);
@@ -1632,12 +1633,9 @@ void main() {
     expect(link.calls, isNot(contains('runCliCommand')));
 
     // ...but virtual protocol information is independent of that firmware.
-    expect(node.getDeviceInfo().firmwareVerCode, defaultFirmwareVerCode);
+    expect(node.getDeviceInfo().firmwareVerCode, targetFirmwareVerCode);
+    expect(node.getDeviceInfo().version, targetCompatibilityVersion);
     expect(node.getDeviceInfo().manufacturer, virtualBoardName);
-    expect(
-      buildVirtualDeviceInfo(targetBaseline: true).firmwareVerCode,
-      targetFirmwareVerCode,
-    );
     // The virtual CLI lands in T11 and must be gated by virtual state, not
     // physical fw13.
   });
