@@ -8,14 +8,15 @@ personal project and has not been independently audited.
 
 | Asset | Sensitivity | Where it lives |
 |---|---|---|
-| MeshCore identity private key (64-byte expanded key: 32-byte scalar + 32-byte nonce) | **Secret.** Whoever holds it can sign adverts/messages as this node and decrypt direct traffic. | Android Keystore-backed secure storage in the app; headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can also export it over the local companion endpoint. |
-| Contacts, channels, message queue, adverts, prefs | Private-ish. Reveals who/how you communicate. | `node_state.json` in the app support dir (not encrypted at rest). |
-| The device's own identity | Not ours. The proxy never reads or adopts it. | Stays on the companion device; it is never reported in SELF_INFO. |
+| MeshCore identity private keys (64-byte expanded key: 32-byte scalar + 32-byte nonce, one per virtual identity) | **Secret.** Whoever holds one can sign adverts/messages and decrypt direct traffic as that identity. | Per-identity Android Keystore-backed secure storage (`meshcore_identity_v2/<id>`); headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can export/import only the active identity over the local companion endpoint. |
+| Contacts, channels, message queue, adverts, prefs | Private-ish. Reveals who/how you communicate. | `<app-support>/identities/<id>/node_state.json` (not encrypted at rest). |
+| The device's own identity | Not ours. The proxy never reads or adopts it. | Stays on the companion device; it is never reported in SELF_INFO or exposed in the UI. |
 
 ## Identity storage review
 
-`IdentityStore` (`app/lib/services/identity_store.dart`) stores the 64-byte
-MeshCore key as hex in `flutter_secure_storage` with:
+`IdentityStore` (`app/lib/services/identity_store.dart`) stores each 64-byte
+MeshCore key as hex in a `meshcore_identity_v2/<identity-id>` slot in
+`flutter_secure_storage` with:
 
 ```dart
 AndroidOptions(encryptedSharedPreferences: true)
@@ -28,33 +29,33 @@ AndroidOptions(encryptedSharedPreferences: true)
   RSA/ECB/PKCS1Padding. Both are Keystore-backed, but GCM + AES-256 is the
   modern, non-malleable construction.
 - `EncryptedSharedPreferences` requires API 23+; the app's `minSdk` is 24.
-- The key is **never** logged. Log lines only ever contain a 4-byte public-key
-  prefix (`_pubkeyPrefix()` in `app/lib/app_state.dart`).
-- `exportKey()` returns the raw 64-byte key in response to the Identity screen's
-  explicit "Reveal 64-byte key" action, or to an app-facing client's
-  `CMD_EXPORT_PRIVATE_KEY` over the local companion endpoint (the protocol's
-  approved local key operation; no app confirmation).
+- Keys are **never** logged. Diagnostics identify identities by stable record id
+  or public-key prefix only.
+- The MeshChameleon UI has no reveal/import/export/regenerate controls.
+  `CMD_EXPORT_PRIVATE_KEY` / `CMD_IMPORT_PRIVATE_KEY` operate only on the active
+  virtual identity over the local companion endpoint (the protocol's approved
+  local key operation; no app confirmation).
+- Public keys are unique across identity records. A protocol import that would
+  duplicate another identity's key, or clone the attached radio's own key, is
+  rejected before storage changes.
 - **Android backup is disabled** (`android:allowBackup="false"`). The
   Keystore-encrypted blob is useless off-device anyway, and this avoids
   cloud-exfiltrating contacts/message state.
 
-### Backend migration note
+### Legacy data note
 
-Switching to `EncryptedSharedPreferences` changes the on-disk format. Identities
-written by an earlier debug build (legacy plugin backend) will not be readable
-after this change—generate or re-import the key on such installs. This is a
-pre-1.0 change; release installs start clean.
+Multi-identity builds deliberately do not migrate the pre-multi-identity
+`meshcore_identity_v1` secure key or root `node_state.json`. Those entries are
+ignored and a fresh identity is created. This is a pre-1.0 change; release
+installs start clean.
 
 ## What this does *not* address
 
-- **Export is plaintext on screen.** Revealing the key puts it in the UI (and
-  potentially the clipboard/screenshots). Treat that as a deliberate migration
-  step, not a normal operation.
 - **No biometric/device-credential gate.** Access is bound to the app sandbox +
   Keystore, not to a user presence check.
-- **`node_state.json` is not encrypted.** It holds contacts, channels, adverts,
-  and the message queue. It is protected only by the app sandbox. Encrypting it
-  (or moving it behind the same store) is future work.
+- **Per-identity `node_state.json` files are not encrypted.** They hold contacts,
+  channels, adverts, and the message queue. They are protected only by the app
+  sandbox. Encrypting them (or moving them behind the same store) is future work.
 - **Rooted/compromised device or a malicious local app with the same UID** can
   read anything the app can.
 - **No key material is sent off-device.** There is no analytics, telemetry
@@ -80,9 +81,9 @@ pre-1.0 change; release installs start clean.
   directly to the physical companion can race replies on the shared radio link;
   the proxy cannot serialize external clients. Use one configuration client at a
   time.
-- **Virtual storage is quota-limited, not confidential.** The 4 MiB partition
-  bounds durable virtual state and returns explicit storage errors; it does not
-  encrypt `node_state.json`.
+- **Virtual storage is quota-limited, not confidential.** Each identity's 4 MiB
+  partition bounds durable virtual state and returns explicit storage errors; it
+  does not encrypt `node_state.json`.
 
 ## Remote CLI and telemetry exposure
 
@@ -96,9 +97,11 @@ unconsumed routes remain in the raw RX log but are not executed locally.
 
 ## Identity entry points
 
-- **Generate** — 32-byte seed from a CSPRNG (`LocalIdentity.generate()`); the
-  seed is retained in memory for signing and stored only as the expanded key.
-- **Import** — accepts a 32-byte seed *or* the 64-byte expanded key. Both forms
-  can sign now: the 64-byte form is the expanded Ed25519 key, which is all that
-  RFC 8032 signing needs (`CryptoUtils.ed25519SignFromExpanded`). See
-  `DEVELOPMENT.md`.
+- **First run** — one identity is generated automatically with a 32-byte CSPRNG
+  seed (`LocalIdentity.generate()`) and stored only as the expanded key.
+- **Create** — the app wizard creates additional identities, inactive, with the
+  same generation path. Only the display name is chosen in the UI.
+- **Import** — the companion protocol accepts the 64-byte expanded key for the
+  active identity after firmware-equivalent validation. Both identity forms can
+  sign: 64-byte identities use the expanded Ed25519 key directly
+  (`CryptoUtils.ed25519SignFromExpanded`, RFC 8032). See `DEVELOPMENT.md`.

@@ -215,6 +215,35 @@ void main() {
     expect(deleteItem.enabled, isFalse);
   });
 
+  testWidgets('an unavailable key cannot activate but may be deleted',
+      (tester) async {
+    late String secondId;
+    await tester.runAsync(() async {
+      secondId = (await repository.create(name: 'Second')).id;
+      await IdentityStore().deleteById(secondId);
+      await app.loadIdentities();
+    });
+    await tester.pumpWidget(wrap(const IdentitiesScreen()));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Key unavailable'), findsOneWidget);
+    final activeBefore = app.activeIdentityId;
+    await tester.tap(find.text('Second'));
+    await tester.pumpAndSettle();
+    expect(app.activeIdentityId, activeBefore);
+
+    final secondCardMenu = find.descendant(
+      of: find.ancestor(of: find.text('Second'), matching: find.byType(Card)),
+      matching: find.byType(PopupMenuButton<String>),
+    );
+    await tester.tap(secondCardMenu);
+    await tester.pumpAndSettle();
+    final deleteItem = tester.widget<PopupMenuItem<String>>(
+      find.widgetWithText(PopupMenuItem<String>, 'Delete identity'),
+    );
+    expect(deleteItem.enabled, isTrue);
+  });
+
   testWidgets('no legacy identity controls or algorithm labels remain',
       (tester) async {
     await tester.pumpWidget(wrap(const IdentitiesScreen()));

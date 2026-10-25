@@ -53,8 +53,18 @@ the external hardware matrix remains pending. The Android background-execution
 shape is still the main-isolate foreground-service design, and background/Doze
 survival has not been hardware-validated.
 
-Do not claim hardware validation unless it was run against real hardware. BLE
-and background execution are currently not hardware-validated.
+Multi-identity management is implemented: all catalog identities run live on
+one shared radio, the active identity is served over the companion endpoint,
+and outbound packets are mirrored in-process to the other live identities after
+the RF send. Per-identity keys live in
+`meshcore_identity_v2/<id>` secure slots and state in
+`<support>/identities/<id>/node_state.json`; there is intentionally no migration
+from the old single-identity layout. The attached radio's own companion identity
+cannot be messaged through the virtual stack and unicasts to it are rejected.
+
+Do not claim hardware validation unless it was run against real hardware. BLE,
+multi-identity radio behavior, and background execution are currently not
+hardware-validated.
 
 ## Development and verification
 

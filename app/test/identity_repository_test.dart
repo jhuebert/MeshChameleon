@@ -275,6 +275,49 @@ void main() {
     expect((await repo.loadKey(record.id))!.publicKey, key!.publicKey);
   });
 
+  test('no key material is written to the index or node state', () async {
+    final repo = repository();
+    await repo.loadOrCreate();
+    final record = (await repo.records()).single;
+    final key = (await repo.loadKey(record.id))!;
+    final privateHex = bytesToHex(key.meshcore64);
+    final publicHex = bytesToHex(key.publicKey);
+
+    final indexText =
+        await File('${dir.path}/identities/index.json').readAsString();
+    final stateText = await repo.stateFile(record.id).readAsString();
+
+    expect(indexText, contains(publicHex),
+        reason: 'the catalog caches only the public key');
+    expect(indexText, isNot(contains(privateHex)));
+    expect(stateText, isNot(contains(privateHex)));
+    expect(stateText, isNot(contains(publicHex)));
+  });
+
+  test('orphan state directories are removed after catalog load', () async {
+    final repo = repository();
+    await repo.loadOrCreate();
+    final orphan = Directory('${repo.identitiesDirectory.path}/orphan');
+    await orphan.create(recursive: true);
+    await File('${orphan.path}/node_state.json').writeAsString('{}');
+
+    await repo.cleanupOrphans();
+
+    expect(await orphan.exists(), isFalse);
+  });
+
+  test('first_run_key_write_failure_does_not_create_a_catalog', () async {
+    final repo = IdentityRepository(
+      supportDirectory: dir,
+      secureStore: _FailingIdentityStore(),
+    );
+    await expectLater(
+      repo.loadOrCreate(),
+      throwsA(isA<FileSystemException>()),
+    );
+    expect(await File('${dir.path}/identities/index.json').exists(), isFalse);
+  });
+
   test('corrupt_state_is_quarantined_and_defaults_are_used', () async {
     final repo = repository();
     await repo.loadOrCreate();
@@ -292,6 +335,13 @@ void main() {
         fallbackName: record.name);
     expect(fresh.prefs.nodeName, record.name);
   });
+}
+
+class _FailingIdentityStore extends IdentityStore {
+  @override
+  Future<void> saveById(String id, LocalIdentity identity) async {
+    throw const FileSystemException('secure key write failed');
+  }
 }
 
 Uint8List defaultPublicChannelSecretBytes() =>

@@ -37,6 +37,7 @@ class _Sink implements CompanionPushSink {
 
 class _Router implements LocalPeerRouter {
   final List<MeshNode> nodes = [];
+  final List<Uint8List> mirrored = [];
   Uint8List? blocked;
 
   void register(MeshNode node) => nodes.add(node);
@@ -50,6 +51,7 @@ class _Router implements LocalPeerRouter {
     Uint8List packet, {
     required Uint8List fromPublicKey,
   }) async {
+    mirrored.add(Uint8List.fromList(packet));
     for (final node in List<MeshNode>.of(nodes)) {
       if (_equal(node.identity.publicKey, fromPublicKey)) continue;
       try {
@@ -146,6 +148,8 @@ void main() {
     expect(a.queuedDirectCount, 0, reason: 'sender is excluded from mirror');
     expect(a.link, isA<FakeDeviceLink>());
     expect((a.link as FakeDeviceLink).transmitted, hasLength(1));
+    expect(router.mirrored.single, (a.link as FakeDeviceLink).transmitted.single,
+        reason: 'mirror copies keep the exact RF bytes');
 
     await Future<void>.delayed(const Duration(milliseconds: 260));
 
@@ -292,10 +296,19 @@ void main() {
       await a.sendRawData(Uint8List.fromList([1, 2, 3]), Uint8List(0), 0),
       isTrue,
     );
+    expect(
+      await a.sendRawData(
+        Uint8List.fromList([4, 5, 6]),
+        Uint8List.fromList([0xAA]),
+        1,
+      ),
+      isTrue,
+    );
 
     expect(sink.controlData, hasLength(1));
-    expect(sink.rawData, hasLength(1));
-    expect((a.link as FakeDeviceLink).transmitted, hasLength(2));
+    expect(sink.rawData, hasLength(2),
+        reason: 'a local direct packet is final-hop even with a remaining path');
+    expect((a.link as FakeDeviceLink).transmitted, hasLength(3));
   });
 
   test('a duplicate through RF and local paths queues only once', () async {

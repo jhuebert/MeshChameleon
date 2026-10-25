@@ -99,6 +99,25 @@ void main() {
     expect(base.batteryReads, 1, reason: 'fresh sample is reused');
   });
 
+  test('an in-flight battery sample from a detached session is not reused',
+      () async {
+    final a = hub.viewFor('a');
+    base.batteryAck = Completer<void>();
+    final pending = a.battery();
+    await Future<void>.delayed(Duration.zero);
+    expect(base.batteryReads, 1);
+
+    await hub.detach();
+    hub.attach();
+    base.batteryAck!.complete();
+    await pending;
+    base.batteryAck = null;
+
+    await a.battery();
+    expect(base.batteryReads, 2,
+        reason: 'the old session sample must not seed the new cache');
+  });
+
   test('battery failures are not cached as successes', () async {
     final a = hub.viewFor('a');
     base.batteryError = const DeviceCommandError.device(errCodeFileIoError);

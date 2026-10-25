@@ -2560,7 +2560,7 @@ class MeshNode extends CompanionBridge {
       case payloadTypeReq:
         await _onRequest(packet, generation);
       case payloadTypeRawCustom:
-        _onRawCustom(packet);
+        _onRawCustom(packet, peerOrigin: peerOrigin);
       case payloadTypeAdvert:
         await _onAdvert(packet, generation);
       case payloadTypeTxtMsg:
@@ -3274,10 +3274,14 @@ class MeshNode extends CompanionBridge {
     );
   }
 
-  void _onRawCustom(Packet packet) {
+  void _onRawCustom(Packet packet, {bool peerOrigin = false}) {
     // Raw custom delivery is direct-route zero-hop only. Flooded/raw-in-transit
-    // packets remain available through the full 0x88 raw RX log.
-    if (!packet.isRouteDirect || packet.pathHashCount != 0) return;
+    // packets remain available through the full 0x88 raw RX log. A local peer
+    // copy is already at its final endpoint even when a direct path remains.
+    if (!packet.isRouteDirect ||
+        (!peerOrigin && packet.pathHashCount != 0)) {
+      return;
+    }
     if (_isDuplicate(packet.calculatePacketHash())) return;
     pushSink?.pushRawData(packet.snr, packet.rssi, packet.payload);
   }

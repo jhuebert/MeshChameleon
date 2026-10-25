@@ -63,6 +63,7 @@ class CompanionServer implements CompanionPushSink {
   /// command generation are dropped rather than sent to a replacement client.
   int _connectionGeneration = 0;
   int? _commandGeneration;
+  bool _switchingBridge = false;
 
   int? get port => _server?.port;
   bool get hasClient => _client != null;
@@ -102,6 +103,7 @@ class CompanionServer implements CompanionPushSink {
   /// that connects during the barrier run only after the new bridge is in
   /// place. The listener socket stays open.
   Future<void> switchBridge(CompanionBridge next) {
+    _switchingBridge = true;
     _disconnectClient(reason: 'identity switch');
     final completer = Completer<void>();
     _commandTail = _commandTail.then((_) async {
@@ -111,11 +113,14 @@ class CompanionServer implements CompanionPushSink {
           previous.setPushSink(null);
           _bridge = next;
         }
+        _switchingBridge = false;
         _bridge.setPushSink(_client == null ? null : this);
       } finally {
+        _switchingBridge = false;
         if (!completer.isCompleted) completer.complete();
       }
     }).catchError((Object e) {
+      _switchingBridge = false;
       _log('bridge switch error: $e');
       if (!completer.isCompleted) completer.complete();
     });
@@ -140,7 +145,9 @@ class CompanionServer implements CompanionPushSink {
     _codec.reset();
     _signBuffer.clear();
     socket.setOption(SocketOption.tcpNoDelay, true);
-    _bridge.setPushSink(this);
+    // During a bridge switch the new bridge is installed by the barrier; the
+    // old bridge must not receive a new client's push sink in the meantime.
+    if (!_switchingBridge) _bridge.setPushSink(this);
     _appTargetVer = 0;
 
     socket.listen(

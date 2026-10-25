@@ -57,9 +57,46 @@ not bugs:
 - Decoders reject truncated/oversized/unsafe values rather than reproducing
   `atoi`/`atof` acceptance. Persistence failures return honest errors.
 
-Other deliberate limits: no dependency upgrades, no multi-virtual-companion
-support, no iOS/USB transport work, no virtual repeater routing/forwarding, no
-mandatory authentication redesign, and no sensor-node implementation.
+Other deliberate limits: no dependency upgrades, no iOS/USB transport work, no
+virtual repeater routing/forwarding, no mandatory authentication redesign, no
+sensor-node implementation, and no migration from the pre-multi-identity
+single-key layout.
+
+## Multi-identity runtime
+
+All catalog identities are started as live `MeshNode` runtimes while a device is
+connected. `SharedRadioHub` owns the single raw-RX registration and fans frames
+to every runtime; `LocalMeshRouter` mirrors every outbound packet to the other
+live identities after the RF dispatch succeeds. The active identity's node is
+the only one bound to `CompanionServer`; switching calls
+`server.switchBridge()` to disconnect the old client and serve the new
+`SELF_INFO` without rebinding the TCP listener.
+
+Storage layout:
+
+```text
+<app-support>/identities/index.json          catalog (public-key/name caches only)
+<app-support>/identities/<id>/node_state.json contacts/channels/queue/prefs
+secure storage: meshcore_identity_v2/<id>     64-byte expanded key
+```
+
+Rules worth preserving:
+
+- `active_id` must reference a record; a missing active selection is repaired to
+  a readable identity at startup.
+- Public keys are unique across records. A protocol key import updates the
+  active record in place, keeps its name/state, and is rejected if another
+  identity or the attached radio already uses that key.
+- Node state is the source of truth for the name; `SET_ADVERT_NAME` and the CLI
+  `set name` repair the catalog cache. The MeshChameleon UI only writes a name
+  when creating an identity.
+- The local mirror uses the exact outbound bytes and a peer-origin flag, so a
+  direct path may remain without blocking local delivery. Mirror copies emit no
+  raw-RX push and add no RF airtime; they are deduplicated like RF duplicates.
+- The attached radio's own public key is kept internal and rejects direct sends.
+  It is never exposed as a contact or virtual identity.
+- `--identity-file` headless proxy runs remain single-identity; the feature
+  targets the app.
 
 ## Co-client and raw-modem limitations
 
@@ -75,10 +112,10 @@ repeater: no packet forwarding is implemented.
 
 ## Virtual storage and quota
 
-Contacts (350), channels (40), queued messages, advert blobs/path cache and
-sensor preferences share a deterministic 4 MiB virtual partition enforced before
-publish. Quota failures are reported as storage/table-full errors; the app does
-not delete broad directories or physical radio state to recover. See
+Each identity has its own 4 MiB virtual partition: contacts (350), channels (40),
+queued messages, advert blobs/path cache, and sensor preferences are enforced
+before publish. Quota failures are reported as storage/table-full errors; the app
+does not delete broad directories or physical radio state to recover. See
 `SECURITY.md` for at-rest storage.
 
 ## Linux desktop and headless proxy
@@ -266,10 +303,11 @@ adverts/TX or firmware flashing is part of the default test gate.
 
 ## Identity storage
 
-The identity is kept in Android Keystore-backed
-`EncryptedSharedPreferences` (AES-256-GCM). Android backup is disabled
-(`allowBackup="false"`). See `SECURITY.md` for the full model and its caveats,
-including the backend-format note if you are upgrading a pre-1.0 install.
+Each identity key is kept in its own Android Keystore-backed
+`EncryptedSharedPreferences` slot (`meshcore_identity_v2/<id>`, AES-256-GCM).
+Android backup is disabled (`allowBackup="false"`). The old single-identity
+`meshcore_identity_v1` slot and root-level `node_state.json` are deliberately not
+read or migrated. See `SECURITY.md` for the full model and its caveats.
 
 ## Background execution (Android)
 

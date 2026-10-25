@@ -33,6 +33,7 @@ class SharedRadioHub {
   BatteryReading? _batteryCache;
   DateTime? _batteryCachedAt;
   Future<BatteryReading?>? _batteryInFlight;
+  int _batteryGeneration = 0;
   Future<void> _txTail = Future<void>.value();
 
   /// Return the stable view for [identityId]. The view delegates lifecycle,
@@ -54,6 +55,7 @@ class SharedRadioHub {
   Future<void> detach() async {
     _attached = false;
     base.setRawRxListener(null);
+    _batteryGeneration++;
     _batteryCache = null;
     _batteryCachedAt = null;
     _batteryInFlight = null;
@@ -64,6 +66,7 @@ class SharedRadioHub {
     if (_disposed) return;
     _disposed = true;
     _attached = false;
+    _batteryGeneration++;
     _subscribed.clear();
     _views.clear();
     base.setRawRxListener(null);
@@ -116,9 +119,10 @@ class SharedRadioHub {
     final pending = _batteryInFlight;
     if (pending != null) return pending;
 
+    final generation = _batteryGeneration;
     late Future<BatteryReading?> future;
     future = base.battery().then((reading) {
-      if (reading != null) {
+      if (reading != null && generation == _batteryGeneration) {
         _batteryCache = reading;
         _batteryCachedAt = _now();
       }

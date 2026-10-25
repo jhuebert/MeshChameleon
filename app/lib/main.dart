@@ -327,6 +327,8 @@ class _StatusCard extends StatelessWidget {
             Text('Identity: $identityLabel',
                 style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
+            Text('Identities: ${app.identities.length}'
+                ' (${app.identities.where((summary) => summary.live).length} live)'),
             Text('Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
             Text('Proxy: ${app.proxyStatus.name}'
                 '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),

@@ -173,6 +173,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
                         summary: summary,
                         busy: app.busy,
                         canDelete: !summary.active && identities.length > 1,
+                        isLast: identities.length == 1,
                         onTap: () => _activate(summary),
                         onClear: () => _clear(summary),
                         onDelete: () => _delete(summary),
@@ -278,6 +279,7 @@ class _IdentityCard extends StatelessWidget {
     required this.summary,
     required this.busy,
     required this.canDelete,
+    required this.isLast,
     required this.onTap,
     required this.onClear,
     required this.onDelete,
@@ -286,6 +288,7 @@ class _IdentityCard extends StatelessWidget {
   final IdentitySummary summary;
   final bool busy;
   final bool canDelete;
+  final bool isLast;
   final VoidCallback onTap;
   final VoidCallback onClear;
   final VoidCallback onDelete;
@@ -377,7 +380,11 @@ class _IdentityCard extends StatelessWidget {
                   child: Text(
                     canDelete
                         ? 'Delete identity'
-                        : 'Activate another identity before deleting this one',
+                        : summary.active
+                            ? 'Activate another identity before deleting this one'
+                            : isLast
+                                ? 'At least one identity must remain'
+                                : 'Delete identity',
                   ),
                 ),
               ],
