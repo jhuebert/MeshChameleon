@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 
 import 'package:companion_server/companion_server.dart';
@@ -17,9 +18,19 @@ import 'services/identity_manager.dart';
 import 'services/identity_repository.dart';
 import 'services/identity_runtime.dart';
 import 'services/identity_store.dart';
+import 'services/network_connection_store.dart';
 import 'services/session_store.dart';
 
 enum ProxyStatus { stopped, running }
+
+/// Creates the TCP link used to reach a network companion.
+///
+/// Tests supply a [FakeDeviceLink]; production uses [TcpDeviceLink].
+typedef TcpDeviceLinkFactory = RadioLink Function(
+  String host,
+  int port,
+  void Function(String message) onLog,
+);
 
 /// Owns the device session, identity manager, proxy server, and navigation
 /// state, and exposes them to the UI.
@@ -28,15 +39,29 @@ class AppState extends ChangeNotifier {
     IdentityRepository? repository,
     IdentityStore? identityStore,
     SessionStore? sessionStore,
+    NetworkConnectionStore? networkConnectionStore,
+    TcpDeviceLinkFactory? tcpLinkFactory,
     DeviceCapabilities? capabilities,
     this.reconnectDelay = const Duration(seconds: 3),
   })  : _repository = repository,
         identityStore = identityStore ?? IdentityStore(),
         sessionStore = sessionStore ?? SessionStore(),
+        networkConnectionStore =
+            networkConnectionStore ?? NetworkConnectionStore(),
+        _tcpLinkFactory = tcpLinkFactory ?? _defaultTcpLinkFactory,
         capabilities = capabilities ?? DeviceCapabilities.current();
 
   final IdentityStore identityStore;
   final SessionStore sessionStore;
+  final NetworkConnectionStore networkConnectionStore;
+  final TcpDeviceLinkFactory _tcpLinkFactory;
+
+  static RadioLink _defaultTcpLinkFactory(
+    String host,
+    int port,
+    void Function(String message) onLog,
+  ) =>
+      TcpDeviceLink(host: host, port: port, onLog: onLog);
 
   /// What this build can do; gates the BLE UI and session restore.
   final DeviceCapabilities capabilities;
@@ -84,6 +109,12 @@ class AppState extends ChangeNotifier {
   /// [autoResume] is on.
   SessionConfig? lastSession;
   bool autoResume = false;
+
+  List<SavedNetworkConnection> _savedNetworkConnections = const [];
+
+  /// Successful network targets, newest first.
+  List<SavedNetworkConnection> get savedNetworkConnections =>
+      UnmodifiableListView(_savedNetworkConnections);
 
   /// Whether the OS exempts the app from battery optimizations (null until
   /// queried; always null on non-Android platforms).
@@ -154,12 +185,16 @@ class AppState extends ChangeNotifier {
     final manager = await _ensureManager();
     await manager.load();
     final session = await sessionStore.load();
+    final savedConnections = await networkConnectionStore.load();
     lastSession = session;
     if (session != null) {
       port = session.proxyPort;
       autoResume = session.autoResume;
       _intentionalOff = session.intentionallyOff;
     }
+    // Load the history before auto-resume so a resumed TCP session refreshes
+    // its target instead of replacing the saved list.
+    _savedNetworkConnections = savedConnections;
     notifyListeners();
     await _maybeResumeSession();
   }
@@ -272,44 +307,53 @@ class AppState extends ChangeNotifier {
   // Device link
   // -------------------------------------------------------------------------
 
-  Future<void> connectTcp({required String host, int? tcpPort}) async {
+  /// Connect to a network companion.
+  ///
+  /// Returns true only when the link attached and the session was recorded.
+  /// Failed history writes are logged without failing the connection.
+  Future<bool> connectTcp({required String host, int? tcpPort}) async {
+    final normalizedHost = host.trim();
     final devicePort = tcpPort ?? defaultCompanionPort;
-    final link = TcpDeviceLink(
-      host: host,
-      port: devicePort,
-      onLog: log,
-    );
-    final ok = await _attachLink(link, 'TCP $host:$devicePort');
-    if (ok) {
-      await _recordSession(SessionConfig(
-        kind: DeviceTargetKind.tcp,
-        host: host,
-        devicePort: devicePort,
-        proxyPort: port,
-        autoResume: autoResume,
-      ));
+    if (normalizedHost.isEmpty || devicePort < 1 || devicePort > 65535) {
+      log('Enter a host and a port between 1 and 65535');
+      return false;
     }
+    final link = _tcpLinkFactory(normalizedHost, devicePort, log);
+    final ok = await _attachLink(
+      link,
+      'TCP ${formatNetworkAddress(normalizedHost, devicePort)}',
+    );
+    if (!ok) return false;
+    await _recordSession(SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: normalizedHost,
+      devicePort: devicePort,
+      proxyPort: port,
+      autoResume: autoResume,
+    ));
+    await _recordNetworkConnection(normalizedHost, devicePort);
+    return true;
   }
 
-  Future<void> connectBle(BluetoothDevice device) async {
+  Future<bool> connectBle(BluetoothDevice device) async {
     if (!capabilities.supportsBle) {
       log('BLE is not available in this build');
-      return;
+      return false;
     }
     final link = BleDeviceLink(device: device, onLog: log);
     final name = device.platformName.isEmpty
         ? device.remoteId.toString()
         : device.platformName;
     final ok = await _attachLink(link, 'BLE $name');
-    if (ok) {
-      await _recordSession(SessionConfig(
-        kind: DeviceTargetKind.ble,
-        bleRemoteId: device.remoteId.str,
-        bleName: name,
-        proxyPort: port,
-        autoResume: autoResume,
-      ));
-    }
+    if (!ok) return false;
+    await _recordSession(SessionConfig(
+      kind: DeviceTargetKind.ble,
+      bleRemoteId: device.remoteId.str,
+      bleName: name,
+      proxyPort: port,
+      autoResume: autoResume,
+    ));
+    return true;
   }
 
   /// Attach the in-memory simulated companion (development builds only).
@@ -317,21 +361,77 @@ class AppState extends ChangeNotifier {
   /// Exercises every live identity, the companion server, and the UI without
   /// any radio: [FakeDeviceLink] answers device queries and radio-parameter
   /// requests, and its transmissions never leave the process.
-  Future<void> connectSimulated({RadioLink? simulatedLink}) async {
+  Future<bool> connectSimulated({RadioLink? simulatedLink}) async {
     if (!capabilities.supportsSimulatedCompanion) {
       log('The simulated companion is only available in development builds');
-      return;
+      return false;
     }
     final link =
         simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion');
     final ok = await _attachLink(link, 'Simulated companion');
-    if (ok) {
-      await _recordSession(SessionConfig(
-        kind: DeviceTargetKind.simulated,
-        proxyPort: port,
-        autoResume: autoResume,
-      ));
+    if (!ok) return false;
+    await _recordSession(SessionConfig(
+      kind: DeviceTargetKind.simulated,
+      proxyPort: port,
+      autoResume: autoResume,
+    ));
+    return true;
+  }
+
+  Future<void> _recordNetworkConnection(String host, int port) async {
+    _savedNetworkConnections = withRecordedNetworkConnection(
+      _savedNetworkConnections,
+      host: host,
+      port: port,
+      connectedAt: DateTime.now().toUtc().millisecondsSinceEpoch,
+    );
+    notifyListeners();
+    try {
+      await networkConnectionStore.save(_savedNetworkConnections);
+    } catch (e) {
+      log('Could not save network connection history: $e');
     }
+  }
+
+  /// Remove a saved target. The in-memory list changes only after the file
+  /// write succeeds, so a failed delete leaves the card visible.
+  Future<bool> removeSavedNetworkConnection(
+    SavedNetworkConnection connection,
+  ) async {
+    final next = withoutNetworkConnection(
+      _savedNetworkConnections,
+      connection.key,
+    );
+    try {
+      await networkConnectionStore.save(next);
+    } catch (e) {
+      log('Could not remove the saved network connection: $e');
+      return false;
+    }
+    _savedNetworkConnections = next;
+    notifyListeners();
+    return true;
+  }
+
+  /// Restore a removed target with its original timestamp.
+  ///
+  /// A newer entry for the same key wins if the user reconnected before Undo.
+  Future<bool> restoreSavedNetworkConnection(
+    SavedNetworkConnection connection,
+  ) async {
+    final next = withRestoredNetworkConnection(
+      _savedNetworkConnections,
+      connection,
+    );
+    try {
+      await networkConnectionStore.save(next);
+    } catch (e) {
+      log('Could not restore the saved network connection: $e');
+      return false;
+    }
+    _savedNetworkConnections = next;
+    notifyListeners();
+    return true;
   }
 
   Future<bool> _attachLink(RadioLink link, String label) async {

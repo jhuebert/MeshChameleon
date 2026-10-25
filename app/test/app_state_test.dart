@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:device_link/device_link.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_node/mesh_node.dart';
@@ -11,6 +12,7 @@ import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
@@ -84,7 +86,23 @@ void main() {
   late Directory dir;
   late IdentityRepository repository;
   late SessionStore sessionStore;
+  late NetworkConnectionStore networkConnectionStore;
   late AppState app;
+
+  AppState buildApp({
+    SessionStore? session,
+    NetworkConnectionStore? connections,
+    TcpDeviceLinkFactory? tcpLinkFactory,
+    DeviceCapabilities capabilities = _capabilities,
+  }) =>
+      AppState(
+        repository: repository,
+        sessionStore: session ?? sessionStore,
+        networkConnectionStore: connections ?? networkConnectionStore,
+        tcpLinkFactory: tcpLinkFactory,
+        capabilities: capabilities,
+        reconnectDelay: const Duration(milliseconds: 10),
+      );
 
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
@@ -94,12 +112,9 @@ void main() {
       secureStore: IdentityStore(),
     );
     sessionStore = SessionStore(file: File('${dir.path}/session.json'));
-    app = AppState(
-      repository: repository,
-      sessionStore: sessionStore,
-      capabilities: _capabilities,
-      reconnectDelay: const Duration(milliseconds: 10),
-    );
+    networkConnectionStore = NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'));
+    app = buildApp();
     await app.loadIdentities();
   });
 
@@ -239,6 +254,191 @@ void main() {
     expect(app.identities.every((summary) => !summary.live), isTrue);
   });
 
+  test('successful TCP attach records and persists the normalized target',
+      () async {
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    (String, int)? requested;
+    final tcpApp = buildApp(
+      tcpLinkFactory: (host, port, onLog) {
+        requested = (host, port);
+        return fake;
+      },
+    );
+    await tcpApp.loadIdentities();
+    addTearDown(tcpApp.disconnectDevice);
+
+    expect(
+      await tcpApp.connectTcp(host: ' 192.168.1.55 ', tcpPort: 5000),
+      isTrue,
+      reason: tcpApp.logs.join('\n'),
+    );
+
+    expect(requested, ('192.168.1.55', 5000));
+    final saved = tcpApp.savedNetworkConnections.single;
+    expect(saved.host, '192.168.1.55');
+    expect(saved.port, 5000);
+    expect(saved.lastConnectedAt, greaterThan(0));
+    final loaded = await NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    ).load();
+    expect(loaded.single, saved);
+  });
+
+  test('a failed TCP attach records nothing', () async {
+    final fake = FakeDeviceLink()
+      ..deviceInfoError =
+          const DeviceCommandError.malformed(message: 'device unavailable');
+    final tcpApp = buildApp(
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    await tcpApp.loadIdentities();
+    addTearDown(tcpApp.disconnectDevice);
+
+    expect(
+      await tcpApp.connectTcp(host: '192.168.1.55', tcpPort: 5000),
+      isFalse,
+    );
+
+    expect(tcpApp.savedNetworkConnections, isEmpty);
+    expect(await networkConnectionStore.load(), isEmpty);
+  });
+
+  test('invalid TCP targets are rejected before creating a link', () async {
+    var created = 0;
+    final tcpApp = buildApp(
+      tcpLinkFactory: (host, port, onLog) {
+        created++;
+        return FakeDeviceLink();
+      },
+    );
+    await tcpApp.loadIdentities();
+    addTearDown(tcpApp.disconnectDevice);
+
+    expect(await tcpApp.connectTcp(host: '   ', tcpPort: 5000), isFalse);
+    expect(await tcpApp.connectTcp(host: 'host', tcpPort: 0), isFalse);
+    expect(await tcpApp.connectTcp(host: 'host', tcpPort: 65536), isFalse);
+
+    expect(created, 0);
+    expect(tcpApp.savedNetworkConnections, isEmpty);
+  });
+
+  test('history loads before auto-resume and keeps every saved target',
+      () async {
+    final resumeSessionStore =
+        SessionStore(file: File('${dir.path}/resume_session.json'));
+    await resumeSessionStore.save(const SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: 'resume.example',
+      devicePort: 5000,
+      proxyPort: 0,
+      autoResume: true,
+    ));
+    final historyStore = NetworkConnectionStore(
+      file: File('${dir.path}/resume_connections.json'),
+    );
+    await historyStore.save([
+      const SavedNetworkConnection(
+        host: 'older.example',
+        port: 5000,
+        lastConnectedAt: 100,
+      ),
+      const SavedNetworkConnection(
+        host: 'resume.example',
+        port: 5000,
+        lastConnectedAt: 200,
+      ),
+    ]);
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final resumed = buildApp(
+      session: resumeSessionStore,
+      connections: historyStore,
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    addTearDown(resumed.disconnectDevice);
+
+    await resumed.loadIdentities();
+
+    expect(resumed.deviceConnected, isTrue, reason: resumed.logs.join('\n'));
+    expect(resumed.savedNetworkConnections, hasLength(2));
+    expect(resumed.savedNetworkConnections.first.host, 'resume.example');
+    expect(resumed.savedNetworkConnections.last.host, 'older.example');
+    final persisted = await historyStore.load();
+    expect(persisted, hasLength(2));
+  });
+
+  test('remove and restore update both memory and disk', () async {
+    const first = SavedNetworkConnection(
+      host: 'first.example',
+      port: 5000,
+      lastConnectedAt: 300,
+    );
+    const second = SavedNetworkConnection(
+      host: 'second.example',
+      port: 6000,
+      lastConnectedAt: 200,
+    );
+    await networkConnectionStore.save([first, second]);
+    final historyApp = buildApp();
+    await historyApp.loadIdentities();
+    addTearDown(historyApp.disconnectDevice);
+    expect(historyApp.savedNetworkConnections, [first, second]);
+
+    expect(await historyApp.removeSavedNetworkConnection(first), isTrue);
+    expect(historyApp.savedNetworkConnections, [second]);
+    expect(await networkConnectionStore.load(), [second]);
+
+    expect(await historyApp.restoreSavedNetworkConnection(first), isTrue);
+    expect(historyApp.savedNetworkConnections, [first, second]);
+    final restored = await networkConnectionStore.load();
+    expect(restored, [first, second]);
+    expect(restored.first.lastConnectedAt, 300);
+  });
+
+  test('a history write failure keeps a successful TCP connection', () async {
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final tcpApp = buildApp(
+      connections: NetworkConnectionStore(file: File(dir.path)),
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    await tcpApp.loadIdentities();
+    addTearDown(tcpApp.disconnectDevice);
+
+    expect(
+        await tcpApp.connectTcp(host: 'host.example', tcpPort: 5000), isTrue);
+
+    expect(tcpApp.deviceConnected, isTrue);
+    expect(tcpApp.savedNetworkConnections, hasLength(1));
+    expect(
+      tcpApp.logs.join('\n'),
+      contains('Could not save network connection history'),
+    );
+  });
+
+  test('BLE and simulated connect report whether they succeeded', () async {
+    expect(
+      await app.connectBle(BluetoothDevice.fromId('AA:BB:CC:DD:EE:FF')),
+      isFalse,
+    );
+    expect(await app.connectSimulated(), isTrue, reason: app.logs.join('\n'));
+    addTearDown(app.disconnectDevice);
+
+    final releaseShaped = buildApp(
+      capabilities: const DeviceCapabilities(
+        supportsBle: false,
+        supportsSimulatedCompanion: false,
+      ),
+    );
+    await releaseShaped.loadIdentities();
+    addTearDown(releaseShaped.disconnectDevice);
+    expect(await releaseShaped.connectSimulated(), isFalse);
+  });
+
   test('physical shutdown stops runtimes and suppresses auto-resume', () async {
     await app.setAutoResume(true);
     final link = FakeDeviceLink(
@@ -257,11 +457,7 @@ void main() {
     final saved = await sessionStore.load();
     expect(saved!.intentionallyOff, isTrue);
 
-    final resumed = AppState(
-      repository: repository,
-      sessionStore: sessionStore,
-      capabilities: _capabilities,
-    );
+    final resumed = buildApp();
     addTearDown(resumed.disconnectDevice);
     await resumed.loadIdentities();
     expect(resumed.deviceConnected, isFalse);

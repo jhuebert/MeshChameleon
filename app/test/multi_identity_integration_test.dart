@@ -13,6 +13,7 @@ import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
@@ -102,6 +103,9 @@ void main() {
     app = AppState(
       repository: repository,
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
+      networkConnectionStore: NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'),
+      ),
       capabilities: _capabilities,
     );
     await app.loadIdentities();
@@ -203,8 +207,8 @@ void main() {
     client = await connectClient();
     addTearDown(client.close);
     expect(app.server!.hasClient, isTrue);
-    expect(app.manager!.activeIdentity!.publicKey,
-        runtimeB.identity!.publicKey);
+    expect(
+        app.manager!.activeIdentity!.publicKey, runtimeB.identity!.publicKey);
 
     client.send([cmdSyncNextMessage]);
     final message = await client.frames.next();
@@ -260,7 +264,8 @@ void main() {
     expect(runtimeD.node, isNotNull);
     expect(
       runtimeD.node!.contacts.any(
-        (contact) => bytesToHex(contact.publicKey) ==
+        (contact) =>
+            bytesToHex(contact.publicKey) ==
             bytesToHex(runtimeB.identity!.publicKey),
       ),
       isFalse,
@@ -270,7 +275,8 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 250));
     expect(
       runtimeD.node!.contacts.any(
-        (contact) => bytesToHex(contact.publicKey) ==
+        (contact) =>
+            bytesToHex(contact.publicKey) ==
             bytesToHex(runtimeB.identity!.publicKey),
       ),
       isTrue,

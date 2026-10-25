@@ -8,6 +8,7 @@ import 'package:meshchameleon/screens/connect_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
@@ -73,6 +74,9 @@ void main() {
       app = AppState(
         repository: repository,
         sessionStore: SessionStore(file: File('${dir.path}/session.json')),
+        networkConnectionStore: NetworkConnectionStore(
+          file: File('${dir.path}/network_connections.json'),
+        ),
         capabilities: capabilities,
       );
       await app.loadIdentities();

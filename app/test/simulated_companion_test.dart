@@ -9,6 +9,7 @@ import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
@@ -39,6 +40,9 @@ void main() {
     final app = AppState(
       repository: repository,
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
+      networkConnectionStore: NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'),
+      ),
       capabilities: _capabilities,
     );
     await app.loadIdentities();
@@ -73,13 +77,15 @@ void main() {
     expect(app.node, isNotNull, reason: app.logs.join('\n'));
     // Attach performs the handshake, one tuning read, registers the shared RX
     // listener, and reads a battery sample. It never changes a physical setting.
-    expect(link.calls, containsAllInOrder([
-      'connect',
-      'deviceInfo',
-      'selfInfo',
-      'tuningParams',
-      'setRawRxListener',
-    ]));
+    expect(
+        link.calls,
+        containsAllInOrder([
+          'connect',
+          'deviceInfo',
+          'selfInfo',
+          'tuningParams',
+          'setRawRxListener',
+        ]));
     const writes = [
       'sendRawPacket',
       'setRadioParams',
@@ -153,6 +159,9 @@ void main() {
     final app = AppState(
       repository: repository,
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
+      networkConnectionStore: NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'),
+      ),
       capabilities: const DeviceCapabilities(
         supportsBle: false,
         supportsSimulatedCompanion: false,

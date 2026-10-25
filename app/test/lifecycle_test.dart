@@ -9,6 +9,7 @@ import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
@@ -41,6 +42,9 @@ void main() {
     final app = AppState(
       repository: repository,
       sessionStore: sessionStore,
+      networkConnectionStore: NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'),
+      ),
       capabilities: _capabilities,
       reconnectDelay: const Duration(milliseconds: 10),
     );

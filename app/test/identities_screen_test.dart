@@ -12,6 +12,7 @@ import 'package:meshchameleon/screens/identities_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
@@ -37,6 +38,9 @@ void main() {
     app = AppState(
       repository: repository,
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
+      networkConnectionStore: NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'),
+      ),
       capabilities: _capabilities,
     );
     await app.loadIdentities();
@@ -132,8 +136,8 @@ void main() {
     expect(betaIndex, greaterThan(alphaIndex));
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('1 channels · 1 contacts'), findsOneWidget);
-    expect(find.text('1 DMs queued · 1 channel messages queued'),
-        findsOneWidget);
+    expect(
+        find.text('1 DMs queued · 1 channel messages queued'), findsOneWidget);
     expect(find.textContaining(first), findsNothing);
   });
 
@@ -158,9 +162,13 @@ void main() {
 
     expect(find.text('Custom Node'), findsOneWidget);
     expect(app.identities, hasLength(3));
-    expect(app.activeIdentityId, isNot(
-      app.identities.firstWhere((summary) => summary.name == 'Custom Node').id,
-    ));
+    expect(
+        app.activeIdentityId,
+        isNot(
+          app.identities
+              .firstWhere((summary) => summary.name == 'Custom Node')
+              .id,
+        ));
   });
 
   testWidgets('create wizard rejects an invalid name', (tester) async {
@@ -195,8 +203,8 @@ void main() {
 
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(app.activeIdentityId, secondId);
-    expect(find.textContaining('#${app.activeIdentity!.prefixHex}'),
-        findsWidgets);
+    expect(
+        find.textContaining('#${app.activeIdentity!.prefixHex}'), findsWidgets);
   });
 
   testWidgets('delete is disabled for the active identity and clear is present',
@@ -264,6 +272,9 @@ void main() {
         secureStore: IdentityStore(),
       ),
       sessionStore: SessionStore(file: File('${dir.path}/session.json')),
+      networkConnectionStore: NetworkConnectionStore(
+        file: File('${dir.path}/network_connections.json'),
+      ),
       capabilities: _capabilities,
     );
     await tester.runAsync(() async {
