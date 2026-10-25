@@ -362,6 +362,11 @@ class IdentityRepository {
   }
 
   /// Remove per-identity state directories that no catalog record references.
+  ///
+  /// Secure key slots are deliberately never removed here. On Linux,
+  /// `flutter_secure_storage` keeps every key in one slot keyed by application
+  /// id, so a catalog from one support directory must not be allowed to prune
+  /// another catalog's keys.
   Future<void> cleanupOrphans() async {
     final index = await indexStore.load();
     if (index == null) return;
@@ -383,15 +388,6 @@ class IdentityRepository {
       }
     } on FileSystemException catch (e) {
       onLog?.call('Could not scan identity state directories: $e');
-    }
-    try {
-      for (final id in await _secureStore.storedIds()) {
-        if (known.contains(id)) continue;
-        await _secureStore.deleteById(id);
-        onLog?.call('Removed orphaned identity key slot');
-      }
-    } catch (e) {
-      onLog?.call('Could not scan identity key slots: $e');
     }
   }
 }

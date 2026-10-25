@@ -56,15 +56,6 @@ class IdentityStore {
 
   Future<void> deleteById(String id) => _storage.delete(key: _storageKey(id));
 
-  /// Ids with a per-identity secure slot. Values are never returned.
-  Future<List<String>> storedIds() async {
-    final all = await _storage.readAll();
-    return [
-      for (final key in all.keys)
-        if (key.startsWith(_prefix)) key.substring(_prefix.length),
-    ];
-  }
-
   /// A [VirtualIdentityPersistence] scoped to one identity record.
   ///
   /// [validate] runs before the durable write so protocol key imports can

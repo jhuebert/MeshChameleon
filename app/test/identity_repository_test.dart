@@ -309,20 +309,34 @@ void main() {
     expect(stateText, isNot(contains(publicHex)));
   });
 
-  test('orphan state directories are removed after catalog load', () async {
+  test('cleanup removes orphan state but preserves another catalog key',
+      () async {
     final repo = repository();
     await repo.loadOrCreate();
-    final orphan = Directory('${repo.identitiesDirectory.path}/orphan');
+    final firstRecord = (await repo.records()).single;
+    final firstKey = await repo.loadKey(firstRecord.id);
+    expect(firstKey, isNotNull);
+
+    final otherDir =
+        await Directory.systemTemp.createTemp('mesh_identity_other_');
+    addTearDown(() => otherDir.delete(recursive: true));
+    final other = IdentityRepository(
+      supportDirectory: otherDir,
+      secureStore: IdentityStore(),
+    );
+    await other.loadOrCreate();
+    final orphan = Directory('${other.identitiesDirectory.path}/orphan');
     await orphan.create(recursive: true);
     await File('${orphan.path}/node_state.json').writeAsString('{}');
 
-    final orphanIdentity = await LocalIdentity.generate();
-    await IdentityStore().saveById('f' * 32, orphanIdentity);
-
-    await repo.cleanupOrphans();
+    await other.cleanupOrphans();
 
     expect(await orphan.exists(), isFalse);
-    expect(await IdentityStore().loadById('f' * 32), isNull);
+    final kept = await other.loadKey(firstRecord.id);
+    expect(kept, isNotNull,
+        reason: 'the shared Linux keyring must not be pruned by a second '
+            'support directory');
+    expect(kept!.publicKey, firstKey!.publicKey);
   });
 
   test('first_run_key_write_failure_does_not_create_a_catalog', () async {
