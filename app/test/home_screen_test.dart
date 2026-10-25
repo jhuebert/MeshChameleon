@@ -5,7 +5,8 @@ import 'package:meshchameleon/main.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('home screen renders proxy status', (tester) async {
+  testWidgets('home screen renders identity, device, and proxy state',
+      (tester) async {
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => AppState(),
@@ -14,7 +15,8 @@ void main() {
     );
     expect(find.text('MeshChameleon'), findsOneWidget);
     expect(find.text('Device link'), findsOneWidget);
-    expect(find.text('Identity'), findsOneWidget);
+    expect(find.text('No identity'), findsOneWidget);
+    expect(find.text('Create an identity'), findsOneWidget);
     expect(find.text('Proxy server'), findsOneWidget);
     expect(find.text('Proxy server port'), findsOneWidget);
     expect(
@@ -23,5 +25,6 @@ void main() {
     );
     expect(find.text('Recent log'), findsNothing);
     expect(find.byType(Image), findsOneWidget);
+    expect(find.textContaining('Ed25519'), findsNothing);
   });
 }

@@ -39,7 +39,7 @@ class IdentitySummary {
   /// First 4 public-key bytes (8 hex characters).
   String get prefixHex => bytesToHex(
         publicKey.sublist(0, publicKey.length < 4 ? publicKey.length : 4),
-      );
+      ).toUpperCase();
 
   int get queuedTotal => queuedDirect + queuedChannel;
 }

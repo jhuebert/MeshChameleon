@@ -45,9 +45,8 @@ class _FramedClient {
 
 class StreamQueue<T> {
   StreamQueue(Stream<T> stream) {
-    _sub = stream.listen(_add);
+    stream.listen(_add);
   }
-  late final StreamSubscription<T> _sub;
   final List<T> _buffer = [];
   final List<Completer<T>> _waiters = [];
 

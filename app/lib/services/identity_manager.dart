@@ -469,6 +469,8 @@ class IdentityManager {
     }
   }
 
+  Future<String> suggestName() => repository.suggestName();
+
   Future<IdentityRecord> create({String? name}) async {
     final record = await repository.create(name: name);
     _index = await repository.loadOrCreate();

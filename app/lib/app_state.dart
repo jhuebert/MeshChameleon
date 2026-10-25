@@ -155,6 +155,11 @@ class AppState extends ChangeNotifier {
     await _maybeResumeSession();
   }
 
+  Future<String> suggestIdentityName() async {
+    final manager = await _ensureManager();
+    return manager.suggestName();
+  }
+
   /// Create an additional identity. It is inactive; the active selection does
   /// not change.
   Future<IdentityRecord?> createIdentity({String? name}) async {

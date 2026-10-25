@@ -5,7 +5,7 @@ import 'package:provider/provider.dart';
 
 import 'app_state.dart';
 import 'screens/connect_screen.dart';
-import 'screens/identity_screen.dart';
+import 'screens/identities_screen.dart';
 import 'screens/log_screen.dart';
 import 'services/foreground_service.dart';
 
@@ -21,7 +21,7 @@ class ProxyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => AppState()..loadIdentity(),
+      create: (_) => AppState()..loadIdentities(),
       child: MaterialApp(
         title: 'MeshChameleon',
         theme: ThemeData(
@@ -47,7 +47,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final identity = app.identity;
+    final active = app.activeIdentity;
     return Scaffold(
       appBar: AppBar(
         title: Row(
@@ -72,9 +72,12 @@ class HomeScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          _StatusCard(app: app, identityLabel: identity == null
-              ? 'None'
-              : '#${identity.publicKey.take(4).map((b) => b.toRadixString(16).padLeft(2, '0')).join()}'),
+          _StatusCard(
+            app: app,
+            identityLabel: active == null
+                ? 'None'
+                : '${active.name} (#${active.prefixHex})',
+          ),
           const SizedBox(height: 12),
           Card(
             child: ListTile(
@@ -93,12 +96,20 @@ class HomeScreen extends StatelessWidget {
           ),
           Card(
             child: ListTile(
-              leading: const Icon(Icons.key),
-              title: const Text('Identity'),
-              subtitle: Text(identity == null ? 'Not set' : 'Ed25519'),
+              leading: Icon(
+                active == null ? Icons.key_off : Icons.key,
+              ),
+              title: Text(active?.name ?? 'No identity'),
+              subtitle: Text(
+                active == null
+                    ? 'Create an identity'
+                    : '#${active.prefixHex}'
+                        '${active.live ? ' · Live' : ''}',
+              ),
               trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const IdentityScreen())),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const IdentitiesScreen()),
+              ),
             ),
           ),
           _ProxyPortCard(port: app.port),
