@@ -42,6 +42,12 @@ class IdentityStore {
     }
   }
 
+  /// Whether a non-empty key slot exists, without validating the key material.
+  Future<bool> hasById(String id) async {
+    final value = await _storage.read(key: storageKey(id));
+    return value != null && value.isNotEmpty;
+  }
+
   Future<void> saveById(String id, LocalIdentity identity) =>
       _storage.write(
         key: storageKey(id),

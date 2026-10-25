@@ -113,6 +113,8 @@ class IdentityRepository {
 
   Future<LocalIdentity?> loadKey(String id) => _secureStore.loadById(id);
 
+  Future<bool> hasKey(String id) => _secureStore.hasById(id);
+
   /// Scoped persistence adapter used by the running node.
   VirtualIdentityPersistence persistenceFor(
     String id, {
@@ -372,17 +374,21 @@ class IdentityRepository {
     if (index == null) return;
     final known = {for (final record in index.identities) record.id};
     final dir = identitiesDirectory;
-    if (!await dir.exists()) return;
-    await for (final entity in dir.list()) {
-      if (entity is! Directory) continue;
-      final name = entity.path.split(Platform.pathSeparator).last;
-      if (known.contains(name)) continue;
-      try {
-        await entity.delete(recursive: true);
-        onLog?.call('Removed orphaned identity state directory');
-      } catch (e) {
-        onLog?.call('Could not remove orphaned identity state: $e');
+    try {
+      if (!await dir.exists()) return;
+      await for (final entity in dir.list()) {
+        if (entity is! Directory) continue;
+        final name = entity.path.split(Platform.pathSeparator).last;
+        if (known.contains(name)) continue;
+        try {
+          await entity.delete(recursive: true);
+          onLog?.call('Removed orphaned identity state directory');
+        } catch (e) {
+          onLog?.call('Could not remove orphaned identity state: $e');
+        }
       }
+    } on FileSystemException catch (e) {
+      onLog?.call('Could not scan identity state directories: $e');
     }
   }
 }
