@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'buffer.dart';
 import 'constants.dart';
+import 'paths.dart';
 
 /// A mesh contact, mirroring the companion contact record.
 class Contact {
@@ -46,6 +47,15 @@ class Contact {
 
   Uint8List get publicKeyPrefix6 => Uint8List.sublistView(publicKey, 0, 6);
 
+  /// Whether [outPathLen] is a learned direct route.
+  ///
+  /// Zero is a valid zero-hop direct route and must not be confused with the
+  /// `0xFF`/-1 "route unknown" state; both cases have an empty path buffer.
+  bool get hasDirectRoute =>
+      outPathLen >= 0 &&
+      PathUtils.isValidPathLen(outPathLen) &&
+      outPath.length >= PathUtils.getByteLength(outPathLen);
+
   Contact clone() => Contact(
         publicKey: Uint8List.fromList(publicKey),
         name: name,
@@ -73,10 +83,10 @@ class Channel {
 /// Local node configuration / self info.
 class NodePrefs {
   NodePrefs({
-    this.nodeName = 'MeshCore Proxy',
+    this.nodeName = 'MeshChameleon',
     this.advType = advTypeChat,
     this.txPowerDbm = 20,
-    this.maxTxPower = 22,
+    this.maxTxPower = defaultMaxTxPowerDbm,
     this.frequencyHz = 915000000,
     this.bandwidthHz = 250000,
     this.spreadingFactor = 10,
@@ -90,9 +100,10 @@ class NodePrefs {
     this.telemetryModeEnvironment = teleModeDeny,
     this.manualAddContacts = 0,
     this.autoaddConfig = 0,
+    this.autoaddMaxHops = 0,
+    this.timezoneOffsetHours = 0,
     this.clientRepeat = 0,
     this.pathHashMode = 0,
-    this.exportPrivateKeyEnabled = false,
     this.rxDelayBaseMs = 0,
     this.airtimeFactorMs = 0,
     this.defaultScopeName = '',
@@ -116,9 +127,16 @@ class NodePrefs {
   int telemetryModeEnvironment;
   int manualAddContacts;
   int autoaddConfig;
+
+  /// Optional max-hop auto-add limit (0 = unlimited), persisted with the
+  /// auto-add configuration.
+  int autoaddMaxHops;
+
+  /// Virtual timezone offset in whole hours (does not alter epoch seconds).
+  int timezoneOffsetHours;
+
   int clientRepeat;
   int pathHashMode;
-  bool exportPrivateKeyEnabled;
 
   /// Device radio tuning (`CMD_GET/SET_TUNING_PARAMS`): the receive-delay base
   /// and airtime factor, both in milliseconds ×1000 on the wire.
@@ -156,13 +174,16 @@ class NodePrefs {
     telemetryModeEnvironment = other.telemetryModeEnvironment;
     manualAddContacts = other.manualAddContacts;
     autoaddConfig = other.autoaddConfig;
+    autoaddMaxHops = other.autoaddMaxHops;
+    timezoneOffsetHours = other.timezoneOffsetHours;
     clientRepeat = other.clientRepeat;
     pathHashMode = other.pathHashMode;
-    exportPrivateKeyEnabled = other.exportPrivateKeyEnabled;
     rxDelayBaseMs = other.rxDelayBaseMs;
     airtimeFactorMs = other.airtimeFactorMs;
     defaultScopeName = other.defaultScopeName;
-    defaultScopeKey = other.defaultScopeKey;
+    defaultScopeKey = other.defaultScopeKey == null
+        ? null
+        : Uint8List.fromList(other.defaultScopeKey!);
   }
 }
 
@@ -190,6 +211,79 @@ class DeviceInfo {
   final int clientRepeat;
   final int pathHashMode;
 }
+
+/// Capabilities reported by the physical companion used as a radio modem.
+///
+/// Deliberately separate from the virtual [DeviceInfo] advertised to clients.
+/// Physical firmware gates physical CLI support, but virtual protocol codes,
+/// board strings, capacities and path-hash mode never come from the radio.
+class PhysicalCapabilities {
+  const PhysicalCapabilities({
+    this.firmwareVerCode = defaultFirmwareVerCode,
+    this.maxTxPower = defaultMaxTxPowerDbm,
+    this.clientRepeat = 0,
+    this.pathHashMode = 0,
+  });
+
+  factory PhysicalCapabilities.fromDeviceInfo(
+    DeviceInfo info, {
+    int maxTxPower = defaultMaxTxPowerDbm,
+  }) =>
+      PhysicalCapabilities(
+        firmwareVerCode: info.firmwareVerCode,
+        maxTxPower: maxTxPower,
+        clientRepeat: info.clientRepeat,
+        pathHashMode: info.pathHashMode,
+      );
+
+  final int firmwareVerCode;
+
+  /// Maximum TX power (dBm) reported by the physical SELF_INFO.
+  final int maxTxPower;
+
+  /// Physical client-repeat byte (this setting controls the modem).
+  final int clientRepeat;
+
+  /// Physical path-hash mode. Stored separately and never used as virtual mode.
+  final int pathHashMode;
+
+  PhysicalCapabilities copyWith({
+    int? firmwareVerCode,
+    int? maxTxPower,
+    int? clientRepeat,
+    int? pathHashMode,
+  }) =>
+      PhysicalCapabilities(
+        firmwareVerCode: firmwareVerCode ?? this.firmwareVerCode,
+        maxTxPower: maxTxPower ?? this.maxTxPower,
+        clientRepeat: clientRepeat ?? this.clientRepeat,
+        pathHashMode: pathHashMode ?? this.pathHashMode,
+      );
+}
+
+/// Build the virtual companion's advertised capabilities.
+///
+/// [clientRepeat] is the physical modem's repeat byte (S2); [pathHashMode] is
+/// virtual state. [targetBaseline] selects the T16 MeshCore 1.18 baseline for
+/// golden tests; the active advertised baseline stays at
+/// [defaultFirmwareVerCode]/[activeDeviceVersion] until then.
+DeviceInfo buildVirtualDeviceInfo({
+  int clientRepeat = 0,
+  int pathHashMode = 0,
+  bool targetBaseline = false,
+}) =>
+    DeviceInfo(
+      firmwareVerCode:
+          targetBaseline ? targetFirmwareVerCode : defaultFirmwareVerCode,
+      maxContacts: virtualMaxContacts,
+      maxChannels: virtualMaxChannels,
+      blePin: 0,
+      buildDate: '',
+      manufacturer: virtualBoardName,
+      version: targetBaseline ? targetCompatibilityVersion : activeDeviceVersion,
+      clientRepeat: clientRepeat,
+      pathHashMode: pathHashMode,
+    );
 
 /// Radio parameters read from / written to the device.
 class RadioParams {
@@ -273,6 +367,22 @@ class QueuedMessage {
   /// then holds the raw payload and [text] is unused.
   final int channelDataType;
   final Uint8List? channelDataPayload;
+
+  QueuedMessage clone() => QueuedMessage(
+        senderKey: Uint8List.fromList(senderKey),
+        txtType: txtType,
+        timestamp: timestamp,
+        text: text,
+        isChannel: isChannel,
+        channelIdx: channelIdx,
+        pathLen: pathLen,
+        snr: snr,
+        rssi: rssi,
+        channelDataType: channelDataType,
+        channelDataPayload: channelDataPayload == null
+            ? null
+            : Uint8List.fromList(channelDataPayload!),
+      );
 }
 
 /// Recently heard advertiser path information.
@@ -290,6 +400,14 @@ class AdvertPath {
   final int pathLen;
   final Uint8List path;
   final int recvTimestamp;
+
+  AdvertPath clone() => AdvertPath(
+        publicKeyPrefix: Uint8List.fromList(publicKeyPrefix),
+        name: name,
+        pathLen: pathLen,
+        path: path,
+        recvTimestamp: recvTimestamp,
+      );
 }
 
 /// Result of a message send operation.

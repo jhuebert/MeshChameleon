@@ -23,7 +23,7 @@ class _Client {
   }
 
   final Socket _socket;
-  final SerialFrameCodec _codec = SerialFrameCodec();
+  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
   final List<Uint8List> _buffer = [];
   final List<Completer<Uint8List>> _waiters = [];
 
@@ -125,15 +125,54 @@ void main() {
     );
 
     final first = await startProxyCli(options);
-    final publicKey = first.node.identity.publicKey;
-    await first.close();
-
+    final initialKey = first.node.identity.publicKey;
     final written = File(path);
     expect(await written.exists(), isTrue);
     expect((await written.stat()).mode & 0x1FF, 0x180, reason: 'mode 0600');
 
+    final socket = await Socket.connect('127.0.0.1', first.port!);
+    final client = _Client(socket);
+    addTearDown(client.close);
+    final replacement =
+        await LocalIdentity.fromSeed(Uint8List(32)..[0] = 42);
+    client.send([cmdImportPrivateKey, ...replacement.meshcore64]);
+    expect(await client.next(), [respCodeOk]);
+    expect(first.node.identity.publicKey, replacement.publicKey);
+    expect(first.node.identity.publicKey, isNot(initialKey));
+    await client.close();
+    await first.close();
+
+    expect(await written.readAsString(),
+        bytesToHex(replacement.meshcore64));
+    expect((await written.stat()).mode & 0x1FF, 0x180,
+        reason: 'atomic replacement preserves mode 0600');
+
     final second = await startProxyCli(options);
     addTearDown(second.close);
-    expect(second.node.identity.publicKey, publicKey);
+    expect(second.node.identity.publicKey, replacement.publicKey);
+  });
+
+  test('headless ephemeral import lasts until the proxy exits', () async {
+    final options = ProxyCliOptions.parse(
+      const ['--simulated', '--proxy-port', '0'],
+    );
+    final handle = await startProxyCli(options);
+    final socket = await Socket.connect('127.0.0.1', handle.port!);
+    final client = _Client(socket);
+    addTearDown(client.close);
+
+    final replacement =
+        await LocalIdentity.fromSeed(Uint8List(32)..[0] = 43);
+    client.send([cmdImportPrivateKey, ...replacement.meshcore64]);
+    expect(await client.next(), [respCodeOk]);
+    expect(handle.node.identity.publicKey, replacement.publicKey);
+
+    client.send([cmdExportPrivateKey]);
+    final exported = await client.next();
+    expect(exported[0], respCodePrivateKey);
+    expect(exported.sublist(1), replacement.meshcore64);
+
+    await client.close();
+    await handle.close();
   });
 }

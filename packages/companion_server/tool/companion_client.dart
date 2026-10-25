@@ -26,7 +26,7 @@ Future<void> main(List<String> args) async {
       timeout: const Duration(seconds: 10));
   socket.setOption(SocketOption.tcpNoDelay, true);
 
-  final codec = SerialFrameCodec();
+  final codec = SerialFrameCodec.bidirectional();
   final buffer = <Uint8List>[];
   final waiters = <Completer<Uint8List>>[];
   socket.listen((data) {

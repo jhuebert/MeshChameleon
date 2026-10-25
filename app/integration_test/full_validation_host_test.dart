@@ -74,7 +74,7 @@ void main() {
     final node = MeshNode(
       identity: identity,
       link: link,
-      deviceInfo: info,
+      physical: PhysicalCapabilities.fromDeviceInfo(info),
       store: InMemoryNodeStore(),
     );
     await node.load();

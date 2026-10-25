@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
@@ -112,6 +113,184 @@ void main() {
       expect(decoded.queue, isEmpty);
     });
 
+    test('snapshot_is_deep_copy_before_async_save', () {
+      final contact = Contact(
+        publicKey: Uint8List(32)..[0] = 1,
+        name: 'original',
+        outPath: Uint8List.fromList([1, 2]),
+        rawAdvert: Uint8List.fromList([3, 4]),
+      );
+      final queued = QueuedMessage(
+        senderKey: Uint8List(32)..[0] = 2,
+        text: 'queued',
+        channelDataPayload: Uint8List.fromList([5, 6]),
+      );
+      final prefsKey = Uint8List.fromList([9, 9]);
+      final channel = Channel(name: 'c', secret: Uint8List(16)..[0] = 7);
+      final pathPrefix = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7]);
+      final settings = <String, String>{'key': 'value'};
+      final state = NodeState(
+        prefs: NodePrefs(nodeName: 'snapshot', defaultScopeKey: prefsKey),
+        contacts: [contact],
+        channels: {1: channel},
+        queue: [queued],
+        advertPaths: {
+          'k': AdvertPath(
+            publicKeyPrefix: pathPrefix,
+            name: 'p',
+            path: Uint8List.fromList([8]),
+          ),
+        },
+        customSettings: settings,
+      );
+
+      // Mutate every nested object after the snapshot was taken.
+      contact.name = 'mutated';
+      contact.outPath[0] = 0xAA;
+      contact.rawAdvert![0] = 0xBB;
+      queued.senderKey[0] = 0xCC;
+      queued.channelDataPayload![0] = 0xDD;
+      channel.secret[0] = 0xEE;
+      prefsKey[0] = 0xFF;
+      pathPrefix[0] = 0x11;
+      settings['key'] = 'mutated';
+
+      expect(state.prefs.nodeName, 'snapshot');
+      expect(state.prefs.defaultScopeKey, [9, 9]);
+      expect(state.contacts.single.name, 'original');
+      expect(state.contacts.single.outPath, [1, 2]);
+      expect(state.contacts.single.rawAdvert, [3, 4]);
+      expect(state.queue.single.text, 'queued');
+      expect(state.queue.single.senderKey[0], 2);
+      expect(state.queue.single.channelDataPayload, [5, 6]);
+      expect(state.channels[1]!.secret[0], 7);
+      expect(state.advertPaths['k']!.publicKeyPrefix[0], 1);
+      expect(state.customSettings['key'], 'value');
+    });
+
+    test('storage_counts_utf8_compact_virtual_state_not_physical_flash_or_pretty_bytes',
+        () {
+      final state = NodeState(
+        prefs: NodePrefs(nodeName: 'café'),
+        customSettings: {'sensor': 'välue'},
+      );
+      final compact = jsonEncode(state.toJson());
+      final pretty =
+          const JsonEncoder.withIndent('  ').convert(state.toJson());
+
+      expect(state.storageBytes, utf8.encode(compact).length);
+      expect(state.storageBytes, greaterThan(compact.length),
+          reason: 'UTF-8 bytes, not UTF-16 code units');
+      expect(utf8.encode(pretty).length, greaterThan(state.storageBytes),
+          reason: 'pretty file formatting is not charged to the partition');
+    });
+
+    test('used1025_rounds_to2_total4096', () async {
+      expect(storageKibForBytes(1025), 2);
+      expect(storageKibForBytes(1024), 1);
+      expect(virtualStorageTotalKb, 4096);
+
+      final node = MeshNode(
+        identity: await LocalIdentity.fromSeed(Uint8List(32)..[0] = 3),
+        link: FakeDeviceLink(
+          batteryReading_: const BatteryReading(
+            millivolts: 4000,
+            storageUsedKb: 12,
+            storageTotalKb: 1024,
+          ),
+        ),
+      );
+      addTearDown(node.stop);
+      final reading = await node.getBatteryAndStorage();
+      expect(reading.storageTotalKb, 4096);
+      expect(reading.storageUsedKb, greaterThan(0),
+          reason: 'fresh state still uses bytes');
+      expect(node.storageUsedBytes, greaterThan(0));
+    });
+
+    test('load_legacy_schema_and_over_capacity_state_without_data_loss',
+        () async {
+      final contacts = List<Contact>.generate(
+        virtualMaxContacts + 1,
+        (i) => Contact(
+          publicKey: Uint8List(32)
+            ..[0] = i & 0xFF
+            ..[1] = (i >> 8) & 0xFF,
+          name: 'legacy$i',
+          lastmod: i + 1,
+        ),
+      );
+      final channels = <int, Channel>{
+        for (var i = 0; i <= virtualMaxChannels; i++)
+          i: Channel(
+            name: 'ch$i',
+            secret: Uint8List(16)..[0] = i,
+          ),
+      };
+      final queue = List<QueuedMessage>.generate(
+        513,
+        (i) => QueuedMessage(
+          senderKey: Uint8List(32),
+          timestamp: i,
+          text: 'legacy message $i',
+          isChannel: true,
+        ),
+      );
+      final paths = <String, AdvertPath>{
+        for (var i = 0; i <= 64; i++)
+          'P$i': AdvertPath(
+            publicKeyPrefix: Uint8List(7),
+            path: Uint8List(0),
+            recvTimestamp: i,
+          ),
+      };
+      final legacy = NodeState(
+        prefs: NodePrefs(nodeName: 'legacy', pathHashMode: 1),
+        contacts: contacts,
+        channels: channels,
+        queue: queue,
+        advertPaths: paths,
+      ).toJson();
+      legacy['version'] = 1;
+      (legacy['prefs'] as Map)
+        ..remove('autoadd_max_hops')
+        ..remove('timezone_offset_hours');
+      legacy.remove('custom_settings');
+
+      final decoded = NodeState.fromJson(legacy);
+      expect(decoded.prefs.nodeName, 'legacy');
+      expect(decoded.prefs.autoaddMaxHops, 0);
+      expect(decoded.prefs.timezoneOffsetHours, 0);
+      expect(decoded.contacts, hasLength(virtualMaxContacts + 1));
+      expect(decoded.channels, hasLength(virtualMaxChannels + 1));
+      expect(decoded.queue, hasLength(513));
+      expect(decoded.advertPaths, hasLength(65));
+      expect(decoded.customSettings, isEmpty);
+
+      final store = InMemoryNodeStore();
+      await store.save(decoded);
+      final node = MeshNode(
+        identity: await LocalIdentity.fromSeed(Uint8List(32)..[0] = 4),
+        link: FakeDeviceLink(),
+        store: store,
+      );
+      await node.load();
+      expect(node.contacts, hasLength(virtualMaxContacts + 1));
+      expect(node.maxChannels, virtualMaxChannels);
+      await expectLater(
+        node.addUpdateContact(Contact(
+          publicKey: Uint8List(32)
+            ..[0] = 0xEE
+            ..[1] = 0xEE,
+          name: 'new',
+        )),
+        throwsA(isA<CompanionOperationError>()),
+      );
+      expect(node.contacts, hasLength(virtualMaxContacts + 1),
+          reason: 'over-capacity legacy state is preserved');
+      node.stop();
+    });
+
     test('drops contacts with a malformed public key', () {
       final decoded = NodeState.fromJson(<String, Object?>{
         'contacts': [
@@ -169,6 +348,49 @@ void main() {
       final b = store.save(NodeState(prefs: NodePrefs(nodeName: 'second')));
       await Future.wait([a, b]);
       expect((await store.load())!.prefs.nodeName, 'second');
+    });
+
+    test('failed_save_is_observable_and_next_save_still_runs', () async {
+      // A regular file where the parent directory should be makes the write
+      // fail with a real filesystem error.
+      final blocker = File('${dir.path}/blocker');
+      await blocker.writeAsString('x');
+      final file = File('${blocker.path}/state.json');
+      final store = JsonNodeStore(file: file);
+
+      await expectLater(
+        store.save(NodeState(prefs: NodePrefs(nodeName: 'first'))),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      await blocker.delete();
+      await store.save(NodeState(prefs: NodePrefs(nodeName: 'second')));
+      await store.flush();
+      expect((await store.load())!.prefs.nodeName, 'second');
+    });
+
+    test('flush_prevents_old_snapshot_resurrecting_reset_state', () async {
+      final file = File('${dir.path}/reset.json');
+      final store = JsonNodeStore(file: file);
+      final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 5);
+      final node = MeshNode(
+        identity: id,
+        link: FakeDeviceLink(),
+        store: store,
+        prefs: NodePrefs(nodeName: 'old name'),
+      );
+      addTearDown(node.stop);
+
+      await node.setAdvertName('old name');
+      await node.flush();
+      await node.resetVirtualState();
+
+      final loaded = await store.load();
+      expect(loaded!.prefs.nodeName, 'MeshChameleon');
+      expect(loaded.contacts, isEmpty);
+      expect(loaded.queue, isEmpty);
+      expect(node.identity.publicKey, id.publicKey,
+          reason: 'reset keeps the identity');
     });
   });
 
@@ -252,9 +474,9 @@ void main() {
     });
 
     test('persists preference and channel changes', () async {
-      alice.setAdvertName('renamed');
-      alice.setAdvertLatLon(12.5, -3.25);
-      alice.setChannel(1, 'team', Uint8List.fromList(List.filled(16, 9)));
+      await alice.setAdvertName('renamed');
+      await alice.setAdvertLatLon(12.5, -3.25);
+      await alice.setChannel(1, 'team', Uint8List.fromList(List.filled(16, 9)));
 
       final saved = await store.load();
       expect(saved!.prefs.nodeName, 'renamed');
@@ -276,10 +498,10 @@ void main() {
 
       final relaunched = MeshNode(identity: aliceId, link: aliceLink, store: store);
       await relaunched.load();
-      final msg = relaunched.syncNextMessage();
+      final msg = await relaunched.syncNextMessage();
       expect(msg, isNotNull);
       expect(msg!.text, 'bob: hello alice');
-      expect(relaunched.syncNextMessage(), isNull);
+      expect(await relaunched.syncNextMessage(), isNull);
     });
 
     test('drops the oldest queued messages on overflow', () async {
@@ -296,10 +518,294 @@ void main() {
       await bob.sendChannelMessage(0, 'msg3');
       await pump();
 
-      expect(bounded.syncNextMessage()!.text, 'bob: msg2');
-      expect(bounded.syncNextMessage()!.text, 'bob: msg3');
-      expect(bounded.syncNextMessage(), isNull);
+      expect((await bounded.syncNextMessage())!.text, 'bob: msg2');
+      expect((await bounded.syncNextMessage())!.text, 'bob: msg3');
+      expect(await bounded.syncNextMessage(), isNull);
       bounded.stop();
+    });
+
+    test('quota_rejects_candidate_without_publishing_or_losing_old_contact',
+        () async {
+      final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 6);
+      final store = InMemoryNodeStore(maxBytes: 4096);
+      final node = MeshNode(
+        identity: id,
+        link: FakeDeviceLink(),
+        store: store,
+        storageQuotaBytes: 4096,
+      )..start();
+      addTearDown(node.stop);
+
+      final old = Contact(
+        publicKey: Uint8List(32)..[0] = 1,
+        name: 'old',
+      );
+      await node.addUpdateContact(old);
+      final big = Contact(
+        publicKey: Uint8List(32)..[0] = 2,
+        name: 'big',
+        rawAdvert: Uint8List(8000),
+      );
+
+      await expectLater(
+        node.addUpdateContact(big),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeTableFull)),
+      );
+      expect(node.contacts, hasLength(1));
+      expect(node.contacts.single.name, 'old');
+      final saved = await store.load();
+      expect(saved!.contacts.single.name, 'old');
+    });
+
+    test('queue_drops_oldest_for_count_and_quota', () async {
+      final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 7);
+      final channel = Channel(
+        name: 'Public',
+        secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
+      );
+
+      // Count cap: the newest three of four messages survive.
+      final countLink = FakeDeviceLink();
+      await countLink.connect();
+      final counted = MeshNode(
+        identity: id,
+        link: countLink,
+        maxQueueSize: 3,
+      )..start();
+      for (var i = 0; i < 4; i++) {
+        countLink.deliver(
+          6.0,
+          -70,
+          _groupDataPacket(channel, Uint8List.fromList([i])),
+        );
+        await pump();
+      }
+      expect((await counted.syncNextMessage())!.channelDataPayload, [1]);
+      expect((await counted.syncNextMessage())!.channelDataPayload, [2]);
+      expect((await counted.syncNextMessage())!.channelDataPayload, [3]);
+      expect(await counted.syncNextMessage(), isNull);
+      counted.stop();
+
+      // Quota cap: one small message fits, two do not; the oldest is dropped.
+      final emptyBytes = NodeState(
+        prefs: NodePrefs(),
+        channels: {0: channel},
+      ).storageBytes;
+      final oneBytes = NodeState(
+        prefs: NodePrefs(),
+        channels: {0: channel},
+        queue: [_queuedChannelData(Uint8List.fromList([1]))],
+      ).storageBytes;
+      final quota = emptyBytes + (oneBytes - emptyBytes) + 20;
+
+      final quotaLink = FakeDeviceLink();
+      await quotaLink.connect();
+      final bounded = MeshNode(
+        identity: id,
+        link: quotaLink,
+        storageQuotaBytes: quota,
+        store: InMemoryNodeStore(maxBytes: quota),
+      )..start();
+
+      quotaLink.deliver(
+        6.0,
+        -70,
+        _groupDataPacket(channel, Uint8List.fromList([1])),
+      );
+      await pump();
+      expect((await bounded.getStats(statsTypeCore))['queue_len'], 1);
+
+      quotaLink.deliver(
+        6.0,
+        -70,
+        _groupDataPacket(channel, Uint8List.fromList([2])),
+      );
+      await pump();
+      expect((await bounded.getStats(statsTypeCore))['queue_len'], 1);
+
+      // A message that cannot fit even alone is dropped without evicting the
+      // current queue.
+      quotaLink.deliver(
+        6.0,
+        -70,
+        _groupDataPacket(channel, Uint8List(255)),
+      );
+      await pump();
+      expect((await bounded.getStats(statsTypeCore))['queue_len'], 1);
+      expect((await bounded.syncNextMessage())!.channelDataPayload, [2]);
+      expect(await bounded.syncNextMessage(), isNull);
+      bounded.stop();
+    });
+
+    test('disk_full_is_err5_not_quota_err3', () async {
+      final dir = await Directory.systemTemp.createTemp('mesh_node_disk_full');
+      addTearDown(() => dir.delete(recursive: true));
+      final blocker = File('${dir.path}/blocker');
+      await blocker.writeAsString('x');
+      final store = JsonNodeStore(file: File('${blocker.path}/state.json'));
+      final node = MeshNode(
+        identity: await LocalIdentity.fromSeed(Uint8List(32)..[0] = 8),
+        link: FakeDeviceLink(),
+        store: store,
+      )..start();
+      addTearDown(node.stop);
+
+      await expectLater(
+        node.setAdvertName('new name'),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeFileIoError)),
+      );
+      expect(node.prefs.nodeName, 'MeshChameleon');
+    });
+
+    test('legacy_over_quota_state_allows_shrinking_but_not_growth', () async {
+      final dir = await Directory.systemTemp.createTemp('mesh_node_overquota');
+      addTearDown(() => dir.delete(recursive: true));
+      final file = File('${dir.path}/state.json');
+      final contact =
+          Contact(publicKey: Uint8List(32)..[0] = 1, name: 'legacy');
+      final keep = Contact(
+        publicKey: Uint8List(32)..[0] = 2,
+        name: 'keep',
+        rawAdvert: Uint8List(2000),
+      );
+      final legacy = NodeState(
+        prefs: NodePrefs(nodeName: 'legacy'),
+        contacts: [contact, keep],
+      );
+      await file.writeAsString(jsonEncode(legacy.toJson()));
+
+      final store = JsonNodeStore(file: file, maxBytes: 1024);
+      final loaded = await store.load();
+      expect(loaded, isNotNull);
+      expect(loaded!.storageBytes, greaterThan(1024));
+
+      final node = MeshNode(
+        identity: await LocalIdentity.fromSeed(Uint8List(32)..[0] = 9),
+        link: FakeDeviceLink(),
+        store: store,
+        storageQuotaBytes: 1024,
+      );
+      await node.load();
+      expect(node.contacts, hasLength(2));
+
+      // A shrinking mutation is allowed even though the state remains over
+      // quota; growth is rejected.
+      await node.removeContact(contact.publicKey);
+      expect(node.contacts.single.name, 'keep');
+      expect((await store.load())!.contacts.single.name, 'keep');
+
+      await expectLater(
+        node.addUpdateContact(Contact(
+          publicKey: Uint8List(32)
+            ..[0] = 3
+            ..[1] = 3,
+          name: 'new',
+        )),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeTableFull)),
+      );
+      node.stop();
+    });
+
+    test('timezone_persists_but_virtual_time_offset_does_not', () async {
+      final store = InMemoryNodeStore();
+      final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 12);
+      final firstClock = VirtualClock(
+        hostWallClock: () => DateTime.fromMillisecondsSinceEpoch(100000),
+        monotonicClock: () => Duration.zero,
+      );
+      final first = MeshNode(
+        identity: id,
+        link: FakeDeviceLink(),
+        store: store,
+        clock: firstClock,
+      );
+      expect(first.setTime(500), isTrue);
+      await first.setTimezoneOffsetHours(5);
+      first.stop();
+
+      expect((await store.load())!.prefs.timezoneOffsetHours, 5);
+      final secondClock = VirtualClock(
+        hostWallClock: () => DateTime.fromMillisecondsSinceEpoch(200000),
+        monotonicClock: () => Duration.zero,
+      );
+      final second = MeshNode(
+        identity: id,
+        link: FakeDeviceLink(),
+        store: store,
+        clock: secondClock,
+      );
+      await second.load();
+      expect(second.timezoneOffsetHours, 5);
+      expect(second.getTime(), 200,
+          reason: 'the runtime virtual offset is not persisted');
+      second.stop();
+    });
+
+    test('memory_store_enforces_same_virtual_quota', () async {
+      final store = InMemoryNodeStore(maxBytes: 1024);
+      await expectLater(
+        store.save(NodeState(prefs: NodePrefs(nodeName: 'x' * 2000))),
+        throwsA(isA<NodeStorageQuotaError>()),
+      );
+    });
+
+    test('advert_path_cache_is_capped_at_64', () async {
+      expect(defaultOfflineQueueSize, 512);
+      final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 11);
+      final link = FakeDeviceLink();
+      await link.connect();
+      final node = MeshNode(identity: id, link: link)..start();
+      addTearDown(node.stop);
+
+      for (var i = 0; i < 66; i++) {
+        final peer = await LocalIdentity.fromSeed(
+          Uint8List(32)..[0] = i + 20,
+        );
+        final advert = await PacketBuilder.createAdvert(
+          identity: peer,
+          name: 'p$i',
+          lat: 0,
+          lon: 0,
+          flags: advTypeChat,
+          flood: true,
+          timestamp: 1700000000 + i,
+        );
+        link.deliver(6.0, -70, advert.writeTo());
+        await pump();
+      }
+      expect(node.contacts, hasLength(66));
+      expect(node.advertPathCacheLength, maxAdvertPathCacheEntries);
     });
   });
 }
+
+Uint8List _groupDataPacket(Channel channel, Uint8List data) {
+  final secret = Uint8List(32);
+  secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
+  final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
+  final plaintext = BufferWriter()
+    ..writeUInt16Le(0x1234)
+    ..writeByte(data.length)
+    ..writeBytes(data);
+  final cipher = CryptoUtils.encryptThenMac(
+      secret.sublist(0, 16), secret, plaintext.toBytes());
+  return (Packet()
+        ..header = Packet.createHeader(payloadTypeGrpData, routeTypeFlood)
+        ..pathLenByte = 0
+        ..payload = Uint8List.fromList([channelHash, ...cipher]))
+      .writeTo();
+}
+
+QueuedMessage _queuedChannelData(Uint8List data) => QueuedMessage(
+      senderKey: Uint8List(32),
+      isChannel: true,
+      channelIdx: 0,
+      pathLen: 0xFF,
+      snr: 6.0,
+      rssi: -70,
+      channelDataType: 0x1234,
+      channelDataPayload: Uint8List.fromList(data),
+    );

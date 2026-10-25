@@ -26,8 +26,9 @@ Options:
                            $defaultCompanionPort).
   --proxy-port PORT        App-facing companion port (default $defaultCompanionPort,
                            0 picks a free port).
-  --identity-file PATH     Persist the proxy identity as plaintext hex (mode
-                           0600). Without this the identity is ephemeral.
+  --identity-file PATH     Persist the proxy identity as plaintext hex (atomic
+                           replace, mode 0600). Without this the identity is
+                           ephemeral, including network imports.
   --state-dir PATH         Persist contacts/channels/queue as JSON there.
   -h, --help               Show this message.
 ''';
@@ -148,7 +149,15 @@ Future<ProxyCliHandle> startProxyCli(
   ProxyCliOptions options, {
   void Function(String message)? log,
 }) async {
-  final identity = await _loadIdentity(options.identityFile, log);
+  final identityPersistence = _openIdentityPersistence(
+    options.identityFile,
+    log,
+  );
+  var identity = await identityPersistence.load();
+  if (identity == null) {
+    identity = await LocalIdentity.generate();
+    await identityPersistence.save(identity);
+  }
 
   final RadioLink link;
   final host = options.deviceHost;
@@ -162,7 +171,12 @@ Future<ProxyCliHandle> startProxyCli(
   await connectWithBackoff(link, onLog: log);
 
   final deviceInfo = await link.deviceInfo();
-  final params = await link.radioParams();
+  final selfInfo = await link.selfInfo();
+  final params = selfInfo.radioParams;
+  final physical = PhysicalCapabilities.fromDeviceInfo(
+    deviceInfo,
+    maxTxPower: selfInfo.maxTxPower,
+  );
   log?.call('device fw=${deviceInfo.firmwareVerCode} '
       'radio=${params.frequencyHz ~/ 1000} kHz sf${params.spreadingFactor}');
 
@@ -170,10 +184,12 @@ Future<ProxyCliHandle> startProxyCli(
   final node = MeshNode(
     identity: identity,
     link: link,
-    deviceInfo: deviceInfo,
+    physical: physical,
     store: store,
+    identityPersistence: identityPersistence,
   );
   await node.load();
+  node.adoptPhysicalCapabilities(physical);
   node.syncRadioParams(params);
   node.start();
 
@@ -194,32 +210,22 @@ Future<NodeStore> _openStore(String? stateDir) async {
   return JsonNodeStore(file: File('${dir.path}/node_state.json'));
 }
 
-/// Load, or create, the proxy identity.
+/// Open the headless identity backend and describe the persistence choice.
 ///
 /// The identity is the proxy's private key: it is only written when the caller
 /// asks for a file, and the warning makes the plaintext trade-off explicit.
-Future<LocalIdentity> _loadIdentity(
+VirtualIdentityPersistence _openIdentityPersistence(
   String? path,
   void Function(String message)? log,
-) async {
+) {
   if (path == null) {
-    log?.call('using an ephemeral identity (pass --identity-file to keep it)');
-    return LocalIdentity.generate();
+    log?.call('using an ephemeral identity; network imports last until exit '
+        '(pass --identity-file to keep it)');
+    return MemoryIdentityPersistence();
   }
-  final file = File(path);
-  if (await file.exists()) {
-    final hex = (await file.readAsString()).trim();
-    log?.call('loaded identity from $path');
-    return LocalIdentity.import(hexToBytes(hex));
-  }
-  final identity = await LocalIdentity.generate();
-  await file.parent.create(recursive: true);
-  await file.writeAsString(bytesToHex(identity.meshcore64));
-  if (!Platform.isWindows) {
-    await Process.run('chmod', ['600', path]);
-  }
-  log?.call('warning: wrote the private identity as plaintext hex to $path');
-  return identity;
+  log?.call('warning: storing the private identity as plaintext hex at $path '
+      '(atomic replace, mode 0600)');
+  return FileIdentityPersistence(File(path));
 }
 
 Future<void> main(List<String> args) async {

@@ -1,6 +1,32 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
+
+/// A failed bridge operation carrying a companion-protocol error response.
+///
+/// [disabled] means the server must answer with the one-byte DISABLED response
+/// instead of `[1, code]`. [uncertain] means a physical write may have reached
+/// the radio and must not be retried automatically.
+class CompanionOperationError implements Exception {
+  const CompanionOperationError(
+    this.code, {
+    this.message,
+    this.disabled = false,
+    this.uncertain = false,
+  });
+
+  final int code;
+  final String? message;
+  final bool disabled;
+  final bool uncertain;
+
+  @override
+  String toString() => 'CompanionOperationError(code=$code'
+      '${disabled ? ', disabled' : ''}'
+      '${uncertain ? ', uncertain' : ''}'
+      '${message == null ? '' : ', $message'})';
+}
 
 /// Sink the [CompanionBridge] uses to emit asynchronous push frames to the
 /// connected client. The server registers itself when a client connects.
@@ -17,6 +43,12 @@ abstract class CompanionPushSink {
   /// A new advert was received; [contactFrame] is a full `RESP_CODE_CONTACT`
   /// style frame body (without the leading code byte).
   void pushNewAdvert(Uint8List contactFrame);
+
+  /// A contact was evicted by overwrite-on-full (full pubkey).
+  void pushContactDeleted(Uint8List pubkey);
+
+  /// Persistent contact capacity/quota prevented auto-add.
+  void pushContactsFull();
 
   /// A contact's routing path changed (full pubkey).
   void pushPathUpdated(Uint8List pubkey);
@@ -96,9 +128,18 @@ class CompanionBridge {
   Uint8List getPublicKey() =>
       throw UnsupportedError('getPublicKey not implemented');
 
+  /// Export the active virtual 64-byte expanded identity.
+  Future<Uint8List> exportPrivateKey() async =>
+      throw UnsupportedError('exportPrivateKey not implemented');
+
+  /// Validate and replace the active virtual identity from a complete 64-byte
+  /// expanded key. Implementations must store before switching.
+  Future<void> importPrivateKey(Uint8List expandedKey) async =>
+      throw UnsupportedError('importPrivateKey not implemented');
+
   DeviceInfo getDeviceInfo() => const DeviceInfo();
 
-  BatteryReading getBatteryAndStorage() =>
+  Future<BatteryReading> getBatteryAndStorage() async =>
       const BatteryReading(millivolts: 0, storageUsedKb: 0, storageTotalKb: 0);
 
   int getTime() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -109,19 +150,24 @@ class CompanionBridge {
 
   Contact? getContactByKey(Uint8List pubkey) => null;
 
+  /// Persistent-contact lookup for client listing/export commands; transient
+  /// anonymous slots are intentionally excluded.
+  Contact? getPersistentContactByKey(Uint8List pubkey) =>
+      getContactByKey(pubkey);
+
   Contact? getContactByKeyPrefix(Uint8List prefix) => null;
 
-  bool addUpdateContact(Contact contact) => false;
+  Future<void> addUpdateContact(Contact contact, {bool hasGps = true}) async {}
 
-  bool removeContact(Uint8List pubkey) => false;
+  Future<void> removeContact(Uint8List pubkey) async {}
 
-  bool resetPath(Uint8List pubkey) => false;
+  Future<void> resetPath(Uint8List pubkey) async {}
 
   Channel? getChannel(int index) => null;
 
   int get maxChannels => 8;
 
-  bool setChannel(int index, String name, Uint8List secret) => false;
+  Future<void> setChannel(int index, String name, Uint8List secret) async {}
 
   Future<SentResult> sendTextMessage(
     Uint8List pubkey,
@@ -145,33 +191,59 @@ class CompanionBridge {
   }) async =>
       false;
 
-  Future<bool> advertise({bool flood = true}) async => false;
+  Future<bool> advertise({bool flood = false}) async => false;
 
-  void setAdvertName(String name) {}
+  Future<void> setAdvertName(String name) async {}
 
-  void setAdvertLatLon(double lat, double lon) {}
+  Future<void> setAdvertLatLon(double lat, double lon) async {}
 
-  void setRadioParams(int freqHz, int bwHz, int sf, int cr) {}
+  Future<void> setRadioParams(
+    int freqHz,
+    int bwHz,
+    int sf,
+    int cr, {
+    bool? clientRepeat,
+  }) async {}
 
-  void setTxPower(int dbm) {}
+  Future<void> setTxPower(int dbm) async {}
 
   /// Current path-hash mode reported to the client in `DEVICE_INFO`.
   int getPathHashMode() => getDeviceInfo().pathHashMode;
 
-  /// Set the path-hash mode (`CMD_SET_PATH_HASH_MODE`, fw v10+).
+  /// Set the virtual path-hash mode (`CMD_SET_PATH_HASH_MODE`).
   Future<void> setPathHashMode(int mode) async {}
 
   /// Current device radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
   Future<TuningParams> getTuningParams() async =>
       const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
 
-  /// Set the device radio tuning parameters (`CMD_SET_TUNING_PARAMS`).
-  void setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) {}
+  /// Set the physical radio tuning parameters (`CMD_SET_TUNING_PARAMS`).
+  Future<void> setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) async {}
 
   /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
   /// Run a CLI command on the device, returning its reply text (fw v14+).
   /// Returns null when unsupported (device firmware < v14).
   Future<String?> runCliCommand(String command) async => null;
+
+  /// Strict binary CLI entry point. Implementations that support the full
+  /// allowlist override this to preserve raw-byte validation.
+  Future<String> runCliCommandBytes(Uint8List payload) async {
+    var bytes = payload;
+    if (bytes.isNotEmpty && bytes.last == 0) {
+      bytes = bytes.sublist(0, bytes.length - 1);
+    }
+    if (bytes.any((b) => b < 0x20 || b == 0x7F)) {
+      return 'Error: illegal argument';
+    }
+    try {
+      final text = await runCliCommand(
+        utf8.decode(bytes, allowMalformed: false),
+      );
+      return text ?? 'Unknown command';
+    } on FormatException {
+      return 'Error: illegal argument';
+    }
+  }
 
   /// The allowed repeat-frequency ranges (`CMD_GET_ALLOWED_REPEAT_FREQ`): raw
   /// `[lower(4)][upper(4)]...` bytes (empty when unrestricted/unknown).
@@ -179,18 +251,22 @@ class CompanionBridge {
 
   Map<String, String> getCustomVars() => const {};
 
-  bool setCustomVar(String name, String value) => false;
+  Future<void> setCustomVar(String name, String value) async {
+    throw const CompanionOperationError(errCodeIllegalArg);
+  }
 
   int getAutoAddConfig() => 0;
 
-  void setAutoAddConfig(int flags) {}
+  int getAutoAddMaxHops() => 0;
 
-  void setOtherParams(
-    int manualAdd,
-    int telemetryModes,
-    int advertLocPolicy,
-    int multiAcks,
-  ) {}
+  Future<void> setAutoAddConfig(int flags, int? maxHops) async {}
+
+  Future<void> setOtherParams({
+    required int manualAddContacts,
+    int? telemetryModes,
+    int? advertLocPolicy,
+    int? multiAcks,
+  }) async {}
 
   /// The raw advert packet blob for [pubkey], or a freshly built self advert
   /// when [pubkey] is null (`CMD_EXPORT_CONTACT`). Backs the `meshcore://` URI.
@@ -204,16 +280,17 @@ class CompanionBridge {
 
   /// Send a raw custom packet (`CMD_SEND_RAW_DATA`) directly along [path]
   /// (already-decoded path bytes plus their encoded length byte).
-  Future<bool> sendRawData(Uint8List payload, Uint8List path, int pathLenByte) async =>
+  Future<bool> sendRawData(
+          Uint8List payload, Uint8List path, int pathLenByte) async =>
       false;
 
   /// Transmit an already-formed packet verbatim (`CMD_SEND_RAW_PACKET`).
   /// [priority] is accepted for protocol compatibility; the transport ignores it.
   Future<bool> sendRawPacket(Packet packet, int priority) async => false;
 
-  QueuedMessage? syncNextMessage() => null;
+  Future<QueuedMessage?> syncNextMessage() async => null;
 
-  Map<String, Object?> getStats(int statsType) => const {};
+  Future<Map<String, Object?>> getStats(int statsType) async => const {};
 
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async =>
       const SentResult.failure();
@@ -273,14 +350,19 @@ class CompanionBridge {
 
   /// `CMD_SET_DEFAULT_FLOOD_SCOPE`: store the default region scope name and its
   /// 16-byte key (both cleared when [key] is null).
-  void setDefaultFloodScope(String name, Uint8List? key) {}
+  Future<void> setDefaultFloodScope(String name, Uint8List? key) async {}
 
   /// The stored default flood scope: a (name, 16-byte key) pair, or `('', null)`
   /// when unset. Backs `CMD_GET_DEFAULT_FLOOD_SCOPE`.
   (String, Uint8List?) getDefaultFloodScope() => ('', null);
 
-  /// `CMD_REBOOT`: restart the node engine (best-effort; ephemeral state only).
-  void reboot() {}
+  /// `CMD_REBOOT`: dispatch the physical reboot and clear ephemeral virtual
+  /// operations. Does not wait for a firmware reply.
+  Future<void> reboot() async {}
+
+  /// Bumped after a successful reboot/shutdown lifecycle action so the server
+  /// can clear per-client ephemeral state (for example signing buffers).
+  int get lifecycleGeneration => 0;
 
   /// Send a raw control-data packet zero-hop.
   Future<bool> sendControlData(Uint8List data) async => false;

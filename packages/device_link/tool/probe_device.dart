@@ -107,6 +107,7 @@ Future<Packet?> _transmitProbeGroupText(TcpDeviceLink link) async {
     channel: channel,
     message: 'M0 proxy probe',
     senderName: 'M0-Probe',
+    timestamp: DateTime.now().millisecondsSinceEpoch ~/ 1000,
   );
   final bytes = packet.writeTo();
   stdout.writeln('channel name="${channel.name}" hash='

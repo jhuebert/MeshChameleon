@@ -6,25 +6,59 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// Schema version written into every persisted [NodeState]. Bump when the
 /// layout changes so older blobs can be migrated or discarded.
-const int nodeStateSchemaVersion = 1;
+const int nodeStateSchemaVersion = 2;
+
+/// Thrown when a candidate state would exceed the deterministic virtual quota.
+///
+/// This is distinct from a physical filesystem failure, which propagates as a
+/// [FileSystemException] and maps to FILE_IO_ERROR rather than TABLE_FULL.
+class NodeStorageQuotaError implements Exception {
+  const NodeStorageQuotaError(this.bytes, this.maxBytes);
+
+  final int bytes;
+  final int maxBytes;
+
+  @override
+  String toString() =>
+      'NodeStorageQuotaError($bytes bytes > $maxBytes byte quota)';
+}
 
 /// A serialisable snapshot of the node state that survives restarts:
-/// preferences, contacts, channels, the offline message queue, and the
-/// recent advert-path cache.
+/// preferences, contacts, channels, the offline message queue, advert-path
+/// cache, and custom sensor settings.
 ///
 /// The identity is intentionally *not* part of this snapshot; it is owned and
-/// stored separately (see the app's secure identity store).
+/// stored separately (see the app's secure identity store). Construction deep
+/// copies every nested object so an in-flight save cannot observe later
+/// mutations.
 class NodeState {
   NodeState({
-    required this.prefs,
+    required NodePrefs prefs,
     List<Contact>? contacts,
     Map<int, Channel>? channels,
     List<QueuedMessage>? queue,
     Map<String, AdvertPath>? advertPaths,
-  })  : contacts = contacts ?? <Contact>[],
-        channels = channels ?? <int, Channel>{},
-        queue = queue ?? <QueuedMessage>[],
-        advertPaths = advertPaths ?? <String, AdvertPath>{};
+    Map<String, String>? customSettings,
+  })  : prefs = NodePrefs()..copyFrom(prefs),
+        contacts = [
+          for (final c in contacts ?? const <Contact>[]) c.clone(),
+        ],
+        channels = {
+          for (final e in (channels ?? const <int, Channel>{}).entries)
+            e.key: Channel(
+              name: e.value.name,
+              secret: Uint8List.fromList(e.value.secret),
+            ),
+        },
+        queue = [
+          for (final m in queue ?? const <QueuedMessage>[]) m.clone(),
+        ],
+        advertPaths = {
+          for (final e in (advertPaths ?? const <String, AdvertPath>{}).entries)
+            e.key: e.value.clone(),
+        },
+        customSettings =
+            Map<String, String>.of(customSettings ?? const <String, String>{});
 
   final NodePrefs prefs;
   final List<Contact> contacts;
@@ -33,6 +67,22 @@ class NodeState {
 
   /// Keyed by the hex-encoded public-key prefix.
   final Map<String, AdvertPath> advertPaths;
+
+  /// Provider-backed virtual sensor settings (not an arbitrary dictionary).
+  final Map<String, String> customSettings;
+
+  /// UTF-8 byte length of the compact canonical serialization. This is the
+  /// deterministic virtual storage usage, independent of file formatting.
+  int get storageBytes => utf8.encode(jsonEncode(toJson())).length;
+
+  NodeState copy() => NodeState(
+        prefs: prefs,
+        contacts: contacts,
+        channels: channels,
+        queue: queue,
+        advertPaths: advertPaths,
+        customSettings: customSettings,
+      );
 
   factory NodeState.fromJson(Map<String, Object?> json) {
     final contacts = <Contact>[];
@@ -60,12 +110,19 @@ class NodeState {
       advertPaths[key] = _advertPathFromJson(map);
     }
 
+    final customSettings = <String, String>{};
+    final rawSettings = _asMap(json['custom_settings']);
+    for (final e in rawSettings.entries) {
+      if (e.value is String) customSettings[e.key] = e.value as String;
+    }
+
     return NodeState(
       prefs: _prefsFromJson(_asMap(json['prefs'])),
       contacts: contacts,
       channels: channels,
       queue: queue,
       advertPaths: advertPaths,
+      customSettings: customSettings,
     );
   }
 
@@ -80,42 +137,67 @@ class NodeState {
         'advert_paths': advertPaths.entries
             .map((e) => <String, Object?>{'key': e.key, ..._advertPathToJson(e.value)})
             .toList(),
+        'custom_settings': customSettings,
       };
 }
 
-/// Persistence backend for the node state. Implementations must be safe to
-/// call from multiple rapid mutations; [save] captures its snapshot before
-/// yielding.
+/// Persistence backend for the node state.
 abstract class NodeStore {
   /// Load the last saved state, or `null` if nothing has been persisted yet.
   Future<NodeState?> load();
 
   /// Persist [state], replacing any previously saved snapshot.
+  ///
+  /// Failures are observable through the returned future. A failed save must
+  /// not poison later saves: implementations recover their internal queue.
   Future<void> save(NodeState state);
+
+  /// Wait for all queued writes to settle. Errors were already reported by the
+  /// corresponding [save] future and are not rethrown here.
+  Future<void> flush();
 }
 
 /// In-memory [NodeStore]. Useful as a default and for tests.
 class InMemoryNodeStore implements NodeStore {
+  InMemoryNodeStore({this.maxBytes = virtualStorageQuotaBytes});
+
+  final int maxBytes;
   NodeState? _state;
+  int _lastBytes = 0;
 
   @override
-  Future<NodeState?> load() async => _state;
+  Future<NodeState?> load() async {
+    _lastBytes = _state?.storageBytes ?? 0;
+    return _state?.copy();
+  }
 
   @override
   Future<void> save(NodeState state) async {
-    _state = state;
+    final bytes = state.storageBytes;
+    _checkVirtualQuota(bytes, _lastBytes, maxBytes);
+    _state = state.copy();
+    _lastBytes = bytes;
   }
+
+  @override
+  Future<void> flush() async {}
 }
 
 /// JSON-file [NodeStore]. Writes atomically (temp file + rename) and serialises
 /// concurrent saves so a later mutation can never be clobbered by an earlier
 /// in-flight write.
 class JsonNodeStore implements NodeStore {
-  JsonNodeStore({required this.file, this.pretty = false});
+  JsonNodeStore({
+    required this.file,
+    this.pretty = false,
+    this.maxBytes = virtualStorageQuotaBytes,
+  });
 
   final File file;
   final bool pretty;
+  final int maxBytes;
   Future<void> _tail = Future<void>.value();
+  int _lastBytes = 0;
 
   @override
   Future<NodeState?> load() async {
@@ -125,7 +207,9 @@ class JsonNodeStore implements NodeStore {
       if (raw.trim().isEmpty) return null;
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return null;
-      return NodeState.fromJson(decoded.cast<String, Object?>());
+      final state = NodeState.fromJson(decoded.cast<String, Object?>());
+      _lastBytes = state.storageBytes;
+      return state;
     } on FormatException {
       return null;
     } on FileSystemException {
@@ -135,19 +219,40 @@ class JsonNodeStore implements NodeStore {
 
   @override
   Future<void> save(NodeState state) {
-    // Encode synchronously so the snapshot is fixed before the async write.
+    final json = state.toJson();
+    final canonical = jsonEncode(json);
+    final bytes = utf8.encode(canonical).length;
+    _checkVirtualQuota(bytes, _lastBytes, maxBytes);
     final encoded = pretty
-        ? const JsonEncoder.withIndent('  ').convert(state.toJson())
-        : jsonEncode(state.toJson());
-    _tail = _tail.then((_) => _write(encoded)).catchError((Object _) {});
-    return _tail;
+        ? const JsonEncoder.withIndent('  ').convert(json)
+        : canonical;
+
+    final write = _tail.then(
+      (_) => _write(encoded),
+      onError: (Object _) => _write(encoded),
+    );
+    // Keep the queue alive after a failed write so later saves still execute.
+    _tail = write.then((_) {}, onError: (Object _) {});
+    return write.then((_) {
+      _lastBytes = bytes;
+    });
   }
+
+  @override
+  Future<void> flush() => _tail;
 
   Future<void> _write(String encoded) async {
     await file.parent.create(recursive: true);
     final tmp = File('${file.path}.tmp');
     await tmp.writeAsString(encoded, flush: true);
     await tmp.rename(file.path);
+  }
+}
+
+void _checkVirtualQuota(int bytes, int lastBytes, int maxBytes) {
+  // A shrinking mutation is allowed even when legacy state is over quota.
+  if (bytes > maxBytes && bytes > lastBytes) {
+    throw NodeStorageQuotaError(bytes, maxBytes);
   }
 }
 
@@ -193,9 +298,10 @@ Map<String, Object?> _prefsToJson(NodePrefs p) => <String, Object?>{
       'telemetry_mode_environment': p.telemetryModeEnvironment,
       'manual_add_contacts': p.manualAddContacts,
       'autoadd_config': p.autoaddConfig,
+      'autoadd_max_hops': p.autoaddMaxHops,
+      'timezone_offset_hours': p.timezoneOffsetHours,
       'client_repeat': p.clientRepeat,
       'path_hash_mode': p.pathHashMode,
-      'export_private_key_enabled': p.exportPrivateKeyEnabled,
       'rx_delay_base_ms': p.rxDelayBaseMs,
       'airtime_factor_ms': p.airtimeFactorMs,
       'default_scope_name': p.defaultScopeName,
@@ -227,9 +333,12 @@ NodePrefs _prefsFromJson(Map<String, Object?> j) {
     manualAddContacts:
         _int(j['manual_add_contacts'], defaults.manualAddContacts),
     autoaddConfig: _int(j['autoadd_config'], defaults.autoaddConfig),
+    autoaddMaxHops:
+        _int(j['autoadd_max_hops'], defaults.autoaddMaxHops),
+    timezoneOffsetHours:
+        _int(j['timezone_offset_hours'], defaults.timezoneOffsetHours),
     clientRepeat: _int(j['client_repeat'], defaults.clientRepeat),
     pathHashMode: _int(j['path_hash_mode'], defaults.pathHashMode),
-    exportPrivateKeyEnabled: j['export_private_key_enabled'] == true,
     rxDelayBaseMs: _int(j['rx_delay_base_ms'], defaults.rxDelayBaseMs),
     airtimeFactorMs: _int(j['airtime_factor_ms'], defaults.airtimeFactorMs),
     defaultScopeName: _str(j['default_scope_name'], defaults.defaultScopeName),

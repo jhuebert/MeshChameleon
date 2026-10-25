@@ -7,6 +7,7 @@ import 'crypto.dart';
 import 'identity.dart';
 import 'models.dart';
 import 'packet.dart';
+import 'paths.dart';
 
 /// Builds MeshCore on-air packets. Ported from `openhop_core` `PacketBuilder`.
 class PacketBuilder {
@@ -56,9 +57,9 @@ class PacketBuilder {
     double lon = 0.0,
     int flags = advertFlagIsChatNode,
     bool flood = true,
-    int? timestamp,
+    required int timestamp,
   }) async {
-    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ts = timestamp;
     final pubkey = identity.publicKey;
     final appdata = encodeAdvertData(name: name, lat: lat, lon: lon, flags: flags);
     final body = Uint8List.fromList([
@@ -114,10 +115,13 @@ class PacketBuilder {
     ));
   }
 
-  /// Create a discrete ACK packet from a precomputed 4-byte ACK hash.
+  /// Create a discrete ACK packet from a precomputed ACK payload.
+  ///
+  /// Plain-text ACKs carry the four-byte hash plus extended-attempt and random
+  /// bytes; all provided bytes are preserved.
   static Packet createAckPacket(List<int> ackBytes) => _packet(
       Packet.createHeader(payloadTypeAck, routeTypeDirect),
-      Uint8List.fromList(ackBytes.sublist(0, 4)));
+      Uint8List.fromList(ackBytes));
 
   /// Create a multipart ACK packet (`PAYLOAD_TYPE_MULTIPART` whose first byte is
   /// `remaining << 4 | PAYLOAD_TYPE_ACK`). Used to send a redundant ACK on
@@ -126,7 +130,7 @@ class PacketBuilder {
       Packet.createHeader(payloadTypeMultipart, routeTypeDirect),
       Uint8List.fromList([
         ((remaining & 0x0F) << 4) | payloadTypeAck,
-        ...ackBytes.sublist(0, 4),
+        ...ackBytes,
       ]));
 
   /// Create an encrypted return-path packet carrying [extra] (e.g. an ACK
@@ -178,9 +182,9 @@ class PacketBuilder {
     required String message,
     int attempt = 0,
     int txtType = txtTypePlain,
-    int? timestamp,
+    required int timestamp,
   }) async {
-    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ts = timestamp;
     final flagsByte = ((txtType & 0x3F) << 2) | (attempt & 0x03);
     final plaintext = BufferWriter()
       ..writeUInt32Le(ts)
@@ -203,7 +207,7 @@ class PacketBuilder {
       selfPubkey: identity.publicKey,
     );
 
-    final hasPath = contact.outPath.isNotEmpty && contact.outPathLen > 0;
+    final hasPath = contact.hasDirectRoute;
     final pkt = _packet(
       Packet.createHeader(payloadTypeTxtMsg, _routeTypeValue(hasPath)),
       payload,
@@ -219,12 +223,12 @@ class PacketBuilder {
     required Channel channel,
     required String message,
     required String senderName,
-    int? timestamp,
+    required int timestamp,
   }) {
     final secret = Uint8List(32);
     secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
     final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
-    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ts = timestamp;
     final content = '$senderName: $message';
     final plaintext = BufferWriter()
       ..writeUInt32Le(ts)
@@ -238,7 +242,10 @@ class PacketBuilder {
   /// Build a group *data* packet (`PAYLOAD_TYPE_GRP_DATA`) for [channel].
   ///
   /// When [pathLenEncoded] is `0xFF` (unknown) the packet is flooded; otherwise
-  /// it is routed directly via [path].
+  /// it is routed directly via [path]. A zero-length path is a valid zero-hop
+  /// direct route and is distinct from flood (`0xFF`). The application payload
+  /// is capped at [maxGroupDataLength] (165); the caller is responsible for
+  /// the additional whole-command frame limit.
   static Packet createGroupData({
     required Channel channel,
     required int dataType,
@@ -246,6 +253,33 @@ class PacketBuilder {
     List<int> path = const [],
     int pathLenEncoded = 0xFF,
   }) {
+    if (dataType == dataTypeReserved) {
+      throw ArgumentError.value(dataType, 'dataType', 'reserved data type');
+    }
+    if (data.length > maxGroupDataLength) {
+      throw ArgumentError.value(
+        data.length,
+        'data.length',
+        'group data exceeds $maxGroupDataLength bytes',
+      );
+    }
+    final flood = pathLenEncoded == 0xFF;
+    if (flood) {
+      if (path.isNotEmpty) {
+        throw ArgumentError.value(
+            path.length, 'path', 'a flooded packet must not carry a path');
+      }
+    } else {
+      if (!PathUtils.isValidPathLen(pathLenEncoded)) {
+        throw ArgumentError.value(
+            pathLenEncoded, 'pathLenEncoded', 'invalid encoded path length');
+      }
+      final expected = PathUtils.getByteLength(pathLenEncoded);
+      if (path.length != expected) {
+        throw ArgumentError.value(
+            path.length, 'path.length', 'expected $expected path bytes');
+      }
+    }
     final secret = Uint8List(32);
     secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
     final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
@@ -256,7 +290,6 @@ class PacketBuilder {
     final cipher = CryptoUtils.encryptThenMac(
         secret.sublist(0, 16), secret, plaintext.toBytes());
     final payload = Uint8List.fromList([channelHash, ...cipher]);
-    final flood = pathLenEncoded == 0xFF || path.isEmpty;
     final pkt = _packet(
       Packet.createHeader(
           payloadTypeGrpData, flood ? routeTypeFlood : routeTypeDirect),
@@ -314,10 +347,10 @@ class PacketBuilder {
     required LocalIdentity identity,
     required int protocolCode,
     List<int> data = const [],
-    int? timestamp,
+    required int timestamp,
     bool? flood,
   }) async {
-    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ts = timestamp;
     final plaintext = BufferWriter()
       ..writeUInt32Le(ts)
       ..writeByte(protocolCode)
@@ -330,8 +363,7 @@ class PacketBuilder {
       identity.publicKey[0],
       ...cipher,
     ]);
-    final useFlood =
-        flood ?? !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final useFlood = flood ?? !contact.hasDirectRoute;
     final pkt = _packet(
       Packet.createHeader(
           payloadTypeReq, useFlood ? routeTypeFlood : routeTypeDirect),
@@ -348,10 +380,10 @@ class PacketBuilder {
     required Contact contact,
     required LocalIdentity identity,
     List<int> data = const [],
-    int? timestamp,
+    required int timestamp,
     bool? flood,
   }) async {
-    final ts = timestamp ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final ts = timestamp;
     final plaintext = BufferWriter()
       ..writeUInt32Le(ts)
       ..writeBytes(data);
@@ -364,8 +396,7 @@ class PacketBuilder {
       ...identity.publicKey,
       ...cipher,
     ]);
-    final useFlood =
-        flood ?? !(contact.outPath.isNotEmpty && contact.outPathLen > 0);
+    final useFlood = flood ?? !contact.hasDirectRoute;
     final pkt = _packet(
       Packet.createHeader(payloadTypeAnonReq,
           useFlood ? routeTypeFlood : routeTypeDirect),
@@ -392,21 +423,70 @@ class PacketBuilder {
   }
 
   /// Decode advert appdata into flag/location/name.
+  ///
+  /// Unlike the upstream parser this never reads past [appdata]; malformed or
+  /// truncated fields return an invalid result instead.
   static AdvertData decodeAdvertData(List<int> appdata) {
     if (appdata.isEmpty) return const AdvertData();
     final reader = BufferReader(Uint8List.fromList(appdata));
     final flags = reader.readByte();
-    double lat = 0.0;
-    double lon = 0.0;
-    if (flags & advertFlagHasLocation != 0 && reader.remaining >= 8) {
+    var lat = 0.0;
+    var lon = 0.0;
+    final hasLocation = flags & advertFlagHasLocation != 0;
+    if (hasLocation) {
+      if (reader.remaining < 8) {
+        return AdvertData(flags: flags, valid: false);
+      }
       lat = reader.readInt32Le() / 1e6;
       lon = reader.readInt32Le() / 1e6;
     }
-    String name = '';
-    if (flags & advertFlagHasName != 0 && reader.remaining > 0) {
-      name = reader.readCString();
+    if (flags & advertFlagFeature1 != 0) {
+      if (reader.remaining < 2) {
+        return AdvertData(flags: flags, valid: false);
+      }
+      reader.skipBytes(2);
     }
-    return AdvertData(flags: flags, lat: lat, lon: lon, name: name);
+    if (flags & advertFlagFeature2 != 0) {
+      if (reader.remaining < 2) {
+        return AdvertData(flags: flags, valid: false);
+      }
+      reader.skipBytes(2);
+    }
+
+    var name = '';
+    var hasName = false;
+    if (flags & advertFlagHasName != 0) {
+      if (reader.remaining <= 0) {
+        return AdvertData(flags: flags, lat: lat, lon: lon, valid: false);
+      }
+      final raw = reader.readRemainingBytes();
+      final nul = raw.indexOf(0);
+      final nameBytes = nul >= 0 ? raw.sublist(0, nul) : raw;
+      if (nameBytes.isEmpty) {
+        return AdvertData(
+          flags: flags,
+          lat: lat,
+          lon: lon,
+          valid: true,
+          hasLocation: hasLocation,
+        );
+      }
+      try {
+        name = utf8.decode(nameBytes);
+      } on FormatException {
+        return AdvertData(flags: flags, lat: lat, lon: lon, valid: false);
+      }
+      hasName = true;
+    }
+    return AdvertData(
+      flags: flags,
+      lat: lat,
+      lon: lon,
+      name: name,
+      valid: true,
+      hasLocation: hasLocation,
+      hasName: hasName,
+    );
   }
 }
 
@@ -417,10 +497,18 @@ class AdvertData {
     this.lat = 0.0,
     this.lon = 0.0,
     this.name = '',
+    this.valid = false,
+    this.hasLocation = false,
+    this.hasName = false,
   });
 
   final int flags;
   final double lat;
   final double lon;
   final String name;
+
+  /// Whether all declared fields were present and the name decoded as UTF-8.
+  final bool valid;
+  final bool hasLocation;
+  final bool hasName;
 }

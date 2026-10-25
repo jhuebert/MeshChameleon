@@ -25,6 +25,7 @@ class AppState extends ChangeNotifier {
     SessionStore? sessionStore,
     NodeStore? nodeStore,
     DeviceCapabilities? capabilities,
+    this.reconnectDelay = const Duration(seconds: 3),
   })  : store = store ?? IdentityStore(),
         sessionStore = sessionStore ?? SessionStore(),
         _nodeStoreInstance = nodeStore,
@@ -35,6 +36,9 @@ class AppState extends ChangeNotifier {
 
   /// What this build can do; gates the BLE UI and session restore.
   final DeviceCapabilities capabilities;
+
+  /// Delay before an unexpected link drop is retried.
+  final Duration reconnectDelay;
 
   /// Foreground service that keeps the process alive while backgrounded.
   final ForegroundService _foreground = ForegroundService();
@@ -47,9 +51,12 @@ class AppState extends ChangeNotifier {
   int port = defaultCompanionPort;
   ProxyStatus proxyStatus = ProxyStatus.stopped;
   String? deviceLabel;
-  String? _deviceNodeName;
   bool deviceConnected = false;
   bool busy = false;
+  bool _intentionalOff = false;
+
+  /// True after a physical shutdown until the user explicitly connects again.
+  bool get intentionallyOff => _intentionalOff;
   RadioLink? _connectingLink;
   bool _connectCancelled = false;
 
@@ -61,6 +68,11 @@ class AppState extends ChangeNotifier {
   /// Whether the OS exempts the app from battery optimizations (null until
   /// queried; always null on non-Android platforms).
   bool? batteryOptimizationsIgnored;
+
+  /// Diagnostic age/staleness for the radio's last good voltage sample.
+  int? get batterySampleAgeSeconds => node?.batterySampleAgeSeconds;
+  bool get batteryStale => node?.batteryStale ?? true;
+  String? get batteryDiagnostic => node?.batteryDiagnostic;
 
   final List<String> logs = [];
 
@@ -94,26 +106,41 @@ class AppState extends ChangeNotifier {
     if (session != null) {
       port = session.proxyPort;
       autoResume = session.autoResume;
+      _intentionalOff = session.intentionallyOff;
     }
     notifyListeners();
     await _maybeResumeSession();
   }
 
   Future<void> generateIdentity() async {
+    final runningNode = node;
+    if (runningNode != null) {
+      await runningNode.replaceIdentity(await LocalIdentity.generate());
+      log('Generated identity ${_pubkeyPrefix()}');
+      notifyListeners();
+      return;
+    }
     identity = await store.generate();
     log('Generated identity ${_pubkeyPrefix()}');
     final connectedLink = link;
-    if (connectedLink != null && node == null) {
+    if (connectedLink != null) {
       await _initializeNode(connectedLink);
     }
     notifyListeners();
   }
 
   Future<void> importIdentity(Uint8List key) async {
+    final runningNode = node;
+    if (runningNode != null) {
+      await runningNode.replaceIdentity(await LocalIdentity.import(key));
+      log('Imported identity ${_pubkeyPrefix()}');
+      notifyListeners();
+      return;
+    }
     identity = await store.import(key);
     log('Imported identity ${_pubkeyPrefix()}');
     final connectedLink = link;
-    if (connectedLink != null && node == null) {
+    if (connectedLink != null) {
       await _initializeNode(connectedLink);
     }
     notifyListeners();
@@ -123,8 +150,8 @@ class AppState extends ChangeNotifier {
   ///
   /// Sends `CMD_EXPORT_PRIVATE_KEY` over the live device link. Returns false
   /// (logging a reason) when no device is connected or the firmware disables
-  /// export. The key is never logged. On success the device link is dropped so
-  /// the next connect builds the mesh node under the imported identity.
+  /// export. The key is never logged. On success it follows the same shared
+  /// virtual replacement path as manual import, keeping the device link up.
   Future<bool> importIdentityFromDevice() async {
     final link = this.link;
     if (link == null || !deviceConnected) {
@@ -138,7 +165,6 @@ class AppState extends ChangeNotifier {
         return false;
       }
       await importIdentity(key);
-      await disconnectDevice();
       return true;
     } catch (e) {
       log('Import from device failed: $e');
@@ -146,7 +172,118 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<Uint8List?> exportIdentity() => store.exportKey();
+  Future<Uint8List?> exportIdentity() async {
+    final runningNode = node;
+    if (runningNode != null) return runningNode.exportPrivateKey();
+    return store.exportKey();
+  }
+
+  /// Staged app-only virtual data reset. This never disconnects the radio,
+  /// reboots it, or changes device-target/proxy settings.
+  ///
+  /// The durable state reset happens first. When [rotateIdentity] is requested,
+  /// a validated new key is persisted only after that succeeds; a key failure
+  /// returns a partial result with the old identity still active.
+  Future<VirtualResetResult> resetVirtualData({
+    bool rotateIdentity = false,
+  }) async {
+    final runningNode = node;
+    if (runningNode != null) {
+      final result = await runningNode.resetVirtualData(
+        rotateIdentity: rotateIdentity,
+      );
+      if (result.dataReset) server?.clearSigningBuffer();
+      notifyListeners();
+      return result;
+    }
+
+    LocalIdentity? candidate;
+    if (rotateIdentity) {
+      candidate = await LocalIdentity.generate();
+      if (!await LocalIdentity.validateMeshcore64(candidate.meshcore64)) {
+        throw const CompanionOperationError(
+          errCodeIllegalArg,
+          message: 'generated identity failed validation',
+        );
+      }
+    }
+
+    final nodeStore = await _nodeStore();
+    await nodeStore.flush();
+    try {
+      await nodeStore.save(freshVirtualState());
+    } catch (e) {
+      throw CompanionOperationError(
+        errCodeFileIoError,
+        message: 'virtual reset persistence failed: $e',
+      );
+    }
+
+    if (candidate != null) {
+      try {
+        await store.save(candidate);
+        identity = candidate;
+      } catch (e) {
+        LocalIdentity? readBack;
+        try {
+          readBack = await store.load();
+        } catch (_) {
+          readBack = null;
+        }
+        if (readBack != null &&
+            readBack.meshcore64.length == 64 &&
+            bytesToHex(readBack.meshcore64) ==
+                bytesToHex(candidate.meshcore64)) {
+          identity = readBack;
+        } else {
+          notifyListeners();
+          return VirtualResetResult(
+            dataReset: true,
+            identityRotated: false,
+            keyError: CompanionOperationError(
+              errCodeFileIoError,
+              message: 'new identity persistence failed: $e',
+            ),
+          );
+        }
+      }
+    }
+    notifyListeners();
+    return VirtualResetResult(
+      dataReset: true,
+      identityRotated: candidate != null,
+    );
+  }
+
+  void _onNodeIdentityChanged(LocalIdentity changed) {
+    identity = changed;
+    log('Active identity changed to ${_pubkeyPrefix()}');
+    notifyListeners();
+  }
+
+  Future<void> _onNodePoweredOff() async {
+    _intentionalOff = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    deviceConnected = false;
+    log('Device powered off; automatic reconnect suppressed');
+    final current = lastSession;
+    if (current != null) {
+      final updated = current.copyWith(intentionallyOff: true);
+      lastSession = updated;
+      try {
+        await sessionStore.save(updated);
+      } catch (e) {
+        log('Could not persist intentional shutdown: $e');
+      }
+    }
+    try {
+      await _foreground.stop();
+    } catch (_) {
+      // The service may already be gone after the device powered off.
+    }
+    notifyListeners();
+  }
 
   String _pubkeyPrefix() {
     final key = identity?.publicKey;
@@ -202,13 +339,15 @@ class AppState extends ChangeNotifier {
   ///
   /// Exercises the mesh node, the companion server, and the UI without any
   /// radio: [FakeDeviceLink] answers device queries and radio-parameter
-  /// requests, and its transmissions never leave the process.
-  Future<void> connectSimulated() async {
+  /// requests, and its transmissions never leave the process. Tests may pass
+  /// their own [simulatedLink] to observe the attach sequence.
+  Future<void> connectSimulated({RadioLink? simulatedLink}) async {
     if (!capabilities.supportsSimulatedCompanion) {
       log('The simulated companion is only available in development builds');
       return;
     }
-    final link = FakeDeviceLink(deviceNodeName: 'Simulated companion');
+    final link =
+        simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion');
     final ok = await _attachLink(link, 'Simulated companion');
     if (ok) {
       await _recordSession(SessionConfig(
@@ -240,12 +379,18 @@ class AppState extends ChangeNotifier {
 
       final deviceInfo = await link.deviceInfo();
       final selfInfo = await link.selfInfo();
-      final params = selfInfo.radioParams;
-      _deviceNodeName = selfInfo.nodeName;
+      final physical = PhysicalCapabilities.fromDeviceInfo(
+        deviceInfo,
+        maxTxPower: selfInfo.maxTxPower,
+      );
       log('Device: fw ${deviceInfo.firmwareVerCode}, '
           '${deviceInfo.manufacturer} ${deviceInfo.version}');
       if (identity != null) {
-        await _initializeNode(link, deviceInfo: deviceInfo, params: params);
+        await _initializeNode(
+          link,
+          physical: physical,
+          params: selfInfo.radioParams,
+        );
       } else {
         log('Device link ready; import its identity or create one');
         _watchLink(link);
@@ -281,36 +426,34 @@ class AppState extends ChangeNotifier {
 
   Future<void> _initializeNode(
     RadioLink link, {
-    DeviceInfo? deviceInfo,
+    PhysicalCapabilities? physical,
     RadioParams? params,
   }) async {
     final currentIdentity = identity;
     if (currentIdentity == null) return;
-    deviceInfo ??= await link.deviceInfo();
-    params ??= await link.radioParams();
+    if (physical == null || params == null) {
+      final selfInfo = await link.selfInfo();
+      physical ??= PhysicalCapabilities.fromDeviceInfo(
+        await link.deviceInfo(),
+        maxTxPower: selfInfo.maxTxPower,
+      );
+      params ??= selfInfo.radioParams;
+    }
     final node = MeshNode(
       identity: currentIdentity,
       link: link,
-      deviceInfo: deviceInfo,
+      physical: physical,
       store: await _nodeStore(),
+      identityPersistence: store,
+      onIdentityChanged: _onNodeIdentityChanged,
+      onPoweredOff: _onNodePoweredOff,
     );
     await node.load();
-    final deviceName = _deviceNodeName;
-    if (node.prefs.nodeName == 'MeshCore Proxy' &&
-        deviceName != null &&
-        deviceName.isNotEmpty) {
-      node.setAdvertName(deviceName);
-    }
-    // The device is the source of truth for the radio at connect time.
+    // The device is the source of truth for RF parameters at connect time.
+    // Name, location, path-hash mode and other preferences stay virtual.
+    node.adoptPhysicalCapabilities(physical);
     node.syncRadioParams(params);
     node.start();
-    // Best-effort housekeeping: stop the stock device advertising under its
-    // own identity (firmware v14+ only; a no-op otherwise).
-    try {
-      await node.zeroAdvertIntervals();
-    } catch (e) {
-      log('Device housekeeping skipped: $e');
-    }
     this.node = node;
     log('Device link ready; mesh node started');
     _watchLink(link);
@@ -335,6 +478,7 @@ class AppState extends ChangeNotifier {
   /// Persist the last session so it can be restored on the next launch.
   Future<void> _recordSession(SessionConfig session) async {
     lastSession = session;
+    _intentionalOff = false;
     await sessionStore.save(session);
     notifyListeners();
   }
@@ -357,6 +501,10 @@ class AppState extends ChangeNotifier {
   Future<void> _maybeResumeSession() async {
     final session = lastSession;
     if (session == null || !autoResume || identity == null || deviceConnected) {
+      return;
+    }
+    if (session.intentionallyOff) {
+      log('Last session ended with an intentional shutdown; not auto-resuming');
       return;
     }
     log('Resuming last device session ...');
@@ -426,7 +574,10 @@ class AppState extends ChangeNotifier {
   void _watchLink(RadioLink link) {
     _linkStateSub?.cancel();
     _linkStateSub = link.state.listen((state) {
-      if (state == LinkState.disconnected && !_disconnecting && deviceConnected) {
+      if (state == LinkState.disconnected &&
+          !_disconnecting &&
+          !_intentionalOff &&
+          deviceConnected) {
         log('Device link dropped; scheduling reconnect');
         _scheduleReconnect();
       }
@@ -434,8 +585,9 @@ class AppState extends ChangeNotifier {
   }
 
   void _scheduleReconnect() {
+    if (_intentionalOff) return;
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(const Duration(seconds: 3), () {
+    _reconnectTimer = Timer(reconnectDelay, () {
       unawaited(_reconnect());
     });
   }
@@ -445,12 +597,22 @@ class AppState extends ChangeNotifier {
   Future<void> _reconnect() async {
     final curLink = link;
     final curNode = node;
-    if (curLink == null || curNode == null || _disconnecting) return;
+    if (curLink == null ||
+        curNode == null ||
+        _disconnecting ||
+        _intentionalOff) {
+      return;
+    }
     try {
       log('Reconnecting device ...');
       await connectWithBackoff(curLink, onLog: log);
-      final params = await curLink.radioParams();
-      curNode.syncRadioParams(params);
+      final deviceInfo = await curLink.deviceInfo();
+      final selfInfo = await curLink.selfInfo();
+      curNode.adoptPhysicalCapabilities(PhysicalCapabilities.fromDeviceInfo(
+        deviceInfo,
+        maxTxPower: selfInfo.maxTxPower,
+      ));
+      curNode.syncRadioParams(selfInfo.radioParams);
       curNode.start();
       log('Device link reconnected');
       notifyListeners();
@@ -477,7 +639,6 @@ class AppState extends ChangeNotifier {
       link = null;
       deviceConnected = false;
       deviceLabel = null;
-      _deviceNodeName = null;
       try {
         await _foreground.stop();
       } catch (_) {

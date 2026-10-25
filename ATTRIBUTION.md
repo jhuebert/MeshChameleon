@@ -26,3 +26,5 @@ Original copyright notices are retained below.
 
 - Protocol ground truth for the companion radio command set
   (`examples/companion_radio/MyMesh.cpp`, `docs/companion_protocol.md`).
+- 64-byte private-key validation algorithm and its known test keypair
+  (`src/Identity.cpp:67-109`).

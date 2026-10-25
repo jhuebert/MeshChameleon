@@ -44,11 +44,21 @@ class CompanionServer implements CompanionPushSink {
 
   ServerSocket? _server;
   Socket? _client;
-  final SerialFrameCodec _codec = SerialFrameCodec();
+  // The app-facing server only accepts app→radio ('<') frames.
+  final SerialFrameCodec _codec =
+      SerialFrameCodec(direction: FrameDirection.inbound);
   Timer? _idleTimer;
   Timer? _heartbeatTimer;
   int _appTargetVer = 0;
   final List<int> _signBuffer = <int>[];
+
+  /// Commands are executed in arrival order, one at a time.
+  Future<void> _commandTail = Future<void>.value();
+
+  /// Incremented when a client connects/disconnects. Replies from an older
+  /// command generation are dropped rather than sent to a replacement client.
+  int _connectionGeneration = 0;
+  int? _commandGeneration;
 
   int? get port => _server?.port;
   bool get hasClient => _client != null;
@@ -87,33 +97,58 @@ class CompanionServer implements CompanionPushSink {
       old?.destroy();
     }
     _client = socket;
+    _connectionGeneration++;
+    final generation = _connectionGeneration;
     _codec.reset();
+    _signBuffer.clear();
     socket.setOption(SocketOption.tcpNoDelay, true);
     bridge.setPushSink(this);
     _appTargetVer = 0;
 
     socket.listen(
       (data) {
+        if (!identical(socket, _client)) return;
         _resetIdleTimer();
         final frames = _codec.ingest(data);
         for (final frame in frames) {
-          unawaited(_handleCommand(frame));
+          _enqueueCommand(generation, frame);
         }
       },
       onError: (Object e) {
+        if (!identical(socket, _client)) return;
         _log('client error: $e');
         _disconnectClient(reason: 'error');
       },
-      onDone: () => _disconnectClient(reason: 'closed'),
+      onDone: () {
+        if (!identical(socket, _client)) return;
+        _disconnectClient(reason: 'closed');
+      },
       cancelOnError: true,
     );
     _resetIdleTimer();
     _startHeartbeat();
   }
 
+  /// Run [frame] after all earlier commands, scoped to [generation]. Only one
+  /// application operation reaches the bridge/device at a time.
+  void _enqueueCommand(int generation, Uint8List frame) {
+    _commandTail = _commandTail.then((_) async {
+      _commandGeneration = generation;
+      try {
+        await _handleCommand(frame);
+      } finally {
+        _commandGeneration = null;
+      }
+    }).catchError((Object e) {
+      _log('command queue error: $e');
+    });
+  }
+
   void _disconnectClient({required String reason}) {
     final client = _client;
     _client = null;
+    _connectionGeneration++;
+    _signBuffer.clear();
     _log('client disconnected: $reason');
     bridge.setPushSink(null);
     _heartbeatTimer?.cancel();
@@ -137,8 +172,7 @@ class CompanionServer implements CompanionPushSink {
     _heartbeatTimer?.cancel();
     if (config.heartbeatInterval <= Duration.zero) return;
     _heartbeatTimer = Timer.periodic(config.heartbeatInterval, (_) {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      _sendFrame(_u32Frame(respCodeCurrTime, now));
+      _sendPushFrame(_u32Frame(respCodeCurrTime, bridge.getTime()));
     });
   }
 
@@ -146,22 +180,49 @@ class CompanionServer implements CompanionPushSink {
   // Frame I/O
   // -------------------------------------------------------------------------
 
+  /// Send a command reply. Replies from an older client generation are dropped.
   void _sendFrame(List<int> payload) {
-    final client = _client;
+    final generation = _commandGeneration;
+    if (generation != null && generation != _connectionGeneration) {
+      _log('dropping reply from evicted client generation $generation');
+      return;
+    }
+    _writeTo(_client, payload);
+  }
+
+  /// Send an asynchronous push to the current client regardless of which
+  /// command is awaiting a device reply.
+  void _sendPushFrame(List<int> payload) => _writeTo(_client, payload);
+
+  void _writeTo(Socket? client, List<int> payload) {
     if (client == null) return;
     try {
       client.add(_codec.encodeFrame(payload));
     } catch (e) {
       _log('write failed: $e');
-      _disconnectClient(reason: 'write failed');
+      if (identical(client, _client)) {
+        _disconnectClient(reason: 'write failed');
+      }
     }
   }
 
   void sendOk() => _sendFrame(Uint8List.fromList([respCodeOk]));
-  void sendErr(int code) =>
-      _sendFrame(Uint8List.fromList([respCodeErr, code]));
-  void sendDisabled() =>
-      _sendFrame(Uint8List.fromList([respCodeDisabled]));
+  void sendErr(int code) => _sendFrame(Uint8List.fromList([respCodeErr, code]));
+  void sendDisabled() => _sendFrame(Uint8List.fromList([respCodeDisabled]));
+
+  void _sendOperationError(CompanionOperationError e) {
+    if (e.message != null) {
+      _log('physical operation failed: ${e.message}');
+    }
+    if (e.uncertain) {
+      _log('physical operation outcome is uncertain; no automatic retry');
+    }
+    if (e.disabled) {
+      sendDisabled();
+    } else {
+      sendErr(e.code);
+    }
+  }
 
   static Uint8List _u32Frame(int code, int value) {
     final w = BufferWriter()
@@ -176,39 +237,53 @@ class CompanionServer implements CompanionPushSink {
 
   @override
   void pushMsgWaiting() =>
-      _sendFrame(Uint8List.fromList([pushCodeMsgWaiting]));
+      _sendPushFrame(Uint8List.fromList([pushCodeMsgWaiting]));
 
   @override
   void pushSendConfirmed(int ackCrc) =>
-      _sendFrame(_u32Frame(pushCodeSendConfirmed, ackCrc));
+      _sendPushFrame(_u32Frame(pushCodeSendConfirmed, ackCrc));
 
   @override
-  void pushAdvert(Uint8List pubkey) => _sendFrame(
+  void pushAdvert(Uint8List pubkey) => _sendPushFrame(
       Uint8List.fromList([pushCodeAdvert, ...pubkey.take(pubKeySize)]));
 
   @override
   void pushNewAdvert(Uint8List contactFrame) =>
-      _sendFrame(Uint8List.fromList([pushCodeNewAdvert, ...contactFrame]));
+      _sendPushFrame(Uint8List.fromList([pushCodeNewAdvert, ...contactFrame]));
 
   @override
-  void pushPathUpdated(Uint8List pubkey) => _sendFrame(
+  void pushContactDeleted(Uint8List pubkey) => _sendPushFrame(
+      Uint8List.fromList([pushCodeContactDeleted, ...pubkey.take(pubKeySize)]));
+
+  @override
+  void pushContactsFull() =>
+      _sendPushFrame(Uint8List.fromList([pushCodeContactsFull]));
+
+  @override
+  void pushPathUpdated(Uint8List pubkey) => _sendPushFrame(
       Uint8List.fromList([pushCodePathUpdated, ...pubkey.take(pubKeySize)]));
 
   @override
   void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
-      _sendFrame(Uint8List.fromList(
+      _sendPushFrame(Uint8List.fromList(
           [pushCodeTelemetryResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
 
   @override
   void pushBinaryResponse(int tag, Uint8List data) =>
-      _sendFrame(Uint8List.fromList(
-          [pushCodeBinaryResponse, 0, tag & 0xFF, (tag >> 8) & 0xFF,
-           (tag >> 16) & 0xFF, (tag >> 24) & 0xFF, ...data]));
+      _sendPushFrame(Uint8List.fromList([
+        pushCodeBinaryResponse,
+        0,
+        tag & 0xFF,
+        (tag >> 8) & 0xFF,
+        (tag >> 16) & 0xFF,
+        (tag >> 24) & 0xFF,
+        ...data
+      ]));
 
   @override
   void pushRawRxData(double snr, int rssi, Uint8List raw) {
     final snrByte = (snr * 4).round().clamp(-128, 127) & 0xFF;
-    _sendFrame(Uint8List.fromList([
+    _sendPushFrame(Uint8List.fromList([
       pushCodeLogRxData,
       snrByte,
       rssi & 0xFF,
@@ -227,7 +302,7 @@ class CompanionServer implements CompanionPushSink {
       ..writeBytes(outPath)
       ..writeByte(inPathLen & 0xFF)
       ..writeBytes(inPath);
-    _sendFrame(w.toBytes());
+    _sendPushFrame(w.toBytes());
   }
 
   @override
@@ -249,16 +324,16 @@ class CompanionServer implements CompanionPushSink {
         ..writeByte(acl & 0xFF)
         ..writeByte(firmwareVer & 0xFF);
     }
-    _sendFrame(w.toBytes());
+    _sendPushFrame(w.toBytes());
   }
 
   @override
-  void pushLoginFail(Uint8List pubkeyPrefix6) => _sendFrame(
+  void pushLoginFail(Uint8List pubkeyPrefix6) => _sendPushFrame(
       Uint8List.fromList([pushCodeLoginFail, 0, ...pubkeyPrefix6.take(6)]));
 
   @override
   void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
-      _sendFrame(Uint8List.fromList(
+      _sendPushFrame(Uint8List.fromList(
           [pushCodeStatusResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
 
   @override
@@ -267,7 +342,7 @@ class CompanionServer implements CompanionPushSink {
     if (snrByte < 0) snrByte += 256;
     var rssiByte = rssi.clamp(-128, 127);
     if (rssiByte < 0) rssiByte += 256;
-    _sendFrame(Uint8List.fromList([
+    _sendPushFrame(Uint8List.fromList([
       pushCodeControlData,
       snrByte & 0xFF,
       rssiByte & 0xFF,
@@ -296,7 +371,7 @@ class CompanionServer implements CompanionPushSink {
       ..writeBytes(pathHashes)
       ..writeBytes(pathSnrs)
       ..writeByte(finalSnrByte & 0xFF);
-    _sendFrame(w.toBytes());
+    _sendPushFrame(w.toBytes());
   }
 
   // -------------------------------------------------------------------------
@@ -313,6 +388,8 @@ class CompanionServer implements CompanionPushSink {
     _log('cmd 0x${cmd.toRadixString(16)} len=${payload.length}');
     try {
       await _dispatch(cmd, data);
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
     } catch (e) {
       _log('cmd 0x${cmd.toRadixString(16)} error: $e');
       sendErr(errCodeIllegalArg);
@@ -333,38 +410,47 @@ class CompanionServer implements CompanionPushSink {
         final secs = reader.readUInt32Le();
         bridge.setTime(secs) ? sendOk() : sendErr(errCodeIllegalArg);
       case cmdGetBattAndStorage:
-        _cmdBattery();
+        await _cmdBattery();
       case cmdGetCustomVars:
         _cmdCustomVars();
       case cmdSetCustomVar:
         _cmdSetCustomVar(data);
       case cmdGetAutoAddConfig:
-        _sendFrame(
-            Uint8List.fromList([respCodeAutoAddConfig, bridge.getAutoAddConfig() & 0xFF]));
+        _sendFrame(Uint8List.fromList([
+          respCodeAutoAddConfig,
+          bridge.getAutoAddConfig() & 0xFF,
+          bridge.getAutoAddMaxHops() & 0xFF,
+        ]));
       case cmdSetAutoAddConfig:
         if (data.isEmpty) return sendErr(errCodeIllegalArg);
-        bridge.setAutoAddConfig(data[0]);
-        sendOk();
+        final maxHops = data.length >= 2 ? data[1].clamp(0, 64) : null;
+        try {
+          await bridge.setAutoAddConfig(data[0], maxHops);
+          sendOk();
+        } on CompanionOperationError catch (e) {
+          _sendOperationError(e);
+        }
       case cmdSetOtherParams:
-        _cmdSetOtherParams(data);
+        await _cmdSetOtherParams(data);
       case cmdSetRadioParams:
-        _cmdSetRadioParams(data);
+        await _cmdSetRadioParams(data);
       case cmdSetRadioTxPower:
-        _cmdSetTxPower(data);
+        await _cmdSetTxPower(data);
       // These commands are intentionally disabled for the proxy: never change
-      // device settings/state or expose/replace the proxy identity over TCP.
+      // physical device settings/state or PIN/reset.
       case cmdSetDevicePin:
         sendDisabled();
       case cmdFactoryReset:
         sendDisabled();
+      // Virtual identity import/export never touches the physical identity.
       case cmdExportPrivateKey:
-        sendDisabled();
+        await _cmdExportPrivateKey();
       case cmdImportPrivateKey:
-        sendDisabled();
+        await _cmdImportPrivateKey(data);
       case cmdGetTuningParams:
         await _cmdGetTuningParams();
       case cmdSetTuningParams:
-        _cmdSetTuningParams(data);
+        await _cmdSetTuningParams(data);
       case cmdSetPathHashMode:
         await _cmdSetPathHashMode(data);
       case cmdRunCliCommand:
@@ -374,23 +460,21 @@ class CompanionServer implements CompanionPushSink {
       case cmdGetContactByKey:
         _cmdGetContactByKey(data);
       case cmdAddUpdateContact:
-        _cmdAddUpdateContact(data);
+        await _cmdAddUpdateContact(data);
       case cmdRemoveContact:
-        _cmdRemoveContact(data);
+        await _cmdRemoveContact(data);
       case cmdResetPath:
-        _cmdResetPath(data);
+        await _cmdResetPath(data);
       case cmdGetChannel:
         _cmdGetChannel(data);
       case cmdSetChannel:
-        _cmdSetChannel(data);
+        await _cmdSetChannel(data);
       case cmdSendSelfAdvert:
-        _cmdSendSelfAdvert(data);
+        await _cmdSendSelfAdvert(data);
       case cmdSetAdvertName:
-        bridge.setAdvertName(String.fromCharCodes(
-            data.where((b) => b != 0)));
-        sendOk();
+        await _cmdSetAdvertName(data);
       case cmdSetAdvertLatLon:
-        _cmdSetAdvertLatLon(data);
+        await _cmdSetAdvertLatLon(data);
       case cmdSendTxtMsg:
         await _cmdSendTxt(data);
       case cmdSendChannelTxtMsg:
@@ -400,7 +484,7 @@ class CompanionServer implements CompanionPushSink {
       case cmdSendControlData:
         await _cmdSendControlData(data);
       case cmdSyncNextMessage:
-        _cmdSyncNextMessage();
+        await _cmdSyncNextMessage();
       case cmdSignStart:
         _cmdSignStart();
       case cmdSignData:
@@ -408,7 +492,7 @@ class CompanionServer implements CompanionPushSink {
       case cmdSignFinish:
         await _cmdSignFinish();
       case cmdGetStats:
-        _cmdGetStats(data);
+        await _cmdGetStats(data);
       case cmdGetAllowedRepeatFreq:
         await _cmdGetAllowedRepeatFreq();
       case cmdGetAdvertPath:
@@ -444,11 +528,11 @@ class CompanionServer implements CompanionPushSink {
       case cmdSetFloodScope:
         _cmdSetFloodScope(data);
       case cmdSetDefaultFloodScope:
-        _cmdSetDefaultFloodScope(data);
+        await _cmdSetDefaultFloodScope(data);
       case cmdGetDefaultFloodScope:
         _cmdGetDefaultFloodScope();
       case cmdReboot:
-        _cmdReboot(data);
+        await _cmdReboot(data);
       default:
         _log('unsupported cmd 0x${cmd.toRadixString(16)}');
         sendErr(errCodeUnsupportedCmd);
@@ -496,12 +580,12 @@ class CompanionServer implements CompanionPushSink {
       ..writeUInt32Le(prefs.bandwidthHz)
       ..writeByte(prefs.spreadingFactor)
       ..writeByte(prefs.codingRate)
-      ..writeCString(prefs.nodeName, prefs.nodeName.length + 1);
+      ..writeCString(prefs.nodeName, utf8.encode(prefs.nodeName).length + 1);
     _sendFrame(w.toBytes());
   }
 
-  void _cmdBattery() {
-    final b = bridge.getBatteryAndStorage();
+  Future<void> _cmdBattery() async {
+    final b = await bridge.getBatteryAndStorage();
     final w = BufferWriter()
       ..writeByte(respCodeBattAndStorage)
       ..writeUInt16Le(b.millivolts)
@@ -520,30 +604,45 @@ class CompanionServer implements CompanionPushSink {
     _sendFrame(w.toBytes());
   }
 
-  void _cmdSetCustomVar(Uint8List data) {
+  Future<void> _cmdSetCustomVar(Uint8List data) async {
     if (data.length < 3) return sendErr(errCodeIllegalArg);
-    final text = String.fromCharCodes(data.where((b) => b != 0));
+    String text;
+    try {
+      text = utf8.decode(data);
+    } on FormatException {
+      return sendErr(errCodeIllegalArg);
+    }
     final sep = text.indexOf(':');
     if (sep < 1) return sendErr(errCodeIllegalArg);
-    final ok = bridge.setCustomVar(text.substring(0, sep), text.substring(sep + 1));
-    ok ? sendOk() : sendErr(errCodeIllegalArg);
+    try {
+      await bridge.setCustomVar(
+          text.substring(0, sep), text.substring(sep + 1));
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
-  void _cmdSetOtherParams(Uint8List data) {
+  Future<void> _cmdSetOtherParams(Uint8List data) async {
     if (data.isEmpty) return sendErr(errCodeIllegalArg);
-    final manualAdd = data[0];
-    final telemetry = data.length >= 2 ? data[1] : 0;
-    final advertLoc = data.length >= 3 ? data[2] : 0;
-    final multiAcks = data.length >= 4 ? data[3] : 0;
-    bridge.setOtherParams(manualAdd, telemetry, advertLoc, multiAcks);
-    sendOk();
+    try {
+      await bridge.setOtherParams(
+        manualAddContacts: data[0],
+        telemetryModes: data.length >= 2 ? data[1] : null,
+        advertLocPolicy: data.length >= 3 ? data[2] : null,
+        multiAcks: data.length >= 4 ? data[3] : null,
+      );
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   // -------------------------------------------------------------------------
   // Radio
   // -------------------------------------------------------------------------
 
-  void _cmdSetRadioParams(Uint8List data) {
+  Future<void> _cmdSetRadioParams(Uint8List data) async {
     if (data.length < 10) return sendErr(errCodeIllegalArg);
     final reader = BufferReader(data);
     final freq = reader.readUInt32Le();
@@ -556,34 +655,61 @@ class CompanionServer implements CompanionPushSink {
     if (sf < 5 || sf > 12 || cr < 5 || cr > 8) {
       return sendErr(errCodeIllegalArg);
     }
-    bridge.setRadioParams(freq * 1000, bw, sf, cr);
-    sendOk();
+    bool? clientRepeat;
+    if (data.length >= 11) {
+      final repeat = data[10];
+      if (repeat > 1) return sendErr(errCodeIllegalArg);
+      clientRepeat = repeat == 1;
+    }
+    try {
+      await bridge.setRadioParams(
+        freq * 1000,
+        bw,
+        sf,
+        cr,
+        clientRepeat: clientRepeat,
+      );
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
-  void _cmdSetTxPower(Uint8List data) {
+  Future<void> _cmdSetTxPower(Uint8List data) async {
     if (data.isEmpty) return sendErr(errCodeIllegalArg);
     final power = data[0] >= 0x80 ? data[0] - 0x100 : data[0];
-    if (power < -9 || power >= 30) return sendErr(errCodeIllegalArg);
-    bridge.setTxPower(power);
-    sendOk();
+    try {
+      await bridge.setTxPower(power);
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   Future<void> _cmdGetTuningParams() async {
-    final params = await bridge.getTuningParams();
-    final w = BufferWriter()
-      ..writeByte(respCodeTuningParams)
-      ..writeUInt32Le(params.rxDelayBaseMs)
-      ..writeUInt32Le(params.airtimeFactorMs);
-    _sendFrame(w.toBytes());
+    try {
+      final params = await bridge.getTuningParams();
+      final w = BufferWriter()
+        ..writeByte(respCodeTuningParams)
+        ..writeUInt32Le(params.rxDelayBaseMs)
+        ..writeUInt32Le(params.airtimeFactorMs);
+      _sendFrame(w.toBytes());
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
-  void _cmdSetTuningParams(Uint8List data) {
+  Future<void> _cmdSetTuningParams(Uint8List data) async {
     if (data.length < 8) return sendErr(errCodeIllegalArg);
     final r = BufferReader(data);
     final rx = r.readUInt32Le();
     final af = r.readUInt32Le();
-    bridge.setTuningParams(rx, af);
-    sendOk();
+    try {
+      await bridge.setTuningParams(rx, af);
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   Future<void> _cmdSetPathHashMode(Uint8List data) async {
@@ -596,11 +722,40 @@ class CompanionServer implements CompanionPushSink {
   }
 
   Future<void> _cmdRunCliCommand(Uint8List data) async {
-    if (data.isEmpty) return sendErr(errCodeIllegalArg);
-    final command = String.fromCharCodes(data.where((b) => b != 0));
-    final text = await bridge.runCliCommand(command);
-    if (text == null) return sendErr(errCodeUnsupportedCmd);
-    _sendFrame(Uint8List.fromList([respCodeCliReply, ...utf8.encode(text)]));
+    final lifecycleBefore = bridge.lifecycleGeneration;
+    String text;
+    try {
+      text = await bridge.runCliCommandBytes(data);
+    } on CompanionOperationError catch (e) {
+      text = e.disabled
+          ? 'Error: disabled'
+          : switch (e.code) {
+              errCodeFileIoError ||
+              errCodeTableFull =>
+                'Error: storage failure',
+              errCodeBadState => 'Error: device unavailable',
+              errCodeIllegalArg => 'Error: illegal argument',
+              _ => 'Error: unsupported',
+            };
+    } catch (_) {
+      text = 'Error: illegal argument';
+    }
+    if (bridge.lifecycleGeneration != lifecycleBefore) {
+      _signBuffer.clear();
+    }
+    _sendFrame(Uint8List.fromList([
+      respCodeCliReply,
+      ..._boundedCliReply(utf8.encode(text)),
+    ]));
+  }
+
+  List<int> _boundedCliReply(List<int> bytes) {
+    if (bytes.length <= maxCompanionPayloadSize - 1) return bytes;
+    var end = maxCompanionPayloadSize - 1 - 3;
+    while (end > 0 && end < bytes.length && (bytes[end] & 0xC0) == 0x80) {
+      end--;
+    }
+    return [...bytes.sublist(0, end), ...utf8.encode('...')];
   }
 
   // -------------------------------------------------------------------------
@@ -644,45 +799,68 @@ class CompanionServer implements CompanionPushSink {
 
   void _cmdGetContactByKey(Uint8List data) {
     if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
-    final c = bridge.getContactByKey(data.sublist(0, pubKeySize));
+    final c = bridge.getPersistentContactByKey(data.sublist(0, pubKeySize));
     if (c == null) return sendErr(errCodeNotFound);
     _sendFrame(_contactFrame(c));
   }
 
-  void _cmdAddUpdateContact(Uint8List data) {
+  Future<void> _cmdAddUpdateContact(Uint8List data) async {
     if (data.length < 36) return sendErr(errCodeIllegalArg);
     final pubkey = data.sublist(0, pubKeySize);
     final advType = data[32];
     final flags = data[33];
-    final outPathLen = data[34] >= 0x80 ? data[34] - 0x100 : data[34];
+    final pathLenByte = data[34];
+    final int outPathLen;
+    if (pathLenByte == 0xFF) {
+      outPathLen = -1;
+    } else if (PathUtils.isValidPathLen(pathLenByte)) {
+      outPathLen = pathLenByte;
+    } else {
+      return sendErr(errCodeIllegalArg);
+    }
     final pathStart = 35;
     final pathEnd = pathStart + maxPathSize;
-    final path = data.length >= pathEnd
-        ? data.sublist(pathStart, pathEnd)
-        : (data.length > pathStart ? data.sublist(pathStart) : Uint8List(0));
+    var path = Uint8List(0);
+    if (outPathLen >= 0) {
+      final pathBytes = PathUtils.getByteLength(outPathLen);
+      if (data.length < pathStart + pathBytes) {
+        return sendErr(errCodeIllegalArg);
+      }
+      path = data.sublist(pathStart, pathStart + pathBytes);
+    }
     final nameStart = pathEnd;
     final nameEnd = nameStart + maxNameSize;
     Uint8List nameRaw;
     if (data.length >= nameEnd) {
       nameRaw = data.sublist(nameStart, nameEnd);
     } else if (data.length > nameStart) {
-      nameRaw = Uint8List.fromList(
-          [...data.sublist(nameStart), ...List<int>.filled(nameEnd - data.length, 0)]);
+      nameRaw = Uint8List.fromList([
+        ...data.sublist(nameStart),
+        ...List<int>.filled(nameEnd - data.length, 0)
+      ]);
     } else {
       nameRaw = Uint8List(maxNameSize);
     }
-    final name = String.fromCharCodes(nameRaw.takeWhile((b) => b != 0));
+    final name = decodeContactNameBytes(nameRaw);
+    if (name == null) return sendErr(errCodeIllegalArg);
+
     var lastAdvert = 0;
     var lat = 0.0;
     var lon = 0.0;
     var lastmod = bridge.getTime();
+    final hasGps = data.length >= nameEnd + 12;
     if (data.length >= nameEnd + 4) {
       lastAdvert = BufferReader(data.sublist(nameEnd)).readUInt32Le();
     }
-    if (data.length >= nameEnd + 12) {
+    if (hasGps) {
       final r = BufferReader(data.sublist(nameEnd + 4));
-      lat = r.readInt32Le() / 1e6;
-      lon = r.readInt32Le() / 1e6;
+      final latMicros = r.readInt32Le();
+      final lonMicros = r.readInt32Le();
+      if (!isValidAdvertCoordinateMicros(latMicros, lonMicros)) {
+        return sendErr(errCodeIllegalArg);
+      }
+      lat = latMicros / 1e6;
+      lon = lonMicros / 1e6;
     }
     if (data.length >= nameEnd + 16) {
       lastmod = BufferReader(data.sublist(nameEnd + 12)).readUInt32Le();
@@ -693,29 +871,38 @@ class CompanionServer implements CompanionPushSink {
       advType: advType,
       flags: flags,
       outPathLen: outPathLen,
-      outPath: Uint8List.fromList(path),
+      outPath: path,
       lastAdvertTimestamp: lastAdvert,
       lastmod: lastmod,
       gpsLat: lat,
       gpsLon: lon,
     );
-    bridge.addUpdateContact(contact)
-        ? sendOk()
-        : sendErr(errCodeTableFull);
+    try {
+      await bridge.addUpdateContact(contact, hasGps: hasGps);
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
-  void _cmdRemoveContact(Uint8List data) {
+  Future<void> _cmdRemoveContact(Uint8List data) async {
     if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
-    bridge.removeContact(data.sublist(0, pubKeySize))
-        ? sendOk()
-        : sendErr(errCodeNotFound);
+    try {
+      await bridge.removeContact(data.sublist(0, pubKeySize));
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
-  void _cmdResetPath(Uint8List data) {
+  Future<void> _cmdResetPath(Uint8List data) async {
     if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
-    bridge.resetPath(data.sublist(0, pubKeySize))
-        ? sendOk()
-        : sendErr(errCodeNotFound);
+    try {
+      await bridge.resetPath(data.sublist(0, pubKeySize));
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -751,7 +938,7 @@ class CompanionServer implements CompanionPushSink {
     return w.toBytes();
   }
 
-  void _cmdSetChannel(Uint8List data) {
+  Future<void> _cmdSetChannel(Uint8List data) async {
     if (data.length < 34) return sendErr(errCodeIllegalArg);
     final idx = data[0];
     final nameRaw = data.sublist(1, 33);
@@ -764,29 +951,55 @@ class CompanionServer implements CompanionPushSink {
     } else {
       return sendErr(errCodeIllegalArg);
     }
-    bridge.setChannel(idx, name, Uint8List.fromList(secret))
-        ? sendOk()
-        : sendErr(errCodeNotFound);
+    try {
+      await bridge.setChannel(idx, name, Uint8List.fromList(secret));
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   // -------------------------------------------------------------------------
   // Advert
   // -------------------------------------------------------------------------
 
-  void _cmdSendSelfAdvert(Uint8List data) {
-    final flood = data.isEmpty || data[0] == 1;
-    bridge.advertise(flood: flood).then((ok) {
-      ok ? sendOk() : sendErr(errCodeBadState);
-    });
+  Future<void> _cmdSendSelfAdvert(Uint8List data) async {
+    // Pinned firmware: only an explicit byte 1 selects flood; absent/0 is
+    // zero-hop.
+    final flood = data.isNotEmpty && data[0] == 1;
+    final ok = await bridge.advertise(flood: flood);
+    ok ? sendOk() : sendErr(errCodeBadState);
   }
 
-  void _cmdSetAdvertLatLon(Uint8List data) {
+  Future<void> _cmdSetAdvertName(Uint8List data) async {
+    if (data.isEmpty) return sendErr(errCodeIllegalArg);
+    final name = decodeAdvertNameBytes(data);
+    if (name == null) return sendErr(errCodeIllegalArg);
+    try {
+      await bridge.setAdvertName(name);
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
+  }
+
+  Future<void> _cmdSetAdvertLatLon(Uint8List data) async {
     if (data.length < 8) return sendErr(errCodeIllegalArg);
     final r = BufferReader(data);
-    final lat = r.readInt32Le() / 1e6;
-    final lon = r.readInt32Le() / 1e6;
-    bridge.setAdvertLatLon(lat, lon);
-    sendOk();
+    final latMicros = r.readInt32Le();
+    final lonMicros = r.readInt32Le();
+    if (!isValidAdvertCoordinateMicros(latMicros, lonMicros)) {
+      return sendErr(errCodeIllegalArg);
+    }
+    try {
+      await bridge.setAdvertLatLon(
+        latMicros / 1e6,
+        lonMicros / 1e6,
+      );
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -800,7 +1013,8 @@ class CompanionServer implements CompanionPushSink {
     final attempt = r.readByte();
     r.skipBytes(4); // timestamp
     final prefix = r.readBytes(6);
-    final text = String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
+    final text =
+        String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
     final contact = bridge.getContactByKeyPrefix(prefix);
     if (contact == null) return sendErr(errCodeNotFound);
     final result = await bridge.sendTextMessage(
@@ -824,7 +1038,8 @@ class CompanionServer implements CompanionPushSink {
     final txtType = r.readByte();
     final channelIdx = r.readByte();
     r.skipBytes(4); // timestamp
-    final text = String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
+    final text =
+        String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
     if (txtType != txtTypePlain) return sendErr(errCodeUnsupportedCmd);
     if (bridge.getChannel(channelIdx) == null) return sendErr(errCodeNotFound);
     sendOk();
@@ -851,7 +1066,14 @@ class CompanionServer implements CompanionPushSink {
     final dataType = r.readUInt16Le();
     final payload = r.readRemainingBytes();
     if (dataType == dataTypeReserved) return sendErr(errCodeIllegalArg);
-    if (payload.length > maxChannelDataLength) {
+    // The radio-side group-data limit is 165; the 167-byte channel-data limit
+    // applies only to CHANNEL_DATA_RECV pushes. The whole command must also fit
+    // the 176-byte companion payload, so a long path reduces the data budget.
+    if (payload.length > maxGroupDataLength) {
+      return sendErr(errCodeIllegalArg);
+    }
+    final commandLength = 5 + pathBytes.length + payload.length;
+    if (commandLength > maxCompanionPayloadSize) {
       return sendErr(errCodeIllegalArg);
     }
     if (bridge.getChannel(channelIdx) == null) return sendErr(errCodeNotFound);
@@ -874,13 +1096,17 @@ class CompanionServer implements CompanionPushSink {
     ok ? sendOk() : sendErr(errCodeTableFull);
   }
 
-  void _cmdSyncNextMessage() {
-    final msg = bridge.syncNextMessage();
-    if (msg == null) {
-      _sendFrame(Uint8List.fromList([respCodeNoMoreMessages]));
-      return;
+  Future<void> _cmdSyncNextMessage() async {
+    try {
+      final msg = await bridge.syncNextMessage();
+      if (msg == null) {
+        _sendFrame(Uint8List.fromList([respCodeNoMoreMessages]));
+        return;
+      }
+      _sendFrame(_messageFrame(msg));
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
     }
-    _sendFrame(_messageFrame(msg));
   }
 
   Uint8List _messageFrame(QueuedMessage msg) {
@@ -890,8 +1116,9 @@ class CompanionServer implements CompanionPushSink {
     if (msg.isChannel) {
       if (msg.channelDataType != 0) {
         final raw = msg.channelDataPayload ?? Uint8List(0);
-        final payload =
-            raw.length > maxChannelDataLength ? raw.sublist(0, maxChannelDataLength) : raw;
+        final payload = raw.length > maxChannelDataLength
+            ? raw.sublist(0, maxChannelDataLength)
+            : raw;
         final w = BufferWriter()
           ..writeByte(respCodeChannelDataRecv)
           ..writeByte(snrByte & 0xFF)
@@ -928,7 +1155,8 @@ class CompanionServer implements CompanionPushSink {
     }
     final prefix = msg.senderKey.length >= 6
         ? msg.senderKey.sublist(0, 6)
-        : Uint8List.fromList([...msg.senderKey, ...List.filled(6 - msg.senderKey.length, 0)]);
+        : Uint8List.fromList(
+            [...msg.senderKey, ...List.filled(6 - msg.senderKey.length, 0)]);
     if (_appTargetVer >= 3) {
       final w = BufferWriter()
         ..writeByte(respCodeContactMsgRecvV3)
@@ -978,7 +1206,8 @@ class CompanionServer implements CompanionPushSink {
     try {
       final signature = await bridge.sign(Uint8List.fromList(_signBuffer));
       _signBuffer.clear();
-      _sendFrame(Uint8List.fromList([respCodeSignature, ...signature.take(64)]));
+      _sendFrame(
+          Uint8List.fromList([respCodeSignature, ...signature.take(64)]));
     } catch (_) {
       sendErr(errCodeBadState);
     }
@@ -988,14 +1217,41 @@ class CompanionServer implements CompanionPushSink {
   // Stats / advert path / export
   // -------------------------------------------------------------------------
 
-  void _cmdGetStats(Uint8List data) {
+  Future<void> _cmdExportPrivateKey() async {
+    try {
+      final key = await bridge.exportPrivateKey();
+      if (key.length != 64) {
+        _log('identity export returned an invalid length');
+        return sendErr(errCodeBadState);
+      }
+      _sendFrame(Uint8List.fromList([respCodePrivateKey, ...key]));
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
+  }
+
+  Future<void> _cmdImportPrivateKey(Uint8List data) async {
+    // Firmware accepts len>=65 including the command byte and ignores trailing
+    // bytes; a short key is never truncated or clamped into validity.
+    if (data.length < 64) return sendErr(errCodeIllegalArg);
+    final key = Uint8List.fromList(data.sublist(0, 64));
+    try {
+      await bridge.importPrivateKey(key);
+      _signBuffer.clear();
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
+  }
+
+  Future<void> _cmdGetStats(Uint8List data) async {
     final statsType = data.isEmpty ? statsTypePackets : data[0];
     if (statsType != statsTypeCore &&
         statsType != statsTypeRadio &&
         statsType != statsTypePackets) {
       return sendErr(errCodeIllegalArg);
     }
-    final stats = bridge.getStats(statsType);
+    final stats = await bridge.getStats(statsType);
     final w = BufferWriter()
       ..writeByte(respCodeStats)
       ..writeByte(statsType);
@@ -1090,7 +1346,7 @@ class CompanionServer implements CompanionPushSink {
     // bytes) and answers with the local node's own LPP telemetry. `data` here
     // excludes the command byte, so that is a 3-byte payload.
     if (data.length == 3) {
-      final batt = bridge.getBatteryAndStorage();
+      final batt = await bridge.getBatteryAndStorage();
       final lpp = (BufferWriter()
             ..writeByte(telemChannelSelf)
             ..writeByte(0x74) // CayenneLPP voltage (0.01 V)
@@ -1175,8 +1431,8 @@ class CompanionServer implements CompanionPushSink {
   Future<void> _cmdSendLogin(Uint8List data) async {
     if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
     final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
-    final password = String.fromCharCodes(
-        data.sublist(pubKeySize).takeWhile((b) => b != 0));
+    final password =
+        String.fromCharCodes(data.sublist(pubKeySize).takeWhile((b) => b != 0));
     final result = await bridge.sendLogin(pubkey, password);
     if (!result.success) return sendErr(errCodeNotFound);
     _sendSent(result);
@@ -1220,27 +1476,35 @@ class CompanionServer implements CompanionPushSink {
     }
   }
 
-  void _cmdSetDefaultFloodScope(Uint8List data) {
+  Future<void> _cmdSetDefaultFloodScope(Uint8List data) async {
     // [name(31)][key(16)] sets; anything shorter clears the default scope.
-    if (data.length >= 31 + 16) {
-      final nameBytes = data.sublist(0, 31);
-      final end = nameBytes.indexOf(0);
-      final name = String.fromCharCodes(
-          end >= 0 ? nameBytes.sublist(0, end) : nameBytes);
-      if (name.isEmpty || name.length >= 31) {
-        return sendErr(errCodeIllegalArg);
+    try {
+      if (data.length >= 31 + 16) {
+        final nameBytes = data.sublist(0, 31);
+        final end = nameBytes.indexOf(0);
+        final name = String.fromCharCodes(
+            end >= 0 ? nameBytes.sublist(0, end) : nameBytes);
+        if (name.isEmpty || name.length >= 31) {
+          return sendErr(errCodeIllegalArg);
+        }
+        await bridge.setDefaultFloodScope(
+            name, Uint8List.fromList(data.sublist(31, 31 + 16)));
+      } else {
+        await bridge.setDefaultFloodScope('', null);
       }
-      bridge.setDefaultFloodScope(
-          name, Uint8List.fromList(data.sublist(31, 31 + 16)));
-    } else {
-      bridge.setDefaultFloodScope('', null);
+      sendOk();
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
     }
-    sendOk();
   }
 
   Future<void> _cmdGetAllowedRepeatFreq() async {
-    final ranges = await bridge.getAllowedRepeatFreq();
-    _sendFrame(Uint8List.fromList([respCodeAllowedRepeatFreq, ...ranges]));
+    try {
+      final ranges = await bridge.getAllowedRepeatFreq();
+      _sendFrame(Uint8List.fromList([respCodeAllowedRepeatFreq, ...ranges]));
+    } on CompanionOperationError catch (e) {
+      _sendOperationError(e);
+    }
   }
 
   void _cmdGetDefaultFloodScope() {
@@ -1255,10 +1519,17 @@ class CompanionServer implements CompanionPushSink {
     _sendFrame(w.toBytes());
   }
 
-  void _cmdReboot(Uint8List data) {
-    final magic = String.fromCharCodes(data.take(6));
-    if (magic != 'reboot') return sendErr(errCodeIllegalArg);
-    bridge.reboot();
+  /// Clear the current client's partial SIGN_START/DATA buffer after an
+  /// app-only virtual reset or identity/lifecycle change.
+  void clearSigningBuffer() => _signBuffer.clear();
+
+  Future<void> _cmdReboot(Uint8List data) async {
+    // Exact magic only; extra bytes are not a reboot alias.
+    if (data.length != 6 || String.fromCharCodes(data) != 'reboot') {
+      return sendErr(errCodeIllegalArg);
+    }
+    await bridge.reboot();
+    _signBuffer.clear();
     sendOk();
   }
 

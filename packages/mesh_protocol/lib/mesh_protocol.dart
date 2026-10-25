@@ -14,3 +14,4 @@ export 'src/models.dart';
 export 'src/packet.dart';
 export 'src/packet_builder.dart';
 export 'src/paths.dart';
+export 'src/text.dart';

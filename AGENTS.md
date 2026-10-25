@@ -76,9 +76,13 @@ package checks, then the full script before finishing.
 ## Protocol constraints and known gotchas
 
 - TCP companion frames are `'<'` (0x3C) + uint16 LE length + payload inbound
-  and `'>' (0x3E) + uint16 LE length + payload` outbound. Payload maximum is
-  169 bytes (`MAX_FRAME_SIZE` 172 includes 3-byte framing header). BLE NUS
-  carries a raw frame per write/notify.
+  and `'>' (0x3E) + uint16 LE length + payload` outbound. The MeshCore 1.18
+  limit is **176 payload bytes**, plus the 3-byte TCP header (179 bytes total);
+  firmware `MAX_FRAME_SIZE` excludes that header. The server accepts only
+  `'<'`, and the TCP device link accepts only `'>'`. BLE NUS carries a raw
+  payload per write/notify without the TCP header, also limited to 176 bytes.
+  Group-data TX is capped at 165 application bytes, while channel-data RX
+  pushes allow 167 (the limits differ).
 - `SELF_INFO` and `CMD_SET_RADIO_PARAMS` frequency fields are in **kHz** on
   the wire, while bandwidth is in **Hz**. `RadioParams.frequencyHz` is
   normalized to Hz internally; convert only at protocol boundaries.

@@ -11,11 +11,15 @@ library;
 const int frameInboundPrefix = 0x3C; // '<'
 const int frameOutboundPrefix = 0x3E; // '>'
 
-/// Firmware `MAX_FRAME_SIZE`. A framed payload is at most this many bytes.
-const int maxFrameSize = 172;
+/// Firmware `MAX_FRAME_SIZE`: the companion payload excludes the serial frame
+/// header (`prefix + uint16 LE length`).
+const int maxCompanionPayloadSize = 176;
 
-/// Max bytes of payload after the prefix + 2-byte length header.
-const int maxPayloadSize = maxFrameSize - 3;
+/// The serial/TCP framing header: direction prefix plus the 2-byte length.
+const int serialHeaderSize = 3;
+
+/// Maximum framed TCP total: 176-byte payload plus the 3-byte header.
+const int maxSerialFrameSize = maxCompanionPayloadSize + serialHeaderSize;
 
 // ---------------------------------------------------------------------------
 // Commands (app -> radio)
@@ -132,6 +136,8 @@ const int pushCodeTelemetryResponse = 0x8B;
 const int pushCodeBinaryResponse = 0x8C;
 const int pushCodePathDiscoveryResponse = 0x8D;
 const int pushCodeControlData = 0x8E;
+const int pushCodeContactDeleted = 0x8F;
+const int pushCodeContactsFull = 0x90;
 
 // ---------------------------------------------------------------------------
 // Error codes
@@ -195,6 +201,8 @@ const int advertFlagIsRepeater = 0x02;
 const int advertFlagIsRoomServer = 0x03;
 const int advertFlagIsSensor = 0x04;
 const int advertFlagHasLocation = 0x10;
+const int advertFlagFeature1 = 0x20;
+const int advertFlagFeature2 = 0x40;
 const int advertFlagHasName = 0x80;
 
 // ---------------------------------------------------------------------------
@@ -241,14 +249,73 @@ const int cipherMacSize = 2;
 const int cipherBlockSize = 16;
 const int timestampSize = 4;
 
-/// App-facing maximum channel-data payload (`MAX_CHANNEL_DATA_LENGTH`).
-const int maxChannelDataLength = maxFrameSize - 9;
+/// Firmware `MAX_PACKET_PAYLOAD`: the on-air packet payload maximum.
+const int maxPacketPayloadSize = 184;
+
+/// On-air group-data application limit (`MAX_GROUP_DATA_LENGTH` =
+/// 184-byte packet payload - 16-byte cipher block - 3 plaintext bytes).
+const int maxGroupDataLength = maxPacketPayloadSize - cipherBlockSize - 3;
+
+/// Fixed bytes in a `RESP_CODE_CHANNEL_DATA_RECV` push before the payload:
+/// code, SNR, RSSI, reserved, channel index, path length, data type (u16),
+/// data length.
+const int channelDataRxHeaderSize = 9;
+
+/// App-facing channel-data receive limit (`MAX_CHANNEL_DATA_LENGTH` =
+/// 176-byte companion payload - 9-byte `CHANNEL_DATA_RECV` header). This is
+/// distinct from the 165-byte group-data TX limit.
+const int maxChannelDataLength =
+    maxCompanionPayloadSize - channelDataRxHeaderSize;
 
 /// Channel-data type 0 is reserved/invalid (`DATA_TYPE_RESERVED`).
 const int dataTypeReserved = 0x0000;
 
-/// Firmware version code reported to the client in `RESP_CODE_DEVICE_INFO`.
+/// Firmware version code currently advertised in `RESP_CODE_DEVICE_INFO`.
+/// T16 activates [targetFirmwareVerCode] instead.
 const int defaultFirmwareVerCode = 11;
+
+/// MeshCore 1.18 compatibility firmware code (activated in T16).
+const int targetFirmwareVerCode = 14;
+
+/// Virtual product version. Must match the app `pubspec.yaml` version.
+const String productVersion = '0.1.0';
+
+/// Virtual board/manufacturer string for the 40-byte DEVICE_INFO slot.
+const String virtualBoardName = 'MeshChameleon Virtual Companion';
+
+/// DEVICE_INFO version currently advertised. T16 switches to the target string.
+const String activeDeviceVersion = 'meshchameleon $productVersion';
+
+/// MeshCore 1.18 compatibility version for the 20-byte DEVICE_INFO slot.
+const String targetCompatibilityVersion = 'v1.18.0';
+
+/// Virtual CLI version string (product version follows the app release).
+const String virtualCliVersion = 'MeshChameleon $productVersion (MeshCore 1.18.0)';
+
+/// Persistent virtual contact capacity (SPEC S2, owner-updated to match the
+/// Xiao WIO companion's reported 350). DEVICE_INFO reports /2 (=175).
+const int virtualMaxContacts = 350;
+
+/// Virtual channel capacity; valid indices are 0-39.
+const int virtualMaxChannels = 40;
+
+/// Separate anonymous-request contact slots; never part of the persistent list.
+const int maxTransientContacts = 8;
+
+/// Deterministic virtual storage partition quota (4 MiB).
+const int virtualStorageQuotaBytes = 4 * 1024 * 1024;
+
+/// Wire-reported total virtual storage in KiB.
+const int virtualStorageTotalKb = 4096;
+
+/// Advert-path cache capacity, evicting the oldest receive timestamp first.
+const int maxAdvertPathCacheEntries = 64;
+
+/// Round a virtual storage byte count up to the wire's KiB unit.
+int storageKibForBytes(int bytes) => (bytes + 1023) ~/ 1024;
+
+/// Default maximum TX power before the physical SELF_INFO is adopted.
+const int defaultMaxTxPowerDbm = 22;
 
 /// Companion protocol version the client advertises in `CMD_DEVICE_QUERY`.
 const int appProtocolVersion = 4;

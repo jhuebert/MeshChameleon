@@ -28,17 +28,23 @@ Future<void> main(List<String> args) async {
   stdout.writeln('connecting device $host:$port ...');
   await link.connect();
   final info = await link.deviceInfo();
-  final params = await link.radioParams();
+  final deviceSelfInfo = await link.selfInfo();
+  final params = deviceSelfInfo.radioParams;
+  final physical = PhysicalCapabilities.fromDeviceInfo(
+    info,
+    maxTxPower: deviceSelfInfo.maxTxPower,
+  );
   stdout.writeln('device fw=${info.firmwareVerCode} '
       'freq=${params.frequencyHz} name="${info.manufacturer}"');
 
   final node = MeshNode(
     identity: identity,
     link: link,
-    deviceInfo: info,
+    physical: physical,
     store: InMemoryNodeStore(),
   );
   await node.load();
+  node.adoptPhysicalCapabilities(physical);
   node.syncRadioParams(params);
   node.start();
 
@@ -52,7 +58,7 @@ Future<void> main(List<String> args) async {
 
   final socket = await Socket.connect('127.0.0.1', server.port!);
   socket.setOption(SocketOption.tcpNoDelay, true);
-  final codec = SerialFrameCodec();
+  final codec = SerialFrameCodec.bidirectional();
   final buffer = <Uint8List>[];
   final waiters = <Completer<Uint8List>>[];
   socket.listen((data) {

@@ -292,6 +292,13 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
   }
 }
 
+String _batteryDiagnosticText(AppState app) {
+  final age = app.batterySampleAgeSeconds;
+  if (age == null) return 'Radio battery: waiting for first sample';
+  final status = app.batteryStale ? 'stale' : 'fresh';
+  return 'Radio battery: $status sample (${age}s old)';
+}
+
 class _StatusCard extends StatelessWidget {
   const _StatusCard({required this.app, required this.identityLabel});
 
@@ -312,6 +319,8 @@ class _StatusCard extends StatelessWidget {
             Text('Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
             Text('Proxy: ${app.proxyStatus.name}'
                 '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),
+            if (app.deviceConnected)
+              Text(_batteryDiagnosticText(app)),
           ],
         ),
       ),

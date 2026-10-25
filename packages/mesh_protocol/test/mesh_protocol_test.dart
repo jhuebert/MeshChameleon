@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
@@ -74,6 +75,100 @@ void main() {
       expect(PathUtils.isValidPathLen(0), isTrue);
       expect(PathUtils.isValidPathLen(64), isTrue); // 64 one-byte hops
       expect(PathUtils.isValidPathLen((3 << 6) | 1), isFalse); // hash size 4
+    });
+  });
+
+  group('virtual DEVICE_INFO', () {
+    test('active baseline stays below the T16 target', () {
+      final active = buildVirtualDeviceInfo(clientRepeat: 1, pathHashMode: 2);
+      expect(active.firmwareVerCode, defaultFirmwareVerCode);
+      expect(active.version, activeDeviceVersion);
+      expect(active.manufacturer, virtualBoardName);
+      expect(active.maxContacts, 350);
+      expect(active.maxChannels, 40);
+      expect(active.blePin, 0);
+      expect(active.clientRepeat, 1);
+      expect(active.pathHashMode, 2);
+
+      final target = buildVirtualDeviceInfo(targetBaseline: true);
+      expect(target.firmwareVerCode, targetFirmwareVerCode);
+      expect(target.version, targetCompatibilityVersion);
+      expect(utf8.encode(target.manufacturer).length, lessThanOrEqualTo(40));
+      expect(utf8.encode(target.version).length, lessThanOrEqualTo(20));
+    });
+  });
+
+  group('PacketBuilder group data', () {
+    final channel = Channel(
+      name: 'Public',
+      secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
+    );
+
+    test('group_tx_and_channel_rx_limits_are_distinct', () {
+      expect(maxGroupDataLength, 165);
+      expect(maxChannelDataLength, 167);
+      expect(maxCompanionPayloadSize, 176);
+      expect(maxSerialFrameSize, 179);
+    });
+
+    test('rejects overlong data, reserved type, and invalid paths', () {
+      expect(
+        () => PacketBuilder.createGroupData(
+          channel: channel,
+          dataType: 0x1234,
+          data: List<int>.filled(166, 1),
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => PacketBuilder.createGroupData(
+          channel: channel,
+          dataType: dataTypeReserved,
+          data: const [1],
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => PacketBuilder.createGroupData(
+          channel: channel,
+          dataType: 0x1234,
+          data: const [1],
+          path: const [1, 2, 3],
+          pathLenEncoded: 4,
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => PacketBuilder.createGroupData(
+          channel: channel,
+          dataType: 0x1234,
+          data: const [1],
+          path: const [1],
+          pathLenEncoded: 0xFF,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('zero-hop direct and flood are distinct routes', () {
+      final direct = PacketBuilder.createGroupData(
+        channel: channel,
+        dataType: 0x1234,
+        data: const [1],
+        path: const [],
+        pathLenEncoded: 0,
+      );
+      expect(direct.routeType, routeTypeDirect);
+      expect(direct.pathLenByte, 0);
+      expect(direct.path, isEmpty);
+
+      final flood = PacketBuilder.createGroupData(
+        channel: channel,
+        dataType: 0x1234,
+        data: const [1],
+      );
+      expect(flood.routeType, routeTypeFlood);
+      expect(flood.pathLenByte, 0);
     });
   });
 
@@ -224,6 +319,36 @@ void main() {
       expect(CryptoUtils.ed25519SignFromExpanded(expanded, message), expected);
     });
 
+    test('validateMeshcore64 matches the firmware test keypair', () async {
+      const testPrivate = <int>[
+        0x70, 0x65, 0xE1, 0x8F, 0xD9, 0xFA, 0xBB, 0x70, //
+        0xC1, 0xED, 0x90, 0xDC, 0xA1, 0x99, 0x07, 0xDE,
+        0x69, 0x8C, 0x88, 0xB7, 0x09, 0xEA, 0x14, 0x6E,
+        0xAF, 0xD9, 0x3D, 0x9B, 0x83, 0x0C, 0x7B, 0x60,
+        0xC4, 0x68, 0x11, 0x93, 0xC7, 0x9B, 0xBC, 0x39,
+        0x94, 0x5B, 0xA8, 0x06, 0x41, 0x04, 0xBB, 0x61,
+        0x8F, 0x8F, 0xD7, 0xA8, 0x4A, 0x0A, 0xF6, 0xF5,
+        0x70, 0x33, 0xD6, 0xE8, 0xDD, 0xCD, 0x64, 0x71,
+      ];
+      const testPublic = <int>[
+        0x1E, 0xC7, 0x71, 0x75, 0xB0, 0x91, 0x8E, 0xD2, //
+        0x06, 0xF9, 0xAE, 0x04, 0xEC, 0x13, 0x6D, 0x6D,
+        0x5D, 0x43, 0x15, 0xBB, 0x26, 0x30, 0x54, 0x27,
+        0xF6, 0x45, 0xB4, 0x92, 0xE9, 0x35, 0x0C, 0x10,
+      ];
+      final privateKey = Uint8List.fromList(testPrivate);
+      final identity = await LocalIdentity.fromMeshcore64(privateKey);
+      expect(identity.publicKey, testPublic);
+      expect(await LocalIdentity.validateMeshcore64(privateKey), isTrue);
+
+      final seeded = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 7);
+      expect(await LocalIdentity.validateMeshcore64(seeded.meshcore64),
+          isTrue);
+
+      expect(await LocalIdentity.validateMeshcore64(Uint8List(32)), isFalse);
+      expect(await LocalIdentity.validateMeshcore64(Uint8List(64)), isFalse);
+    });
+
     test('ECDH shared secret is symmetric', () async {
       final alice = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 1);
       final bob = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 2);
@@ -242,9 +367,14 @@ void main() {
         name: 'ProxyNode',
         lat: 40.1,
         lon: -96.2,
+        timestamp: 1700000000,
       );
       expect(pkt.payloadType, payloadTypeAdvert);
       expect(await PacketBuilder.verifyAdvert(pkt.payload), isTrue);
+      expect(
+        BufferReader(pkt.payload.sublist(pubKeySize)).readUInt32Le(),
+        1700000000,
+      );
       final data = PacketBuilder.decodeAdvertData(
         pkt.payload.sublist(pubKeySize + timestampSize + signatureSize),
       );
@@ -261,6 +391,7 @@ void main() {
         contact: contact,
         identity: alice,
         message: 'hello bob',
+        timestamp: 1700000000,
       );
       expect(pkt.payloadType, payloadTypeTxtMsg);
       expect(pkt.payload[0], bob.publicKey[0]);
@@ -273,9 +404,9 @@ void main() {
         secret,
         pkt.payload.sublist(2),
       );
-      final r = BufferReader(decrypted)
-        ..skipBytes(4) // timestamp
-        ..skipBytes(1); // flags
+      final r = BufferReader(decrypted);
+      expect(r.readUInt32Le(), 1700000000);
+      r.skipBytes(1); // flags
       expect(r.readCString(), 'hello bob');
       expect(ackCrc, isNot(0));
     });

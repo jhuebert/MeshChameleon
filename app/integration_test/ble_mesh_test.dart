@@ -111,7 +111,7 @@ void main() {
     final node = MeshNode(
       identity: identity,
       link: link,
-      deviceInfo: info,
+      physical: PhysicalCapabilities.fromDeviceInfo(info),
       store: InMemoryNodeStore(),
       prefs: NodePrefs(nodeName: 'BLE Test Proxy'),
     );
@@ -288,7 +288,7 @@ class _FramedClient {
   }
 
   final Socket _socket;
-  final SerialFrameCodec _codec = SerialFrameCodec();
+  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
   final _controller = StreamController<Uint8List>.broadcast();
   late final _Queue<Uint8List> _frames = _Queue(_controller.stream);
 

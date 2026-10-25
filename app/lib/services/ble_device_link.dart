@@ -89,7 +89,8 @@ class BleDeviceLink implements RadioLink {
         if (s == BluetoothConnectionState.disconnected &&
             _state == LinkState.connected) {
           onLog?.call('[BleDeviceLink] device disconnected');
-          _failAll(StateError('BLE disconnected'));
+          _failAll(const DeviceCommandError.disconnected(
+              message: 'BLE disconnected'));
           _setState(LinkState.disconnected);
         }
       });
@@ -106,7 +107,8 @@ class BleDeviceLink implements RadioLink {
     _notifySub = null;
     await _connSub?.cancel();
     _connSub = null;
-    _failAll(StateError('disconnected'));
+    _failAll(
+        const DeviceCommandError.disconnected(message: 'disconnected'));
     try {
       await device.disconnect();
     } catch (_) {}
@@ -117,7 +119,15 @@ class BleDeviceLink implements RadioLink {
   void setRawRxListener(RawRxListener? listener) => _rawRxListener = listener;
 
   void _onFrame(Uint8List frame) {
-    if (frame.isEmpty) return;
+    final payload = decodeBleFrame(frame);
+    if (payload == null) {
+      if (frame.isNotEmpty) {
+        onLog?.call('[BleDeviceLink] dropping oversized BLE frame '
+            '(${frame.length} > $maxCompanionPayloadSize bytes)');
+      }
+      return;
+    }
+    frame = payload;
     if (frame[0] == pushCodeLogRxData) {
       final raw = RawRxFrame.parse(frame);
       if (raw != null) _rawRxListener?.call(raw.snr, raw.rssi, raw.raw);
@@ -125,12 +135,20 @@ class BleDeviceLink implements RadioLink {
     }
     final pending = _pending;
     if (pending != null && !pending.isCompleted) {
-      if (_expected.contains(frame[0])) {
+      if (frame[0] == respCodeErr) {
+        _pending = null;
+        if (frame.length < 2) {
+          pending.completeError(
+            const DeviceCommandError.malformed(
+              message: 'truncated ERR reply from device',
+            ),
+          );
+        } else {
+          pending.completeError(DeviceCommandError.device(frame[1]));
+        }
+      } else if (_expected.contains(frame[0])) {
         _pending = null;
         pending.complete(frame);
-      } else if (frame[0] == respCodeErr) {
-        _pending = null;
-        pending.completeError(StateError('device returned error ${frame[1]}'));
       }
     }
   }
@@ -139,6 +157,18 @@ class BleDeviceLink implements RadioLink {
     final pending = _pending;
     _pending = null;
     if (pending != null && !pending.isCompleted) pending.completeError(error);
+  }
+
+  Future<void> _writeFrame(
+      BluetoothCharacteristic rx, Uint8List frame) async {
+    if (frame.length > maxCompanionPayloadSize) {
+      throw ArgumentError.value(
+        frame.length,
+        'frame.length',
+        'BLE payload exceeds $maxCompanionPayloadSize bytes',
+      );
+    }
+    await rx.write(frame, withoutResponse: false);
   }
 
   Future<T> _runExclusive<T>(Future<T> Function() action) {
@@ -156,18 +186,45 @@ class BleDeviceLink implements RadioLink {
   Future<Uint8List> _request(Uint8List frame, Set<int> expected) {
     return _runExclusive(() async {
       final rx = _rx;
-      if (rx == null) throw StateError('BLE not connected');
+      if (rx == null) {
+        throw const DeviceCommandError.disconnected(
+          message: 'BLE not connected',
+        );
+      }
       if (_pending != null) throw StateError('request already in flight');
       final completer = Completer<Uint8List>();
       _pending = completer;
       _expected = expected;
       try {
-        await rx.write(frame, withoutResponse: false);
+        await _writeFrame(rx, frame);
         return await completer.future.timeout(requestTimeout);
+      } on TimeoutException {
+        throw DeviceCommandError.timeout(
+          message: 'BLE reply timed out after '
+              '${requestTimeout.inMilliseconds}ms',
+        );
       } finally {
         _pending = null;
       }
     });
+  }
+
+  Future<void> _requestOk(Uint8List frame) async {
+    final reply = await _request(
+      frame,
+      {respCodeOk, respCodeErr, respCodeDisabled},
+    );
+    if (reply.isEmpty) {
+      throw const DeviceCommandError.malformed(message: 'empty device reply');
+    }
+    if (reply[0] == respCodeDisabled) {
+      throw const DeviceCommandError.disabled();
+    }
+    if (reply[0] != respCodeOk) {
+      throw DeviceCommandError.malformed(
+        message: 'unexpected device reply ${reply[0]}',
+      );
+    }
   }
 
   @override
@@ -194,7 +251,11 @@ class BleDeviceLink implements RadioLink {
     final frame =
         await _request(DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
     final info = ParsedSelfInfo.parse(frame);
-    if (info == null) throw StateError('invalid SELF_INFO from device');
+    if (info == null) {
+      throw const DeviceCommandError.malformed(
+        message: 'invalid SELF_INFO from device',
+      );
+    }
     return info;
   }
 
@@ -202,27 +263,45 @@ class BleDeviceLink implements RadioLink {
   Future<RadioParams> radioParams() async => (await selfInfo()).radioParams;
 
   @override
-  Future<void> setRadioParams(RadioParams params) async {
-    await _request(DeviceFrames.setRadioParams(params), {respCodeOk, respCodeErr});
+  Future<void> setRadioParams(RadioParams params, {bool? clientRepeat}) async {
+    await _requestOk(DeviceFrames.setRadioParams(
+      params,
+      clientRepeat: clientRepeat,
+    ));
   }
 
   @override
   Future<void> setTxPower(int dbm) async {
-    await _request(DeviceFrames.setTxPower(dbm), {respCodeOk, respCodeErr});
+    await _requestOk(DeviceFrames.setTxPower(dbm));
   }
 
   @override
   Future<void> reboot() async {
+    await _dispatchLifecycle(DeviceFrames.reboot());
+  }
+
+  @override
+  Future<void> shutdown() async {
+    await _dispatchLifecycle(DeviceFrames.shutdown());
+  }
+
+  /// Fire-and-forget lifecycle write. A disconnect observed after the write was
+  /// dispatched is expected; a local/unrelated write failure is not.
+  Future<void> _dispatchLifecycle(Uint8List payload) {
     final rx = _rx;
-    if (rx == null) throw StateError('BLE not connected');
-    // The firmware reboots immediately, so the characteristic write usually
-    // fails with a disconnect before it is acknowledged. That is the expected
-    // outcome of a reboot, not an error.
-    await _runExclusive(() async {
+    if (rx == null) {
+      throw const DeviceCommandError.disconnected(
+        message: 'BLE not connected',
+      );
+    }
+    return _runExclusive(() async {
+      var attempted = false;
       try {
-        await rx.write(DeviceFrames.reboot(), withoutResponse: false);
-      } catch (_) {
-        // Expected: the device disconnected to reboot.
+        attempted = true;
+        await _writeFrame(rx, payload);
+      } catch (e) {
+        if (attempted && _state == LinkState.disconnected) return;
+        rethrow;
       }
     });
   }
@@ -234,32 +313,33 @@ class BleDeviceLink implements RadioLink {
       {respCodeTuningParams, respCodeErr},
     );
     final params = TuningParams.parse(frame);
-    if (params == null) throw StateError('invalid TUNING_PARAMS from device');
+    if (params == null) {
+      throw const DeviceCommandError.malformed(
+        message: 'invalid TUNING_PARAMS from device',
+      );
+    }
     return params;
   }
 
   @override
   Future<void> setTuningParams(TuningParams params) async {
-    await _request(
-      DeviceFrames.setTuningParams(params),
-      {respCodeOk, respCodeErr},
-    );
+    await _requestOk(DeviceFrames.setTuningParams(params));
   }
 
   @override
   Future<void> setPathHashMode(int mode) async {
-    await _request(
-      DeviceFrames.setPathHashMode(mode),
-      {respCodeOk, respCodeErr},
-    );
+    await _requestOk(DeviceFrames.setPathHashMode(mode));
   }
 
   @override
   Future<String> runCliCommand(String command) async {
     final frame = await _request(
       DeviceFrames.runCliCommand(command),
-      {respCodeCliReply, respCodeErr},
+      {respCodeCliReply, respCodeDisabled, respCodeErr},
     );
+    if (frame.isNotEmpty && frame[0] == respCodeDisabled) {
+      throw const DeviceCommandError.disabled();
+    }
     return String.fromCharCodes(frame.length > 1 ? frame.sublist(1) : const []);
   }
 
@@ -279,7 +359,9 @@ class BleDeviceLink implements RadioLink {
       {respCodeAllowedRepeatFreq, respCodeErr},
     );
     if (frame.isEmpty || frame[0] != respCodeAllowedRepeatFreq) {
-      throw StateError('unexpected allowed-repeat-freq reply');
+      throw const DeviceCommandError.malformed(
+        message: 'unexpected allowed-repeat-freq reply',
+      );
     }
     return Uint8List.fromList(frame.sublist(1));
   }

@@ -25,7 +25,10 @@ abstract class RadioLink {
   Future<DeviceInfo> deviceInfo();
   Future<ParsedSelfInfo> selfInfo();
   Future<RadioParams> radioParams();
-  Future<void> setRadioParams(RadioParams params);
+
+  /// Write radio parameters. When [clientRepeat] is supplied it is encoded
+  /// explicitly (0 or 1); `null` leaves the optional byte out.
+  Future<void> setRadioParams(RadioParams params, {bool? clientRepeat});
   Future<void> setTxPower(int dbm);
 
   /// Reboot the device (`CMD_REBOOT`).
@@ -33,6 +36,10 @@ abstract class RadioLink {
   /// The firmware reboots the hardware — needed for saved radio-pref changes
   /// (`CMD_SET_RADIO_PARAMS`) to take effect — and does not send a reply.
   Future<void> reboot();
+
+  /// Power the device off through the physical CLI (`CMD_RUN_CLI_COMMAND`
+  /// `poweroff`, firmware v14+). No normal reply is expected.
+  Future<void> shutdown();
   Future<BatteryReading?> battery();
 
   /// Read the device's radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
@@ -112,6 +119,8 @@ class DeviceFrames {
 
   static Uint8List reboot() =>
       Uint8List.fromList([cmdReboot, ...'reboot'.codeUnits]);
+
+  static Uint8List shutdown() => runCliCommand('poweroff');
 
   static Uint8List getTuningParams() =>
       Uint8List.fromList([cmdGetTuningParams]);

@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// Stores the MeshCore identity (64-byte expanded key) in Android
@@ -10,7 +11,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 /// (AES-256-GCM, with the master key held in the hardware-backed Android
 /// Keystore). The 64-byte identity is never written to plaintext storage, logs,
 /// or the app UI unless the user explicitly reveals it (see [exportKey]).
-class IdentityStore {
+class IdentityStore implements VirtualIdentityPersistence {
   IdentityStore({FlutterSecureStorage? storage})
       : _storage = storage ?? _defaultStorage();
 
@@ -24,11 +25,17 @@ class IdentityStore {
   static const _key = 'meshcore_identity_v1';
   final FlutterSecureStorage _storage;
 
+  @override
   Future<LocalIdentity?> load() async {
     final hex = await _storage.read(key: _key);
     if (hex == null || hex.isEmpty) return null;
     try {
-      return await LocalIdentity.import(hexToBytes(hex));
+      final bytes = hexToBytes(hex);
+      if (bytes.length == 64 &&
+          !await LocalIdentity.validateMeshcore64(bytes)) {
+        return null;
+      }
+      return await LocalIdentity.import(bytes);
     } catch (_) {
       return null;
     }
@@ -41,11 +48,16 @@ class IdentityStore {
   }
 
   Future<LocalIdentity> import(Uint8List key) async {
+    if (key.length == 64 &&
+        !await LocalIdentity.validateMeshcore64(key)) {
+      throw const FormatException('invalid 64-byte identity key');
+    }
     final identity = await LocalIdentity.import(key);
     await save(identity);
     return identity;
   }
 
+  @override
   Future<void> save(LocalIdentity identity) =>
       _storage.write(key: _key, value: bytesToHex(identity.meshcore64));
 

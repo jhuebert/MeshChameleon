@@ -56,12 +56,21 @@ class LocalIdentity {
   }
 
   /// Generate a fresh random identity from 32 bytes of entropy.
-  static Future<LocalIdentity> generate([Random? random]) {
+  ///
+  /// Retry the rare public-key prefix `00`/`FF` so a freshly generated identity
+  /// also passes the firmware's import validation.
+  static Future<LocalIdentity> generate([Random? random]) async {
     final rng = random ?? Random.secure();
-    final seed = Uint8List.fromList(
-      List<int>.generate(32, (_) => rng.nextInt(256)),
-    );
-    return fromSeed(seed);
+    while (true) {
+      final seed = Uint8List.fromList(
+        List<int>.generate(32, (_) => rng.nextInt(256)),
+      );
+      final identity = await fromSeed(seed);
+      if (identity.publicKey[0] != 0x00 &&
+          identity.publicKey[0] != 0xFF) {
+        return identity;
+      }
+    }
   }
 
   /// Create an identity from a 32-byte Ed25519 seed.
@@ -80,6 +89,67 @@ class LocalIdentity {
     identity._x25519Private = _clampFromSeed(seed);
     return identity;
   }
+
+  /// Firmware's known-good test client keypair, used by
+  /// `LocalIdentity::validatePrivateKey` (`Identity.cpp:67-109`).
+  static const _validationTestPrivate = <int>[
+    0x70, 0x65, 0xE1, 0x8F, 0xD9, 0xFA, 0xBB, 0x70, //
+    0xC1, 0xED, 0x90, 0xDC, 0xA1, 0x99, 0x07, 0xDE,
+    0x69, 0x8C, 0x88, 0xB7, 0x09, 0xEA, 0x14, 0x6E,
+    0xAF, 0xD9, 0x3D, 0x9B, 0x83, 0x0C, 0x7B, 0x60,
+    0xC4, 0x68, 0x11, 0x93, 0xC7, 0x9B, 0xBC, 0x39,
+    0x94, 0x5B, 0xA8, 0x06, 0x41, 0x04, 0xBB, 0x61,
+    0x8F, 0x8F, 0xD7, 0xA8, 0x4A, 0x0A, 0xF6, 0xF5,
+    0x70, 0x33, 0xD6, 0xE8, 0xDD, 0xCD, 0x64, 0x71,
+  ];
+  static const _validationTestPublic = <int>[
+    0x1E, 0xC7, 0x71, 0x75, 0xB0, 0x91, 0x8E, 0xD2, //
+    0x06, 0xF9, 0xAE, 0x04, 0xEC, 0x13, 0x6D, 0x6D,
+    0x5D, 0x43, 0x15, 0xBB, 0x26, 0x30, 0x54, 0x27,
+    0xF6, 0x45, 0xB4, 0x92, 0xE9, 0x35, 0x0C, 0x10,
+  ];
+
+  /// Complete firmware private-key validation for the 64-byte form.
+  ///
+  /// Reproduces `LocalIdentity::validatePrivateKey`: derive the public key
+  /// from the supplied scalar, reject `00`/`FF` prefixes, and require a
+  /// symmetric, non-zero ECDH exchange with the upstream test keypair. This is
+  /// deliberately not a length check or scalar clamp.
+  static Future<bool> validateMeshcore64(Uint8List key) async {
+    if (key.length != 64) return false;
+    try {
+      final publicKey =
+          CryptoUtils.ed25519PublicFromScalar(key.sublist(0, 32));
+      if (publicKey[0] == 0x00 || publicKey[0] == 0xFF) return false;
+
+      final testPrivate = Uint8List.fromList(_validationTestPrivate);
+      final testPublic = Uint8List.fromList(_validationTestPublic);
+      final ss1 = await CryptoUtils.x25519SharedSecret(
+        key.sublist(0, 32),
+        testPublic,
+      );
+      final ss2 = await CryptoUtils.x25519SharedSecret(
+        testPrivate.sublist(0, 32),
+        publicKey,
+      );
+      var diff = 0;
+      for (var i = 0; i < 32; i++) {
+        diff |= ss1[i] ^ ss2[i];
+      }
+      if (diff != 0) return false;
+      var nonzero = 0;
+      for (final byte in ss1) {
+        nonzero |= byte;
+      }
+      return nonzero != 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Firmware-name alias for [validateMeshcore64].
+  static Future<bool> validatePrivateKey(Uint8List key) =>
+      validateMeshcore64(key);
 
   /// Create an identity from the 64-byte MeshCore firmware key form.
   ///

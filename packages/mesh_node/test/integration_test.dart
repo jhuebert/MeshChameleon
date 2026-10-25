@@ -21,7 +21,7 @@ class FramedClient {
   }
 
   final Socket _socket;
-  final SerialFrameCodec _codec = SerialFrameCodec();
+  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
   final _controller = StreamController<Uint8List>.broadcast();
   late final _frames = _Queue(_controller.stream);
   int rawRxFrames = 0;
@@ -153,7 +153,7 @@ void main() {
       final sent = await client.next();
       expect(sent[0], respCodeSent);
       await pump();
-      final bobMsg = bob.syncNextMessage();
+      final bobMsg = await bob.syncNextMessage();
       expect(bobMsg, isNotNull);
       expect(bobMsg!.text, 'hi from cli');
 
@@ -206,7 +206,7 @@ void main() {
       client.send([cmdSetFloodScope, 0]);
       expect((await client.next())[0], respCodeOk);
       await pump();
-      final chanMsg = bob.syncNextMessage();
+      final chanMsg = await bob.syncNextMessage();
       expect(chanMsg, isNotNull);
       expect(chanMsg!.isChannel, isTrue);
       expect(chanMsg.text, 'alice: channel hi');
@@ -221,7 +221,7 @@ void main() {
       client.send(dw.toBytes());
       expect((await client.next())[0], respCodeOk);
       await pump();
-      final dataMsg = bob.syncNextMessage();
+      final dataMsg = await bob.syncNextMessage();
       expect(dataMsg, isNotNull);
       expect(dataMsg!.channelDataType, 0x1234);
       expect(dataMsg.channelDataPayload, [9, 9, 9]);

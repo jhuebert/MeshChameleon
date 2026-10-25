@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
 
+import 'errors.dart';
 import 'radio_link.dart';
 
 /// [RadioLink] over TCP using the serial (`'<'`/`'>'`) framing.
@@ -23,7 +24,9 @@ class TcpDeviceLink implements RadioLink {
   final Duration requestTimeout;
   final void Function(String message)? onLog;
 
-  final SerialFrameCodec _codec = SerialFrameCodec();
+  // A device only sends radio→app (outbound '>') frames.
+  final SerialFrameCodec _codec =
+      SerialFrameCodec(direction: FrameDirection.outbound);
   final _stateController = StreamController<LinkState>.broadcast();
   LinkState _state = LinkState.disconnected;
   Socket? _socket;
@@ -56,9 +59,14 @@ class TcpDeviceLink implements RadioLink {
       _codec.reset();
       socket.listen(
         _onData,
-        onError: (Object e) => _failAll(StateError('device link error: $e')),
+        onError: (Object e) => _failAll(
+          DeviceCommandError.disconnected(message: 'device link error: $e'),
+        ),
         onDone: () {
-          _failAll(StateError('device link closed'));
+          _failAll(
+            const DeviceCommandError.disconnected(
+                message: 'device link closed'),
+          );
           _setState(LinkState.disconnected);
         },
         cancelOnError: true,
@@ -74,7 +82,7 @@ class TcpDeviceLink implements RadioLink {
   Future<void> disconnect() async {
     final socket = _socket;
     _socket = null;
-    _failAll(StateError('disconnected'));
+    _failAll(const DeviceCommandError.disconnected(message: 'disconnected'));
     await socket?.close();
     await socket?.done.catchError((_) {});
     _setState(LinkState.disconnected);
@@ -94,12 +102,20 @@ class TcpDeviceLink implements RadioLink {
       }
       final pending = _pending;
       if (pending != null && !pending.isCompleted) {
-        if (_expected.contains(frame_[0])) {
+        if (frame_[0] == respCodeErr) {
+          _pending = null;
+          if (frame_.length < 2) {
+            pending.completeError(
+              const DeviceCommandError.malformed(
+                message: 'truncated ERR reply from device',
+              ),
+            );
+          } else {
+            pending.completeError(DeviceCommandError.device(frame_[1]));
+          }
+        } else if (_expected.contains(frame_[0])) {
           _pending = null;
           pending.complete(frame_);
-        } else if (frame_[0] == respCodeErr) {
-          _pending = null;
-          pending.completeError(StateError('device returned error ${frame_[1]}'));
         }
       }
     }
@@ -127,7 +143,11 @@ class TcpDeviceLink implements RadioLink {
   Future<Uint8List> _request(Uint8List frame, Set<int> expected) {
     return _runExclusive(() async {
       final socket = _socket;
-      if (socket == null) throw StateError('device link not connected');
+      if (socket == null) {
+        throw const DeviceCommandError.disconnected(
+          message: 'device link not connected',
+        );
+      }
       if (_pending != null) throw StateError('request already in flight');
       final completer = Completer<Uint8List>();
       _pending = completer;
@@ -135,10 +155,37 @@ class TcpDeviceLink implements RadioLink {
       try {
         socket.add(_codec.encodeFrame(frame, prefix: frameInboundPrefix));
         return await completer.future.timeout(requestTimeout);
+      } on TimeoutException {
+        throw DeviceCommandError.timeout(
+          message: 'device reply timed out after '
+              '${requestTimeout.inMilliseconds}ms',
+        );
       } finally {
         _pending = null;
       }
     });
+  }
+
+  /// Send a setter and require a definite `OK`; a DISABLED reply preserves its
+  /// semantic (the caller maps it to the one-byte DISABLED response).
+  Future<void> _requestOk(Uint8List frame) async {
+    final reply = await _request(
+      frame,
+      {respCodeOk, respCodeErr, respCodeDisabled},
+    );
+    if (reply.isEmpty) {
+      throw const DeviceCommandError.malformed(
+        message: 'empty device reply',
+      );
+    }
+    if (reply[0] == respCodeDisabled) {
+      throw const DeviceCommandError.disabled();
+    }
+    if (reply[0] != respCodeOk) {
+      throw DeviceCommandError.malformed(
+        message: 'unexpected device reply ${reply[0]}',
+      );
+    }
   }
 
   @override
@@ -166,36 +213,60 @@ class TcpDeviceLink implements RadioLink {
   /// Read the full device SELF_INFO (radio params + name + location).
   @override
   Future<ParsedSelfInfo> selfInfo() async {
-    final frame =
-        await _request(DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
+    final frame = await _request(
+        DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
     final info = ParsedSelfInfo.parse(frame);
-    if (info == null) throw StateError('invalid SELF_INFO from device');
+    if (info == null) {
+      throw const DeviceCommandError.malformed(
+        message: 'invalid SELF_INFO from device',
+      );
+    }
     return info;
   }
 
   @override
-  Future<void> setRadioParams(RadioParams params) async {
-    await _request(
-      DeviceFrames.setRadioParams(params),
-      {respCodeOk, respCodeErr},
-    );
+  Future<void> setRadioParams(RadioParams params, {bool? clientRepeat}) async {
+    await _requestOk(DeviceFrames.setRadioParams(
+      params,
+      clientRepeat: clientRepeat,
+    ));
   }
 
   @override
   Future<void> setTxPower(int dbm) async {
-    await _request(DeviceFrames.setTxPower(dbm), {respCodeOk, respCodeErr});
+    await _requestOk(DeviceFrames.setTxPower(dbm));
   }
 
   @override
   Future<void> reboot() async {
-    // The firmware reboots the hardware without sending a reply, so this is a
-    // fire-and-forget write (not a request/response exchange).
-    await _runExclusive(() async {
+    await _dispatchLifecycle(DeviceFrames.reboot(), 'reboot');
+  }
+
+  @override
+  Future<void> shutdown() async {
+    await _dispatchLifecycle(DeviceFrames.shutdown(), 'shutdown');
+  }
+
+  /// Fire-and-forget lifecycle write: flush the transport, but never wait for a
+  /// firmware reply (reboot/poweroff do not send one).
+  Future<void> _dispatchLifecycle(Uint8List payload, String action) {
+    return _runExclusive(() async {
       final socket = _socket;
-      if (socket == null) throw StateError('device link not connected');
-      socket.add(
-        _codec.encodeFrame(DeviceFrames.reboot(), prefix: frameInboundPrefix),
-      );
+      if (socket == null) {
+        throw const DeviceCommandError.disconnected(
+          message: 'device link not connected',
+        );
+      }
+      try {
+        socket.add(
+          _codec.encodeFrame(payload, prefix: frameInboundPrefix),
+        );
+        await socket.flush();
+      } on SocketException catch (e) {
+        throw DeviceCommandError.disconnected(
+          message: '$action dispatch failed: ${e.message}',
+        );
+      }
     });
   }
 
@@ -206,24 +277,22 @@ class TcpDeviceLink implements RadioLink {
       {respCodeTuningParams, respCodeErr},
     );
     final params = TuningParams.parse(frame);
-    if (params == null) throw StateError('invalid TUNING_PARAMS from device');
+    if (params == null) {
+      throw const DeviceCommandError.malformed(
+        message: 'invalid TUNING_PARAMS from device',
+      );
+    }
     return params;
   }
 
   @override
   Future<void> setTuningParams(TuningParams params) async {
-    await _request(
-      DeviceFrames.setTuningParams(params),
-      {respCodeOk, respCodeErr},
-    );
+    await _requestOk(DeviceFrames.setTuningParams(params));
   }
 
   @override
   Future<void> setPathHashMode(int mode) async {
-    await _request(
-      DeviceFrames.setPathHashMode(mode),
-      {respCodeOk, respCodeErr},
-    );
+    await _requestOk(DeviceFrames.setPathHashMode(mode));
   }
 
   @override
@@ -250,8 +319,11 @@ class TcpDeviceLink implements RadioLink {
   Future<String> runCliCommand(String command) async {
     final frame = await _request(
       DeviceFrames.runCliCommand(command),
-      {respCodeCliReply, respCodeErr},
+      {respCodeCliReply, respCodeDisabled, respCodeErr},
     );
+    if (frame.isNotEmpty && frame[0] == respCodeDisabled) {
+      throw const DeviceCommandError.disabled();
+    }
     return String.fromCharCodes(frame.length > 1 ? frame.sublist(1) : const []);
   }
 
@@ -271,14 +343,20 @@ class TcpDeviceLink implements RadioLink {
       {respCodeAllowedRepeatFreq, respCodeErr},
     );
     if (frame.isEmpty || frame[0] != respCodeAllowedRepeatFreq) {
-      throw StateError('unexpected allowed-repeat-freq reply');
+      throw const DeviceCommandError.malformed(
+        message: 'unexpected allowed-repeat-freq reply',
+      );
     }
     return Uint8List.fromList(frame.sublist(1));
   }
 
   /// Parse `RESP_CODE_DEVICE_INFO`.
   static DeviceInfo parseDeviceInfo(Uint8List frame) {
-    if (frame.length < 4) throw StateError('truncated DEVICE_INFO');
+    if (frame.length < 4) {
+      throw const DeviceCommandError.malformed(
+        message: 'truncated DEVICE_INFO',
+      );
+    }
     final fw = frame[1];
     final maxContacts = frame[2] * 2;
     final maxChannels = frame[3];
@@ -286,7 +364,8 @@ class TcpDeviceLink implements RadioLink {
       if (frame.length < start + len) return '';
       final bytes = frame.sublist(start, start + len);
       final end = bytes.indexOf(0);
-      return String.fromCharCodes(end >= 0 ? bytes.sublist(0, end) : bytes).trim();
+      return String.fromCharCodes(end >= 0 ? bytes.sublist(0, end) : bytes)
+          .trim();
     }
 
     return DeviceInfo(

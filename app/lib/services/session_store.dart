@@ -24,6 +24,7 @@ class SessionConfig {
     this.bleName,
     this.proxyPort = defaultCompanionPort,
     this.autoResume = false,
+    this.intentionallyOff = false,
   });
 
   final DeviceTargetKind kind;
@@ -44,7 +45,16 @@ class SessionConfig {
   /// Whether the app should reconnect and restart the proxy on launch.
   final bool autoResume;
 
-  SessionConfig copyWith({int? proxyPort, bool? autoResume}) => SessionConfig(
+  /// A successful physical shutdown suppresses automatic reconnect/auto-resume
+  /// until the user explicitly connects again.
+  final bool intentionallyOff;
+
+  SessionConfig copyWith({
+    int? proxyPort,
+    bool? autoResume,
+    bool? intentionallyOff,
+  }) =>
+      SessionConfig(
         kind: kind,
         host: host,
         devicePort: devicePort,
@@ -52,6 +62,7 @@ class SessionConfig {
         bleName: bleName,
         proxyPort: proxyPort ?? this.proxyPort,
         autoResume: autoResume ?? this.autoResume,
+        intentionallyOff: intentionallyOff ?? this.intentionallyOff,
       );
 
   Map<String, dynamic> toJson() => {
@@ -62,6 +73,7 @@ class SessionConfig {
         'bleName': bleName,
         'proxyPort': proxyPort,
         'autoResume': autoResume,
+        'intentionallyOff': intentionallyOff,
       };
 
   static SessionConfig? fromJson(Map<String, dynamic> json) {
@@ -76,12 +88,12 @@ class SessionConfig {
     return SessionConfig(
       kind: kind,
       host: json['host'] as String?,
-      devicePort:
-          (json['devicePort'] as num?)?.toInt() ?? defaultCompanionPort,
+      devicePort: (json['devicePort'] as num?)?.toInt() ?? defaultCompanionPort,
       bleRemoteId: json['bleRemoteId'] as String?,
       bleName: json['bleName'] as String?,
       proxyPort: (json['proxyPort'] as num?)?.toInt() ?? defaultCompanionPort,
       autoResume: json['autoResume'] as bool? ?? false,
+      intentionallyOff: json['intentionallyOff'] as bool? ?? false,
     );
   }
 }

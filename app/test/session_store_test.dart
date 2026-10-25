@@ -12,6 +12,7 @@ void main() {
       bleName: 'MeshCore-1234',
       proxyPort: 5100,
       autoResume: true,
+      intentionallyOff: true,
     );
     final restored = SessionConfig.fromJson(config.toJson());
     expect(restored, isNotNull);
@@ -20,14 +21,18 @@ void main() {
     expect(restored.bleName, 'MeshCore-1234');
     expect(restored.proxyPort, 5100);
     expect(restored.autoResume, isTrue);
+    expect(restored.intentionallyOff, isTrue);
+    expect(restored.copyWith(proxyPort: 5200).intentionallyOff, isTrue);
   });
 
   test('SessionConfig defaults ports when absent', () {
-    final restored = SessionConfig.fromJson({'kind': 'tcp', 'host': '10.0.0.5'});
+    final restored =
+        SessionConfig.fromJson({'kind': 'tcp', 'host': '10.0.0.5'});
     expect(restored, isNotNull);
     expect(restored!.devicePort, defaultCompanionPort);
     expect(restored.proxyPort, defaultCompanionPort);
     expect(restored.autoResume, isFalse);
+    expect(restored.intentionallyOff, isFalse);
   });
 
   test('SessionConfig.fromJson rejects an unknown kind', () {
