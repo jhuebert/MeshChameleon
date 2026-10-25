@@ -2822,6 +2822,412 @@ void main() {
     a2.stop();
     b2.stop();
   });
+
+  test('unpermitted_cli_is_queued_and_not_executed', () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+    final command = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 100,
+      txtType: txtTypeCliCommand,
+      text: 'set name Pwned',
+    );
+    bLink.deliver(6, -70, command.writeTo());
+    await pump();
+
+    expect(b.prefs.nodeName, 'bob');
+    final queued = await b.syncNextMessage();
+    expect(queued?.txtType, txtTypeCliCommand);
+    expect(queued?.text, 'set name Pwned');
+    expect(bLink.transmitted, isEmpty);
+    expect(bLink.calls, isNot(contains('runCliCommand')));
+  });
+
+  test('permitted_set_name_changes_virtual_only_and_replies_cli_data_after600ms',
+      () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+    final command = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 100,
+      txtType: txtTypeCliCommand,
+      text: 'AB|set name Remote',
+    );
+    bLink.deliver(6, -70, command.writeTo());
+    await pump();
+
+    expect(b.prefs.nodeName, 'Remote');
+    expect(await b.syncNextMessage(), isNull);
+    expect(bLink.transmitted, isEmpty);
+    scheduler.advance(const Duration(milliseconds: 599));
+    await pump();
+    expect(bLink.transmitted, isEmpty);
+    scheduler.advance(const Duration(milliseconds: 1));
+    await pump();
+    expect(bLink.transmitted, hasLength(1));
+    final reply = Packet.readFrom(bLink.transmitted.single)!;
+    expect(reply.payloadType, payloadTypeTxtMsg);
+    expect(reply.isRouteDirect, isTrue);
+    expect(reply.pathHashCount, 0);
+    final secret = await a.identity.sharedSecret(b.identity.publicKey);
+    final plain = CryptoUtils.macThenDecrypt(
+      secret.sublist(0, 16),
+      secret,
+      reply.payload.sublist(2),
+    );
+    final r = BufferReader(plain);
+    expect(r.readUInt32Le(), isNot(100));
+    final flags = r.readByte();
+    expect((flags >> 2) & 0x3F, txtTypeCliData);
+    expect(r.readCString(), 'AB|OK');
+    expect(
+      bLink.calls.where((c) =>
+          c == 'runCliCommand' ||
+          c == 'setRadioParams' ||
+          c == 'setTxPower' ||
+          c == 'setTuningParams' ||
+          c == 'reboot' ||
+          c == 'shutdown'),
+      isEmpty,
+    );
+  });
+
+  test('permission_survives_advert_and_restart', () async {
+    final aliceId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 245);
+    final bobId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 246);
+    final store = InMemoryNodeStore();
+    final link = FakeDeviceLink();
+    await link.connect();
+    final bob = MeshNode(identity: bobId, link: link, store: store)..start();
+    await bob.load();
+    await bob.addUpdateContact(Contact(
+      publicKey: aliceId.publicKey,
+      name: 'alice',
+      flags: 0x10,
+      outPathLen: 0,
+      lastAdvertTimestamp: 1,
+    ));
+    final advert = await _makeAdvert(
+      aliceId,
+      type: advTypeChat,
+      name: 'alice newer',
+      timestamp: 100,
+    );
+    link.deliver(6, -70, advert.writeTo());
+    await pump();
+    expect(bob.contacts.single.flags, 0x10);
+    expect(bob.contacts.single.name, 'alice newer');
+
+    final restarted = MeshNode(
+      identity: bobId,
+      link: FakeDeviceLink(),
+      store: store,
+    );
+    await restarted.load();
+    expect(restarted.contacts.single.flags, 0x10);
+    expect(restarted.contacts.single.name, 'alice newer');
+    bob.stop();
+  });
+
+  test('remote_radio_reboot_wifi_password_are_denied_no_device_calls', () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+    final commands = [
+      'set radio 915,250,10,5',
+      'reboot',
+      'poweroff',
+      'get wifi.pwd',
+      'set wifi.pwd secret',
+    ];
+    for (var i = 0; i < commands.length; i++) {
+      final packet = await _encryptedTextPacket(
+        from: a.identity,
+        to: b.identity,
+        timestamp: 200 + i,
+        txtType: txtTypeCliCommand,
+        text: commands[i],
+      );
+      bLink.deliver(6, -70, packet.writeTo());
+      await pump();
+    }
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+
+    expect(bLink.transmitted, hasLength(commands.length));
+    for (final raw in bLink.transmitted) {
+      final reply = Packet.readFrom(raw)!;
+      final secret = await a.identity.sharedSecret(b.identity.publicKey);
+      final plain = CryptoUtils.macThenDecrypt(
+          secret.sublist(0, 16), secret, reply.payload.sublist(2));
+      final r = BufferReader(plain);
+      r.readUInt32Le();
+      expect((r.readByte() >> 2) & 0x3F, txtTypeCliData);
+      expect(r.readCString(), 'Error: physical administration disabled');
+    }
+    expect(
+      bLink.calls.where((c) =>
+          c == 'runCliCommand' ||
+          c == 'setRadioParams' ||
+          c == 'setTxPower' ||
+          c == 'setTuningParams' ||
+          c == 'reboot' ||
+          c == 'shutdown'),
+      isEmpty,
+    );
+    expect(b.prefs.nodeName, 'bob');
+  });
+
+  test('duplicate_allowed_command_executes_once', () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+    final command = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 300,
+      txtType: txtTypeCliCommand,
+      text: 'set multi.acks 7',
+    );
+    final bytes = command.writeTo();
+    bLink.deliver(6, -70, bytes);
+    await pump();
+    expect(b.prefs.multiAcks, 7);
+    b.prefs.multiAcks = 1;
+    bLink.deliver(6, -70, bytes);
+    await pump();
+    expect(b.prefs.multiAcks, 1);
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    expect(bLink.transmitted, hasLength(1));
+  });
+
+  test('wrong_mac_unknown_sender_hash_collision_cannot_borrow_permission',
+      () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    final target = a.identity.publicKey[0];
+    final evil = await _identityWithHashByte(target, 500);
+    final attacker = await _identityWithHashByte(target, 900);
+    await b.addUpdateContact(Contact(
+      publicKey: evil.publicKey,
+      name: 'evil',
+      flags: 0,
+      outPathLen: 0,
+    ));
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+
+    // The attacker has the same 1-byte source hash as the permitted contact
+    // but a different shared secret, so every MAC attempt must fail.
+    final forged = await _encryptedTextPacket(
+      from: attacker,
+      to: b.identity,
+      timestamp: 400,
+      txtType: txtTypeCliCommand,
+      text: 'set name Hacked',
+    );
+    bLink.deliver(6, -70, forged.writeTo());
+    await pump();
+    expect(b.prefs.nodeName, 'bob');
+    expect(await b.syncNextMessage(), isNull);
+    expect(bLink.transmitted, isEmpty);
+
+    // A valid packet from the second colliding contact must still decrypt and
+    // execute after the first candidate's MAC fails.
+    final valid = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 401,
+      txtType: txtTypeCliCommand,
+      text: 'set name Collision OK',
+    );
+    bLink.deliver(6, -70, valid.writeTo());
+    await pump();
+    expect(b.prefs.nodeName, 'Collision OK');
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    expect(bLink.transmitted, hasLength(1));
+  });
+
+  test('reply_uses_virtual_identity_and_different_timestamp_no_ack', () async {
+    final aliceId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 247);
+    final bobId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 248);
+    final link = FakeDeviceLink();
+    await link.connect();
+    final scheduler = _FakeScheduler();
+    final clock = VirtualClock(
+      hostWallClock: () => DateTime.fromMillisecondsSinceEpoch(1000 * 1000),
+      monotonicClock: () => Duration.zero,
+    );
+    final bob = MeshNode(
+      identity: bobId,
+      link: link,
+      scheduler: scheduler,
+      clock: clock,
+    )..start();
+    await bob.addUpdateContact(Contact(
+      publicKey: aliceId.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+    final command = await _encryptedTextPacket(
+      from: aliceId,
+      to: bobId,
+      timestamp: 1000,
+      txtType: txtTypeCliCommand,
+      text: 'get name',
+    );
+    link.deliver(6, -70, command.writeTo());
+    await pump();
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    final reply = Packet.readFrom(link.transmitted.single)!;
+    expect(reply.payloadType, payloadTypeTxtMsg);
+    expect(reply.payload[1], bobId.publicKey[0],
+        reason: 'reply source hash is the virtual identity');
+    final secret = await aliceId.sharedSecret(bobId.publicKey);
+    final plain = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16), secret, reply.payload.sublist(2));
+    final r = BufferReader(plain);
+    expect(r.readUInt32Le(), 1001,
+        reason: 'reply timestamp differs from the request timestamp');
+    expect((r.readByte() >> 2) & 0x3F, txtTypeCliData);
+    expect(r.readCString(), '> MeshChameleon');
+    expect(link.transmitted.where((raw) {
+      final packet = Packet.readFrom(raw);
+      return packet?.payloadType == payloadTypeAck ||
+          packet?.payloadType == payloadTypeMultipart;
+    }), isEmpty);
+    bob.stop();
+  });
+
+  test('reply_outbound_zero_hop_direct_unknown_path_scoped_flood', () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    final contact = Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    );
+    await b.addUpdateContact(contact);
+    b.setFloodScopeKey(Uint8List.fromList(List.filled(16, 3)));
+    scheduler.resetJobs();
+    final direct = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 500,
+      txtType: txtTypeCliCommand,
+      text: 'get name',
+    );
+    bLink.deliver(6, -70, direct.writeTo());
+    await pump();
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    final directReply = Packet.readFrom(bLink.transmitted.single)!;
+    expect(directReply.isRouteDirect, isTrue);
+    expect(directReply.pathHashCount, 0);
+
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: -1,
+    ));
+    bLink.transmitted.clear();
+    final unknown = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 501,
+      txtType: txtTypeCliCommand,
+      text: 'get name',
+    );
+    bLink.deliver(6, -70, unknown.writeTo());
+    await pump();
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    final floodReply = Packet.readFrom(bLink.transmitted.single)!;
+    expect(floodReply.isRouteFlood, isTrue);
+    expect(floodReply.routeType, routeTypeTransportFlood,
+        reason: 'reply must use the configured scoped flood');
+    expect(floodReply.path, isEmpty);
+  });
+
+  test('identity_swap_or_reset_cancels_old_scheduled_reply', () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      flags: 0x10,
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+    final first = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 600,
+      txtType: txtTypeCliCommand,
+      text: 'set name BeforeSwap',
+    );
+    bLink.deliver(6, -70, first.writeTo());
+    await pump();
+    await b.replaceIdentity(await LocalIdentity.fromSeed(Uint8List(32)..[0] = 77));
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    expect(bLink.transmitted, isEmpty);
+
+    final second = await _encryptedTextPacket(
+      from: a.identity,
+      to: b.identity,
+      timestamp: 601,
+      txtType: txtTypeCliCommand,
+      text: 'set name BeforeReset',
+    );
+    bLink.deliver(6, -70, second.writeTo());
+    await pump();
+    await b.resetVirtualData();
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    expect(bLink.transmitted, isEmpty);
+  });
+}
+
+
+Future<LocalIdentity> _identityWithHashByte(int byte, int start) async {
+  var n = start;
+  while (true) {
+    final id = await LocalIdentity.fromSeed(_testKey(n++));
+    if (id.publicKey[0] == (byte & 0xFF)) return id;
+  }
 }
 
 /// Build a `PAYLOAD_TYPE_RESPONSE` datagram from [from] to [to] carrying [body]

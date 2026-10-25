@@ -821,13 +821,6 @@ class MeshNode extends CompanionBridge {
     yield* _transientContacts;
   }
 
-  Contact? _contactBySourceHash(int hash) {
-    for (final c in _allContacts) {
-      if (c.publicKey.isNotEmpty && c.publicKey[0] == hash) return c;
-    }
-    return null;
-  }
-
   @override
   Contact? getContactByKey(Uint8List pubkey) {
     final hex = bytesToHex(pubkey);
@@ -2521,21 +2514,13 @@ class MeshNode extends CompanionBridge {
     if (packet.payload.length < 2) return;
     if (packet.payload[0] != _selfHash) return; // not addressed to us
     final srcHash = packet.payload[1];
-    final sender = _contactBySourceHash(srcHash);
-    if (sender == null) return;
-
-    final secret = await identity.sharedSecret(sender.publicKey);
-    if (!_identityCurrent(generation)) return;
-    late Uint8List plaintext;
-    try {
-      plaintext = CryptoUtils.macThenDecrypt(
-        secret.sublist(0, 16),
-        secret,
-        packet.payload.sublist(2),
-      );
-    } catch (_) {
-      return;
-    }
+    final decrypted = await _decryptFromSource(
+      srcHash,
+      packet.payload.sublist(2),
+      generation,
+    );
+    if (decrypted == null) return;
+    final (sender, plaintext) = decrypted;
     if (plaintext.length < 5) return;
     final r = BufferReader(plaintext);
     final ts = r.readUInt32Le();
@@ -2543,8 +2528,9 @@ class MeshNode extends CompanionBridge {
     final txtType = (flagsByte >> 2) & 0x3F;
 
     // Signed messages carry a 4-byte sender prefix before the text.
-    final String text;
-    final Uint8List ackBytes;
+    late String text;
+    Uint8List? rawCommand;
+    late Uint8List ackBytes;
     if (txtType == txtTypeSigned) {
       if (plaintext.length < 9) return;
       r.skipBytes(4); // sender prefix (informational)
@@ -2563,6 +2549,9 @@ class MeshNode extends CompanionBridge {
                   [...plaintext.sublist(0, end), ...identity.publicKey])
               .sublist(0, 4));
     } else {
+      if (txtType == txtTypeCliCommand) {
+        rawCommand = _readCStringBytes(plaintext, r.position);
+      }
       text = r.readCString();
       final textBytes = utf8.encode(text);
       final hash = PacketBuilder.ackHash(
@@ -2588,12 +2577,27 @@ class MeshNode extends CompanionBridge {
     if (!_identityCurrent(generation)) return;
     final expectsAck = txtType == txtTypePlain || txtType == txtTypeSigned;
     if (expectsAck) {
-      _scheduleTextAck(packet, sender, secret, ackBytes);
+      _scheduleTextAck(packet, sender, await identity.sharedSecret(sender.publicKey), ackBytes);
     }
 
-    // Duplicate reception of the same packet is ACKed again (for reliability)
-    // but not queued twice.
+    // Deduplicate before any remote CLI side effect. Duplicate reception of
+    // plain/signed messages is still ACKed above but not queued twice.
     if (_isDuplicate(packet.calculatePacketHash())) return;
+
+    if (txtType == txtTypeCliCommand) {
+      if (_isPersistentContact(sender) && (sender.flags & 0x10) != 0) {
+        await _handleRemoteCli(
+          sender,
+          ts,
+          rawCommand ?? Uint8List.fromList(utf8.encode(text)),
+          generation,
+        );
+        return;
+      }
+      // No 0x10 permission: preserve stock behavior by queueing the command
+      // unchanged, with no execution and no automatic reply.
+    }
+
     await _enqueueMessage(
       QueuedMessage(
         senderKey: sender.publicKey,
@@ -2603,6 +2607,117 @@ class MeshNode extends CompanionBridge {
         snr: packet.snr,
         rssi: packet.rssi,
       ),
+      identityGeneration: generation,
+    );
+  }
+
+  Uint8List _readCStringBytes(Uint8List data, int start) {
+    final out = <int>[];
+    for (var i = start; i < data.length; i++) {
+      if (data[i] == 0) break;
+      out.add(data[i]);
+    }
+    return Uint8List.fromList(out);
+  }
+
+  bool _isPersistentContact(Contact contact) {
+    final hex = contact.publicKeyHex;
+    return contacts.any((c) => c.publicKeyHex == hex);
+  }
+
+  /// Try every known contact whose first public-key byte matches [srcHash].
+  /// Selecting the first hash match would let a 1-byte collision pick the wrong
+  /// permission set or prevent decryption of the real sender.
+  Future<(Contact, Uint8List)?> _decryptFromSource(
+    int srcHash,
+    Uint8List ciphertext,
+    int generation,
+  ) async {
+    for (final contact in _allContacts) {
+      if (contact.publicKey.isEmpty || contact.publicKey[0] != srcHash) {
+        continue;
+      }
+      final secret = await identity.sharedSecret(contact.publicKey);
+      if (!_identityCurrent(generation)) return null;
+      try {
+        final plaintext = CryptoUtils.macThenDecrypt(
+          secret.sublist(0, 16),
+          secret,
+          ciphertext,
+        );
+        if (!_identityCurrent(generation)) return null;
+        return (contact, plaintext);
+      } catch (_) {
+        continue;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _handleRemoteCli(
+    Contact sender,
+    int requestTimestamp,
+    Uint8List commandBytes,
+    int generation,
+  ) async {
+    String reply;
+    String? prefix;
+    try {
+      final invocation = CliParser.parseBytes(commandBytes);
+      prefix = invocation.prefix;
+      final denial = CliRemotePolicy.denialFor(invocation);
+      if (denial != null) {
+        reply = denial;
+      } else {
+        reply = await _runVirtualCli(invocation.command);
+      }
+    } on CliFormatException catch (e) {
+      prefix = e.prefix;
+      reply = 'Error: illegal argument';
+    } on CompanionOperationError catch (e) {
+      reply = _cliOperationError(e);
+    }
+    if (!_identityCurrent(generation)) return;
+    _scheduleCliReply(sender, requestTimestamp, _cliReply(prefix, reply),
+        generation);
+  }
+
+  void _scheduleCliReply(
+    Contact sender,
+    int requestTimestamp,
+    String reply,
+    int generation,
+  ) {
+    if (!_identityCurrent(generation)) return;
+    _scheduleAck(const Duration(milliseconds: 600), () {
+      unawaited(_sendCliReply(sender, requestTimestamp, reply, generation));
+    });
+  }
+
+  Future<void> _sendCliReply(
+    Contact sender,
+    int requestTimestamp,
+    String reply,
+    int generation,
+  ) async {
+    if (!_identityCurrent(generation) || _semanticBlocked) return;
+    var timestamp = clock.wallSeconds;
+    if (timestamp <= requestTimestamp) timestamp = requestTimestamp + 1;
+    if (timestamp <= _lastPacketTimestamp) timestamp = _lastPacketTimestamp + 1;
+    _lastPacketTimestamp = timestamp;
+    final (packet, _) = await PacketBuilder.createTextMessage(
+      contact: sender,
+      identity: identity,
+      message: reply,
+      txtType: txtTypeCliData,
+      timestamp: timestamp,
+    );
+    if (!_identityCurrent(generation)) return;
+    final flood = !sender.hasDirectRoute;
+    await _transmit(
+      packet,
+      flood: flood,
+      scoped: true,
       identityGeneration: generation,
     );
   }
@@ -2873,20 +2988,13 @@ class MeshNode extends CompanionBridge {
     if (payload.length < 2) return;
     if (payload[0] != _selfHash) return; // not addressed to us
     final srcHash = payload[1];
-    final sender = _contactBySourceHash(srcHash);
-    if (sender == null) return;
-    final secret = await identity.sharedSecret(sender.publicKey);
-    if (!_identityCurrent(generation)) return;
-    late Uint8List plaintext;
-    try {
-      plaintext = CryptoUtils.macThenDecrypt(
-        secret.sublist(0, 16),
-        secret,
-        payload.sublist(2),
-      );
-    } catch (_) {
-      return;
-    }
+    final decrypted = await _decryptFromSource(
+      srcHash,
+      payload.sublist(2),
+      generation,
+    );
+    if (decrypted == null) return;
+    final (sender, plaintext) = decrypted;
     if (plaintext.isEmpty) return;
     final pathLenEncoded = plaintext[0];
     final pathByteLen = PathUtils.getByteLength(pathLenEncoded);
@@ -2936,20 +3044,13 @@ class MeshNode extends CompanionBridge {
     if (payload.length < 2) return;
     if (payload[0] != _selfHash) return;
     final srcHash = payload[1];
-    final sender = _contactBySourceHash(srcHash);
-    if (sender == null) return;
-    final secret = await identity.sharedSecret(sender.publicKey);
-    if (!_identityCurrent(generation)) return;
-    late Uint8List plaintext;
-    try {
-      plaintext = CryptoUtils.macThenDecrypt(
-        secret.sublist(0, 16),
-        secret,
-        payload.sublist(2),
-      );
-    } catch (_) {
-      return;
-    }
+    final decrypted = await _decryptFromSource(
+      srcHash,
+      payload.sublist(2),
+      generation,
+    );
+    if (decrypted == null) return;
+    final (sender, plaintext) = decrypted;
     _dispatchResponse(sender.publicKey, plaintext);
   }
 
