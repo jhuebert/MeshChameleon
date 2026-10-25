@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -226,6 +227,100 @@ void main() {
     expect(sent.success, isTrue);
     expect(b.queuedDirectCount, 1);
     expect(link.transmitted, isNotEmpty);
+  });
+
+  test('CLI set name updates the cached record and survives restart', () async {
+    await manager.load();
+    await start();
+    final node = manager.activeNode!;
+
+    expect(await node.runCliCommand('set name CLI Renamed'), 'OK');
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(manager.activeSummary!.name, 'CLI Renamed');
+    expect((await repository.records()).single.name, 'CLI Renamed');
+
+    final restarted = IdentityManager(
+      repository: repository,
+      notifyDebounce: const Duration(milliseconds: 1),
+    );
+    addTearDown(restarted.dispose);
+    await restarted.load();
+    expect(restarted.summaries.single.name, 'CLI Renamed');
+  });
+
+  test('valid key import updates the record but keeps name and state',
+      () async {
+    await manager.load();
+    final id = manager.summaries.single.id;
+    await start();
+    final node = manager.activeNode!;
+    await node.setAdvertName('Imported Name');
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    await node.addUpdateContact(Contact(
+      publicKey: (await LocalIdentity.generate()).publicKey,
+      name: 'Existing Peer',
+    ));
+    final candidate = await LocalIdentity.generate();
+
+    await node.importPrivateKey(candidate.meshcore64);
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+
+    expect(node.identity.publicKey, candidate.publicKey);
+    final summary = manager.summaries.firstWhere((summary) => summary.id == id);
+    expect(summary.publicKey, candidate.publicKey);
+    expect(summary.prefixHex,
+        bytesToHex(candidate.publicKey.sublist(0, 4)).toUpperCase());
+    expect(summary.name, 'Imported Name');
+    expect(summary.contactCount, 1);
+    final record = (await repository.records()).single;
+    expect(record.id, id);
+    expect(record.publicKey, candidate.publicKey);
+    expect(record.name, 'Imported Name');
+  });
+
+  test('importing another identity key is rejected', () async {
+    await manager.load();
+    final second = await repository.create(name: 'Second');
+    await start();
+    final secondKey = await keyFor(second.id);
+    final firstNode = manager.runtimes
+        .firstWhere((runtime) => runtime.record.id == manager.activeId)
+        .node!;
+    final before = Uint8List.fromList(firstNode.identity.publicKey);
+
+    await expectLater(
+      firstNode.importPrivateKey(secondKey.meshcore64),
+      throwsA(isA<CompanionOperationError>()
+          .having((e) => e.code, 'code', errCodeIllegalArg)),
+    );
+
+    expect(firstNode.identity.publicKey, before);
+    final record = (await repository.records())
+        .firstWhere((record) => record.id == manager.activeId);
+    expect(record.publicKey, before);
+  });
+
+  test('importing the attached radio key is rejected while attached', () async {
+    await manager.load();
+    final deviceIdentity = await LocalIdentity.generate();
+    await manager.startLive(
+      base: link,
+      physical: const PhysicalCapabilities(firmwareVerCode: 14),
+      radioParams: link.initialRadioParams,
+      devicePublicKey: deviceIdentity.publicKey,
+    );
+    final node = manager.activeNode!;
+    final before = Uint8List.fromList(node.identity.publicKey);
+
+    await expectLater(
+      node.importPrivateKey(deviceIdentity.meshcore64),
+      throwsA(isA<CompanionOperationError>()
+          .having((e) => e.code, 'code', errCodeIllegalArg)),
+    );
+
+    expect(node.identity.publicKey, before);
+    expect((await repository.records()).single.publicKey, before);
   });
 
   test('create_is_inactive_and_delete_removes_files', () async {

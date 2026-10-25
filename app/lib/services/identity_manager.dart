@@ -372,6 +372,7 @@ class IdentityManager {
     } catch (e) {
       onLog?.call('Could not update the identity index after a key import: $e');
     }
+    if (_loaded) await refreshSummaries();
     _scheduleNotify();
   }
 

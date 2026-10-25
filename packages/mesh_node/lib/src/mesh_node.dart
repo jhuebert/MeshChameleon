@@ -554,6 +554,10 @@ class MeshNode extends CompanionBridge {
       if (backend != null) {
         try {
           await backend.save(candidate);
+        } on CompanionOperationError {
+          // Host validation (duplicate/attached-device key) is an operation
+          // error, not an uncertain storage failure.
+          rethrow;
         } catch (_) {
           LocalIdentity? readBack;
           try {
