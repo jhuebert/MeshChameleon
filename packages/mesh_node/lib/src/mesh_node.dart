@@ -196,6 +196,10 @@ class MeshNode extends CompanionBridge {
   final Map<String, int> _sentGroupPacketHashes = {};
   static const int _seenPacketTtlSecs = 300;
   static const int _seenPacketMax = 1000;
+  String? _localRoutingDiagnostic;
+
+  /// Last in-process mirror failure (never contains key material).
+  String? get localRoutingDiagnostic => _localRoutingDiagnostic;
   int _lastRequestTag = 0;
   int _lastPacketTimestamp = 0;
 
@@ -225,12 +229,19 @@ class MeshNode extends CompanionBridge {
 
   CancelScheduled _scheduleAck(Duration delay, void Function() action) {
     final generation = _identityGeneration;
-    late CancelScheduled cancel;
+    CancelScheduled? cancel;
+    var ran = false;
     cancel = scheduler.schedule(delay, () {
-      _ackScheduleCancels.remove(cancel);
+      ran = true;
+      if (cancel != null) _ackScheduleCancels.remove(cancel);
       if (!_identityCurrent(generation)) return;
       action();
     });
+    if (ran) {
+      // A synchronous scheduler already executed the action; there is nothing
+      // to track or cancel.
+      return () {};
+    }
     _ackScheduleCancels.add(cancel);
     return cancel;
   }
@@ -1123,6 +1134,19 @@ class MeshNode extends CompanionBridge {
   // Messaging
   // -------------------------------------------------------------------------
 
+  /// Reject unicasts to the attached radio's own companion identity.
+  ///
+  /// The device transmits but does not receive its own raw TX, so such a
+  /// message could never be acknowledged.
+  void _ensureNotBlockedPeer(Uint8List pubkey) {
+    if (localRouter?.isBlockedPeer(pubkey) ?? false) {
+      throw const CompanionOperationError(
+        errCodeIllegalArg,
+        message: 'the attached companion identity cannot be messaged',
+      );
+    }
+  }
+
   @override
   Future<SentResult> sendTextMessage(
     Uint8List pubkey,
@@ -1132,6 +1156,7 @@ class MeshNode extends CompanionBridge {
     bool waitForAck = false,
   }) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -1145,16 +1170,40 @@ class MeshNode extends CompanionBridge {
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
     final flood = !contact.hasDirectRoute;
-    await _transmit(
-      packet,
-      flood: flood,
-      scoped: true,
-      identityGeneration: generation,
-    );
-    if (!_identityCurrent(generation)) return const SentResult.failure();
     // CLI data/commands are not acknowledged; don't track a pending ACK.
     final isCommand =
         txtType == txtTypeCliData || txtType == txtTypeCliCommand;
+    _PendingAck? pending;
+    if (!isCommand) {
+      // Register before transmit: a synchronous local mirror can deliver the
+      // ACK before the RF round-trip completes.
+      final timer = Timer(ackTimeout, () {
+        _pendingAcks.removeWhere((a) => a.crc == ackCrc);
+      });
+      pending = _PendingAck(ackCrc, contact.publicKey, timer);
+      _pendingAcks.add(pending);
+    }
+    try {
+      await _transmit(
+        packet,
+        flood: flood,
+        scoped: true,
+        identityGeneration: generation,
+      );
+    } catch (_) {
+      if (pending != null) {
+        pending.timer.cancel();
+        _pendingAcks.remove(pending);
+      }
+      rethrow;
+    }
+    if (!_identityCurrent(generation)) {
+      if (pending != null) {
+        pending.timer.cancel();
+        _pendingAcks.remove(pending);
+      }
+      return const SentResult.failure();
+    }
     if (isCommand) {
       return SentResult(
         success: true,
@@ -1163,10 +1212,6 @@ class MeshNode extends CompanionBridge {
         timeoutMs: waitForAck ? ackTimeout.inMilliseconds : 5000,
       );
     }
-    final timer = Timer(ackTimeout, () {
-      _pendingAcks.removeWhere((a) => a.crc == ackCrc);
-    });
-    _pendingAcks.add(_PendingAck(ackCrc, contact.publicKey, timer));
     return SentResult(
       success: true,
       isFlood: flood,
@@ -1269,6 +1314,7 @@ class MeshNode extends CompanionBridge {
   @override
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -1300,6 +1346,7 @@ class MeshNode extends CompanionBridge {
   @override
   Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     // Like the firmware, ensure a contact exists (a zero-hop one if unknown) so
     // the response can be decrypted and matched.
@@ -1391,6 +1438,7 @@ class MeshNode extends CompanionBridge {
   @override
   Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -1441,6 +1489,7 @@ class MeshNode extends CompanionBridge {
     bool wantEnvironment = true,
   }) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -1534,6 +1583,7 @@ class MeshNode extends CompanionBridge {
   @override
   Future<SentResult> sendLogin(Uint8List pubkey, String password) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -1578,6 +1628,7 @@ class MeshNode extends CompanionBridge {
   @override
   Future<SentResult> sendStatusReq(Uint8List pubkey) async {
     if (_semanticBlocked) return const SentResult.failure();
+    _ensureNotBlockedPeer(pubkey);
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
@@ -2418,13 +2469,48 @@ class MeshNode extends CompanionBridge {
         if (idle != null && !idle.isCompleted) idle.complete();
       }
     }
+    await _mirrorOutbound(bytes);
   }
 
-  Future<void> _onRawFrame(double snr, int rssi, Uint8List raw) async {
+  Future<void> _mirrorOutbound(Uint8List bytes) async {
+    final router = localRouter;
+    if (router == null || _retired) return;
+    try {
+      await router.mirrorOutbound(
+        bytes,
+        fromPublicKey: identity.publicKey,
+      );
+      _localRoutingDiagnostic = null;
+    } catch (e) {
+      // A mirror failure must never turn a successful RF send into a failure.
+      _localRoutingDiagnostic = 'local mirror failed: $e';
+    }
+  }
+
+  /// Deliver an in-process peer copy.
+  ///
+  /// The exact outbound bytes are parsed and handled like a final-hop received
+  /// frame: synthetic metrics, no raw-RX push, no RF airtime, and no route
+  /// consumption requirement.
+  Future<void> receiveLocal(
+    Uint8List raw, {
+    double snr = 0,
+    int rssi = 0,
+  }) =>
+      _onRawFrame(snr, rssi, raw, peerOrigin: true);
+
+  Future<void> _onRawFrame(
+    double snr,
+    int rssi,
+    Uint8List raw, {
+    bool peerOrigin = false,
+  }) async {
     if (_semanticBlocked) return;
     final generation = _identityGeneration;
-    pushSink?.pushRawRxData(snr, rssi, raw);
-    _rxAirMicros += _airtimeMicrosFor(raw.length);
+    if (!peerOrigin) {
+      pushSink?.pushRawRxData(snr, rssi, raw);
+      _rxAirMicros += _airtimeMicrosFor(raw.length);
+    }
     final packet = Packet.readFrom(raw);
     if (packet == null) {
       _packetStats['recv_errors'] = (_packetStats['recv_errors'] ?? 0) + 1;
@@ -2448,8 +2534,10 @@ class MeshNode extends CompanionBridge {
 
     // Control discovery raw packets preserve this path for diagnostics, but
     // semantic delivery at this endpoint requires a fully consumed direct route.
+    // A local mirror copy is already at its final destination even when the
+    // original packet still carries a direct path.
     final endpointConsumed =
-        packet.isRouteFlood || packet.pathHashCount == 0;
+        peerOrigin || packet.isRouteFlood || packet.pathHashCount == 0;
     if (!endpointConsumed) {
       // Stock endpoints can still observe early ACKs before the route is
       // consumed; everything else remains raw-logged only.
@@ -2474,7 +2562,7 @@ class MeshNode extends CompanionBridge {
       case payloadTypeTxtMsg:
         await _onDirectText(packet, generation);
       case payloadTypeGrpTxt:
-        await _onGroupText(packet, generation);
+        await _onGroupText(packet, generation, peerOrigin: peerOrigin);
       case payloadTypeGrpData:
         await _onGroupData(packet, generation);
       case payloadTypeControl:
@@ -2908,7 +2996,11 @@ class MeshNode extends CompanionBridge {
     }
   }
 
-  Future<void> _onGroupText(Packet packet, int generation) async {
+  Future<void> _onGroupText(
+    Packet packet,
+    int generation, {
+    bool peerOrigin = false,
+  }) async {
     if (packet.payload.length < 3) return;
     final channelHash = packet.payload[0];
     Channel? channel;
@@ -2949,8 +3041,9 @@ class MeshNode extends CompanionBridge {
     r.skipBytes(1); // flags
     final text = r.readCString();
     // Raw RX is forwarded separately for path/repeat tracking; don't queue our
-    // own channel TX as a new incoming message.
-    if (text.startsWith('${prefs.nodeName}: ')) return;
+    // own channel TX as a new incoming message. A locally mirrored peer copy is
+    // not our own TX even when both identities share a display name.
+    if (!peerOrigin && text.startsWith('${prefs.nodeName}: ')) return;
     if (!_identityCurrent(generation)) return;
     if (_isDuplicate(packet.calculatePacketHash())) return;
     await _enqueueMessage(

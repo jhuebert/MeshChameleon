@@ -136,6 +136,7 @@ class FakeDeviceLink implements RadioLink {
   Object? batteryError;
   int batteryReads = 0;
   Completer<void>? rawTxAck;
+  Object? rawTxError;
 
   Completer<void>? radioParamsAck;
   Completer<void>? txPowerAck;
@@ -196,6 +197,7 @@ class FakeDeviceLink implements RadioLink {
   @override
   Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) async {
     calls.add('sendRawPacket');
+    if (rawTxError != null) throw rawTxError!;
     transmitted.add(Uint8List.fromList(packet));
     transmitPriorities.add(priority);
     bus?.transmit(this, packet, snr, rssi);
