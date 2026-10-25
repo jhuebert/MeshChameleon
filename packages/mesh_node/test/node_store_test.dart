@@ -230,6 +230,27 @@ void main() {
       expect(relaunched.channels.containsKey(0), isTrue);
     });
 
+    test('migrates the persisted default channel name to Public', () async {
+      await store.save(NodeState(
+        prefs: NodePrefs(),
+        channels: {
+          0: Channel(
+            name: 'public',
+            secret: Uint8List.fromList(
+                LocalIdentity.defaultPublicChannelSecret),
+          ),
+        },
+      ));
+
+      final relaunched = MeshNode(
+        identity: aliceId,
+        link: aliceLink,
+        store: store,
+      );
+      await relaunched.load();
+      expect(relaunched.getChannel(0)?.name, 'Public');
+    });
+
     test('persists preference and channel changes', () async {
       alice.setAdvertName('renamed');
       alice.setAdvertLatLon(12.5, -3.25);

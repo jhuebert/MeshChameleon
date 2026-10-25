@@ -15,6 +15,55 @@ Run everything:
 DART=~/dev/flutter/bin/dart FLUTTER=~/dev/flutter/bin/flutter ./scripts/check.sh
 ```
 
+The same simulator is also reachable without writing a test: from the Linux
+desktop app's **Simulated companion** entry, or from the headless CLI below.
+
+## Linux desktop and headless proxy
+
+Two hardware-free targets share the pure-Dart core:
+
+- **Linux desktop** (`app/linux/`) — the real UI. BLE is hidden off mobile
+  because there is no desktop `flutter_blue_plus` implementation; the
+  debug/profile-only **Simulated companion** entry drives the real `MeshNode`
+  and `CompanionServer` from an in-memory `FakeDeviceLink`.
+- **Headless CLI** (`packages/mesh_node/tool/proxy_cli.dart`) — no Flutter, no
+  GUI, TCP device link only.
+
+Build dependencies on Arch (GTK3, libsecret, and pkg-config are usually already
+present):
+
+```sh
+sudo pacman -S --needed clang cmake ninja
+```
+
+Run the desktop app:
+
+```sh
+cd app
+~/dev/flutter/bin/flutter run -d linux
+```
+
+Run the headless proxy:
+
+```sh
+cd packages/mesh_node
+~/dev/flutter/bin/dart run tool/proxy_cli.dart --simulated
+~/dev/flutter/bin/dart run tool/proxy_cli.dart --device 192.168.1.50:5000
+```
+
+Other options: `--proxy-port` (default 5000, `0` picks a free port),
+`--identity-file`, and `--state-dir` (persist contacts/channels/queue). Without
+`--identity-file` the identity is regenerated each run, so every launch presents
+a new `SELF_INFO` public key.
+
+`--identity-file` writes the proxy's private identity as **plaintext hex at mode
+0600**. Use it only for development; the phone app's Keystore-backed storage is
+the real model (see `SECURITY.md`).
+
+Desktop builds have no BLE device link and no background service — desktop has
+no process suspension to defend against, so the link simply stays up while the
+app runs. None of this is hardware-validated.
+
 ## Connecting a real client
 
 Start the proxy (port defaults to 5000), then point a client at the phone's IP:
@@ -185,6 +234,13 @@ The Android `applicationId` is `org.huebert.meshchameleon` (matching the
 cd app
 ~/dev/flutter/bin/flutter build apk --debug
 ~/dev/android-sdk/platform-tools/adb install -r build/app/outputs/flutter-apk/app-debug.apk
+```
+
+Desktop:
+
+```sh
+cd app
+~/dev/flutter/bin/flutter build linux --debug
 ```
 
 ## Branding (icon + splash)

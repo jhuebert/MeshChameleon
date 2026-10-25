@@ -206,6 +206,17 @@ class CompanionServer implements CompanionPushSink {
            (tag >> 16) & 0xFF, (tag >> 24) & 0xFF, ...data]));
 
   @override
+  void pushRawRxData(double snr, int rssi, Uint8List raw) {
+    final snrByte = (snr * 4).round().clamp(-128, 127) & 0xFF;
+    _sendFrame(Uint8List.fromList([
+      pushCodeLogRxData,
+      snrByte,
+      rssi & 0xFF,
+      ...raw,
+    ]));
+  }
+
+  @override
   void pushPathDiscoveryResponse(Uint8List pubkeyPrefix6, int outPathLen,
       Uint8List outPath, int inPathLen, Uint8List inPath) {
     final w = BufferWriter()
@@ -355,7 +366,7 @@ class CompanionServer implements CompanionPushSink {
       case cmdSetTuningParams:
         _cmdSetTuningParams(data);
       case cmdSetPathHashMode:
-        _cmdSetPathHashMode(data);
+        await _cmdSetPathHashMode(data);
       case cmdRunCliCommand:
         await _cmdRunCliCommand(data);
       case cmdGetContacts:
@@ -575,12 +586,12 @@ class CompanionServer implements CompanionPushSink {
     sendOk();
   }
 
-  void _cmdSetPathHashMode(Uint8List data) {
+  Future<void> _cmdSetPathHashMode(Uint8List data) async {
     // [cmd][reserved=0][mode]
     if (data.length < 2 || data[0] != 0) return sendErr(errCodeIllegalArg);
     final mode = data[1];
     if (mode >= 3) return sendErr(errCodeIllegalArg);
-    bridge.setPathHashMode(mode);
+    await bridge.setPathHashMode(mode);
     sendOk();
   }
 
@@ -812,6 +823,7 @@ class CompanionServer implements CompanionPushSink {
     final r = BufferReader(data);
     final txtType = r.readByte();
     final channelIdx = r.readByte();
+    r.skipBytes(4); // timestamp
     final text = String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
     if (txtType != txtTypePlain) return sendErr(errCodeUnsupportedCmd);
     if (bridge.getChannel(channelIdx) == null) return sendErr(errCodeNotFound);

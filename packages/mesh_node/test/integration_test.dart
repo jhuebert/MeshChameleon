@@ -24,11 +24,21 @@ class FramedClient {
   final SerialFrameCodec _codec = SerialFrameCodec();
   final _controller = StreamController<Uint8List>.broadcast();
   late final _frames = _Queue(_controller.stream);
+  int rawRxFrames = 0;
 
   void send(List<int> payload) =>
       _socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
 
-  Future<Uint8List> next() => _frames.next();
+  Future<Uint8List> next() async {
+    while (true) {
+      final frame = await _frames.next();
+      if (frame[0] == pushCodeLogRxData) {
+        rawRxFrames++;
+        continue;
+      }
+      return frame;
+    }
+  }
 
   Future<void> close() async {
     await _controller.close();
@@ -149,6 +159,7 @@ void main() {
 
       // Bob acknowledged the message, so the proxy pushed SEND_CONFIRMED.
       expect((await client.next())[0], pushCodeSendConfirmed);
+      expect(client.rawRxFrames, greaterThan(0));
 
       // Bob replies; the proxy pushes MSG_WAITING and serves the message.
       final reply = await bob.sendTextMessage(aliceId.publicKey, 'hi alice');
@@ -166,6 +177,12 @@ void main() {
       r.skipBytes(4); // timestamp
       expect(r.readCString(), 'hi alice');
 
+      // A scoped channel send carries the active region key through the server
+      // to the raw radio packet.
+      final regionKey = Uint8List.fromList(List<int>.generate(16, (i) => i + 1));
+      client.send([cmdSetFloodScope, 0, ...regionKey]);
+      expect((await client.next())[0], respCodeOk);
+
       // Channel message from the client is delivered to the peer.
       final cw = BufferWriter()
         ..writeByte(cmdSendChannelTxtMsg)
@@ -175,6 +192,18 @@ void main() {
         ..writeString('channel hi')
         ..writeByte(0);
       client.send(cw.toBytes());
+      expect((await client.next())[0], respCodeOk);
+      final scopedPacket = Packet.readFrom(aliceLink.transmitted.last)!;
+      expect(scopedPacket.routeType, routeTypeTransportFlood);
+      expect(
+        scopedPacket.transportCode0,
+        CryptoUtils.transportCode(
+          regionKey,
+          scopedPacket.payloadType,
+          scopedPacket.payload,
+        ),
+      );
+      client.send([cmdSetFloodScope, 0]);
       expect((await client.next())[0], respCodeOk);
       await pump();
       final chanMsg = bob.syncNextMessage();

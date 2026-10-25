@@ -52,6 +52,7 @@ class FakeDeviceLink implements RadioLink {
     this.rssi = -70,
     this.bus,
     this.echoSelf = false,
+    this.deviceNodeName = 'Fake companion',
     this.connectFailures = 0,
     this.devicePrivateKey,
     this.exportPrivateKeyDisabled = false,
@@ -76,6 +77,7 @@ class FakeDeviceLink implements RadioLink {
 
   /// When true, the simulator also loops the transmitted frame back to itself.
   final bool echoSelf;
+  final String deviceNodeName;
 
   /// Number of initial [connect] calls that should fail (for backoff tests).
   int connectFailures;
@@ -83,8 +85,10 @@ class FakeDeviceLink implements RadioLink {
   final _stateController = StreamController<LinkState>.broadcast();
   LinkState _state = LinkState.disconnected;
   RawRxListener? _rawRxListener;
-  late RadioParams _currentParams;
-  late final RadioParams _initialParams = _currentParams = radioParams_;
+  // Both initialize lazily from the constructed parameter set, so reading
+  // either before the other never observes an uninitialized field.
+  late RadioParams _currentParams = radioParams_;
+  late final RadioParams _initialParams = _currentParams;
 
   /// Every packet this link transmitted (for test assertions).
   final List<Uint8List> transmitted = [];
@@ -132,6 +136,18 @@ class FakeDeviceLink implements RadioLink {
 
   @override
   Future<DeviceInfo> deviceInfo() async => deviceInfo_;
+
+  @override
+  Future<ParsedSelfInfo> selfInfo() async => ParsedSelfInfo(
+        publicKey: Uint8List(32),
+        radioParams: _currentParams,
+        nodeName: deviceNodeName,
+        txPowerDbm: _currentParams.txPowerDbm,
+        maxTxPower: 22,
+        latitude: 0,
+        longitude: 0,
+        advType: advTypeChat,
+      );
 
   @override
   Future<RadioParams> radioParams() async => _currentParams;

@@ -50,7 +50,17 @@ class HomeScreen extends StatelessWidget {
     final identity = app.identity;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('MeshChameleon'),
+        title: Row(
+          children: [
+            Image.asset(
+              'assets/branding/icon.png',
+              width: 32,
+              height: 32,
+            ),
+            const SizedBox(width: 8),
+            const Text('MeshChameleon'),
+          ],
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long),
@@ -71,7 +81,12 @@ class HomeScreen extends StatelessWidget {
               leading: Icon(app.deviceConnected ? Icons.bluetooth_connected : Icons.bluetooth),
               title: const Text('Device link'),
               subtitle: Text(app.deviceLabel ?? 'Not connected'),
-              trailing: const Icon(Icons.chevron_right),
+              trailing: app.deviceConnected
+                  ? TextButton(
+                      onPressed: app.busy ? null : app.disconnectDevice,
+                      child: const Text('Disconnect'),
+                    )
+                  : const Icon(Icons.chevron_right),
               onTap: () => Navigator.of(context)
                   .push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
             ),
@@ -117,14 +132,95 @@ class HomeScreen extends StatelessWidget {
                   app.busy ? null : (value) => app.setAutoResume(value),
             ),
           ),
+          _ProxyPortCard(port: app.port),
           const _BatteryOptimizationCard(),
           if (app.busy) const LinearProgressIndicator(),
-          const SizedBox(height: 16),
-          const Text('Recent log', style: TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          for (final line in app.logs.reversed.take(8))
-            Text(line, style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
         ],
+      ),
+    );
+  }
+}
+
+class _ProxyPortCard extends StatefulWidget {
+  const _ProxyPortCard({required this.port});
+
+  final int port;
+
+  @override
+  State<_ProxyPortCard> createState() => _ProxyPortCardState();
+}
+
+class _ProxyPortCardState extends State<_ProxyPortCard> {
+  late final TextEditingController _controller;
+  final FocusNode _focusNode = FocusNode();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.port.toString());
+  }
+
+  @override
+  void didUpdateWidget(_ProxyPortCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.port != widget.port && !_focusNode.hasFocus) {
+      _controller.text = widget.port.toString();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final app = context.read<AppState>();
+    final value = int.tryParse(_controller.text.trim());
+    if (value == null || !await app.setProxyPort(value)) {
+      _controller.text = app.port.toString();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Enter a port between 1 and 65535')),
+        );
+      }
+    }
+    if (mounted) FocusScope.of(context).unfocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppState>();
+    final enabled = app.proxyStatus == ProxyStatus.stopped && !app.busy;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            const Icon(Icons.settings_ethernet),
+            const SizedBox(width: 16),
+            Expanded(
+              child: TextField(
+                controller: _controller,
+                focusNode: _focusNode,
+                enabled: enabled,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(
+                  labelText: 'Proxy server port',
+                  helperText: 'Clients connect to this TCP port',
+                ),
+                onSubmitted: (_) => _save(),
+              ),
+            ),
+            IconButton(
+              onPressed: enabled ? _save : null,
+              icon: const Icon(Icons.check),
+              tooltip: 'Save port',
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -117,6 +117,15 @@ void main() {
     expect(DeviceFrames.getAllowedRepeatFreq(), [cmdGetAllowedRepeatFreq]);
   });
 
+  test('FakeDeviceLink reports self info before radio params are read',
+      () async {
+    final link = FakeDeviceLink(deviceNodeName: 'sim-nc1');
+    final self = await link.selfInfo();
+    expect(self.nodeName, 'sim-nc1');
+    expect(self.radioParams.frequencyHz, 915000000);
+    expect(link.initialRadioParams.frequencyHz, 915000000);
+  });
+
   test('connectWithBackoff retries transient failures', () async {
     final link = FakeDeviceLink(connectFailures: 2);
     await connectWithBackoff(
@@ -125,6 +134,21 @@ void main() {
       maxDelay: const Duration(milliseconds: 2),
     );
     expect(link.currentState, LinkState.connected);
+  });
+
+  test('connectWithBackoff stops retrying when cancelled', () async {
+    final link = FakeDeviceLink(connectFailures: 3);
+    var cancelled = false;
+    await expectLater(
+      connectWithBackoff(
+        link,
+        initialDelay: const Duration(milliseconds: 1),
+        onLog: (_) => cancelled = true,
+        shouldCancel: () => cancelled,
+      ),
+      throwsStateError,
+    );
+    expect(link.currentState, LinkState.disconnected);
   });
 
   test('connectWithBackoff gives up after maxAttempts', () async {

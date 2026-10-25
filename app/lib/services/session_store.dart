@@ -5,7 +5,10 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
 /// How the last-used companion device was reached.
-enum DeviceTargetKind { tcp, ble }
+///
+/// [simulated] is the in-memory fake device used for development; it is only
+/// restored by builds that offer it (see `DeviceCapabilities`).
+enum DeviceTargetKind { tcp, ble, simulated }
 
 /// Persisted description of the last device session.
 ///
@@ -41,13 +44,13 @@ class SessionConfig {
   /// Whether the app should reconnect and restart the proxy on launch.
   final bool autoResume;
 
-  SessionConfig copyWith({bool? autoResume}) => SessionConfig(
+  SessionConfig copyWith({int? proxyPort, bool? autoResume}) => SessionConfig(
         kind: kind,
         host: host,
         devicePort: devicePort,
         bleRemoteId: bleRemoteId,
         bleName: bleName,
-        proxyPort: proxyPort,
+        proxyPort: proxyPort ?? this.proxyPort,
         autoResume: autoResume ?? this.autoResume,
       );
 

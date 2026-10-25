@@ -10,6 +10,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'services/ble_device_link.dart';
+import 'services/device_capabilities.dart';
 import 'services/foreground_service.dart';
 import 'services/identity_store.dart';
 import 'services/session_store.dart';
@@ -19,12 +20,21 @@ enum ProxyStatus { stopped, running }
 /// Owns the identity, the device link, the mesh node, and the companion server,
 /// and exposes them to the UI.
 class AppState extends ChangeNotifier {
-  AppState({IdentityStore? store, SessionStore? sessionStore})
-      : store = store ?? IdentityStore(),
-        sessionStore = sessionStore ?? SessionStore();
+  AppState({
+    IdentityStore? store,
+    SessionStore? sessionStore,
+    NodeStore? nodeStore,
+    DeviceCapabilities? capabilities,
+  })  : store = store ?? IdentityStore(),
+        sessionStore = sessionStore ?? SessionStore(),
+        _nodeStoreInstance = nodeStore,
+        capabilities = capabilities ?? DeviceCapabilities.current();
 
   final IdentityStore store;
   final SessionStore sessionStore;
+
+  /// What this build can do; gates the BLE UI and session restore.
+  final DeviceCapabilities capabilities;
 
   /// Foreground service that keeps the process alive while backgrounded.
   final ForegroundService _foreground = ForegroundService();
@@ -37,8 +47,11 @@ class AppState extends ChangeNotifier {
   int port = defaultCompanionPort;
   ProxyStatus proxyStatus = ProxyStatus.stopped;
   String? deviceLabel;
+  String? _deviceNodeName;
   bool deviceConnected = false;
   bool busy = false;
+  RadioLink? _connectingLink;
+  bool _connectCancelled = false;
 
   /// Last device session (device link + proxy port), restored on launch when
   /// [autoResume] is on.
@@ -78,7 +91,10 @@ class AppState extends ChangeNotifier {
     identity = await store.load();
     final session = await sessionStore.load();
     lastSession = session;
-    if (session != null) autoResume = session.autoResume;
+    if (session != null) {
+      port = session.proxyPort;
+      autoResume = session.autoResume;
+    }
     notifyListeners();
     await _maybeResumeSession();
   }
@@ -86,12 +102,20 @@ class AppState extends ChangeNotifier {
   Future<void> generateIdentity() async {
     identity = await store.generate();
     log('Generated identity ${_pubkeyPrefix()}');
+    final connectedLink = link;
+    if (connectedLink != null && node == null) {
+      await _initializeNode(connectedLink);
+    }
     notifyListeners();
   }
 
   Future<void> importIdentity(Uint8List key) async {
     identity = await store.import(key);
     log('Imported identity ${_pubkeyPrefix()}');
+    final connectedLink = link;
+    if (connectedLink != null && node == null) {
+      await _initializeNode(connectedLink);
+    }
     notifyListeners();
   }
 
@@ -154,6 +178,10 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> connectBle(BluetoothDevice device) async {
+    if (!capabilities.supportsBle) {
+      log('BLE is not available in this build');
+      return;
+    }
     final link = BleDeviceLink(device: device, onLog: log);
     final name = device.platformName.isEmpty
         ? device.remoteId.toString()
@@ -170,56 +198,138 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  Future<bool> _attachLink(RadioLink link, String label) async {
-    if (identity == null) {
-      log('Generate or import an identity first');
-      return false;
+  /// Attach the in-memory simulated companion (development builds only).
+  ///
+  /// Exercises the mesh node, the companion server, and the UI without any
+  /// radio: [FakeDeviceLink] answers device queries and radio-parameter
+  /// requests, and its transmissions never leave the process.
+  Future<void> connectSimulated() async {
+    if (!capabilities.supportsSimulatedCompanion) {
+      log('The simulated companion is only available in development builds');
+      return;
     }
+    final link = FakeDeviceLink(deviceNodeName: 'Simulated companion');
+    final ok = await _attachLink(link, 'Simulated companion');
+    if (ok) {
+      await _recordSession(SessionConfig(
+        kind: DeviceTargetKind.simulated,
+        proxyPort: port,
+        autoResume: autoResume,
+      ));
+    }
+  }
+
+  Future<bool> _attachLink(RadioLink link, String label) async {
     busy = true;
+    _connectingLink = link;
+    _connectCancelled = false;
     notifyListeners();
     try {
       await disconnectDevice();
+      if (_connectCancelled) return false;
       log('Connecting to $label ...');
-      await connectWithBackoff(link, onLog: log);
+      await connectWithBackoff(
+        link,
+        onLog: log,
+        shouldCancel: () => _connectCancelled,
+      );
+      if (_connectCancelled) return false;
       this.link = link;
       deviceLabel = label;
       deviceConnected = true;
 
       final deviceInfo = await link.deviceInfo();
-      final params = await link.radioParams();
+      final selfInfo = await link.selfInfo();
+      final params = selfInfo.radioParams;
+      _deviceNodeName = selfInfo.nodeName;
       log('Device: fw ${deviceInfo.firmwareVerCode}, '
           '${deviceInfo.manufacturer} ${deviceInfo.version}');
-
-      final node = MeshNode(
-        identity: identity!,
-        link: link,
-        deviceInfo: deviceInfo,
-        store: await _nodeStore(),
-      );
-      await node.load();
-      // The device is the source of truth for the radio at connect time.
-      node.syncRadioParams(params);
-      node.start();
-      // Best-effort housekeeping: stop the stock device advertising under its
-      // own identity (firmware v14+ only; a no-op otherwise).
-      try {
-        await node.zeroAdvertIntervals();
-      } catch (e) {
-        log('Device housekeeping skipped: $e');
+      if (identity != null) {
+        await _initializeNode(link, deviceInfo: deviceInfo, params: params);
+      } else {
+        log('Device link ready; import its identity or create one');
+        _watchLink(link);
+        await _startForegroundService();
       }
-      this.node = node;
-      log('Device link ready; mesh node started');
-      _watchLink(link);
-      await _startForegroundService();
       return true;
     } catch (e) {
-      log('Device connection failed: $e');
-      await disconnectDevice();
+      if (!_connectCancelled) log('Device connection failed: $e');
+      if (identical(this.link, link)) {
+        await disconnectDevice();
+      } else {
+        await link.disconnect();
+      }
       return false;
     } finally {
+      _connectingLink = null;
+      _connectCancelled = false;
       busy = false;
       notifyListeners();
     }
+  }
+
+  Future<void> cancelPendingConnection() async {
+    final pending = _connectingLink;
+    if (pending == null) return;
+    _connectCancelled = true;
+    try {
+      await pending.disconnect();
+    } catch (e) {
+      log('Connection cancellation failed: $e');
+    }
+  }
+
+  Future<void> _initializeNode(
+    RadioLink link, {
+    DeviceInfo? deviceInfo,
+    RadioParams? params,
+  }) async {
+    final currentIdentity = identity;
+    if (currentIdentity == null) return;
+    deviceInfo ??= await link.deviceInfo();
+    params ??= await link.radioParams();
+    final node = MeshNode(
+      identity: currentIdentity,
+      link: link,
+      deviceInfo: deviceInfo,
+      store: await _nodeStore(),
+    );
+    await node.load();
+    final deviceName = _deviceNodeName;
+    if (node.prefs.nodeName == 'MeshCore Proxy' &&
+        deviceName != null &&
+        deviceName.isNotEmpty) {
+      node.setAdvertName(deviceName);
+    }
+    // The device is the source of truth for the radio at connect time.
+    node.syncRadioParams(params);
+    node.start();
+    // Best-effort housekeeping: stop the stock device advertising under its
+    // own identity (firmware v14+ only; a no-op otherwise).
+    try {
+      await node.zeroAdvertIntervals();
+    } catch (e) {
+      log('Device housekeeping skipped: $e');
+    }
+    this.node = node;
+    log('Device link ready; mesh node started');
+    _watchLink(link);
+    await _startForegroundService();
+  }
+
+  Future<bool> setProxyPort(int value) async {
+    if (value < 1 || value > 65535 || proxyStatus == ProxyStatus.running) {
+      return false;
+    }
+    port = value;
+    final current = lastSession;
+    if (current != null) {
+      final updated = current.copyWith(proxyPort: value);
+      lastSession = updated;
+      await sessionStore.save(updated);
+    }
+    notifyListeners();
+    return true;
   }
 
   /// Persist the last session so it can be restored on the next launch.
@@ -257,9 +367,19 @@ class AppState extends ChangeNotifier {
           if (host == null) return;
           await connectTcp(host: host, tcpPort: session.devicePort);
         case DeviceTargetKind.ble:
+          if (!capabilities.supportsBle) {
+            log('Saved session used BLE, which this build does not support');
+            return;
+          }
           final remoteId = session.bleRemoteId;
           if (remoteId == null) return;
           await connectBle(BluetoothDevice.fromId(remoteId));
+        case DeviceTargetKind.simulated:
+          if (!capabilities.supportsSimulatedCompanion) {
+            log('Saved session used the simulated companion, unavailable here');
+            return;
+          }
+          await connectSimulated();
       }
       if (deviceConnected) {
         await startProxy(serverPort: session.proxyPort);
@@ -341,6 +461,9 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> disconnectDevice() async {
+    if (server != null || proxyStatus == ProxyStatus.running) {
+      await stopProxy();
+    }
     _disconnecting = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
@@ -348,17 +471,21 @@ class AppState extends ChangeNotifier {
     _linkStateSub = null;
     node?.stop();
     node = null;
-    await link?.disconnect();
-    link = null;
-    deviceConnected = false;
-    deviceLabel = null;
     try {
-      await _foreground.stop();
-    } catch (_) {
-      // The service may already be stopped.
+      await link?.disconnect();
+    } finally {
+      link = null;
+      deviceConnected = false;
+      deviceLabel = null;
+      _deviceNodeName = null;
+      try {
+        await _foreground.stop();
+      } catch (_) {
+        // The service may already be stopped.
+      }
+      _disconnecting = false;
+      notifyListeners();
     }
-    _disconnecting = false;
-    notifyListeners();
   }
 
   /// Persistent-notification text reflecting the current link/server state.
@@ -398,7 +525,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> startProxy({int? serverPort}) async {
     if (node == null) {
-      log('Connect a device first');
+      log(identity == null
+          ? 'Generate or import an identity first'
+          : 'Connect a device first');
       return;
     }
     server ??= CompanionServer(

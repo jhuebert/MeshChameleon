@@ -161,15 +161,10 @@ class TcpDeviceLink implements RadioLink {
   }
 
   @override
-  Future<RadioParams> radioParams() async {
-    final frame =
-        await _request(DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
-    final info = ParsedSelfInfo.parse(frame);
-    if (info == null) throw StateError('invalid SELF_INFO from device');
-    return info.radioParams;
-  }
+  Future<RadioParams> radioParams() async => (await selfInfo()).radioParams;
 
   /// Read the full device SELF_INFO (radio params + name + location).
+  @override
   Future<ParsedSelfInfo> selfInfo() async {
     final frame =
         await _request(DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});

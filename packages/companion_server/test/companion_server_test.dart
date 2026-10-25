@@ -12,6 +12,15 @@ class TestBridge extends CompanionBridge {
   final LocalIdentity identity;
   final contacts = <Contact>[];
   final channels = <int, Channel>{};
+  int? sentChannelIndex;
+  String? sentChannelText;
+
+  @override
+  Future<bool> sendChannelMessage(int channelIndex, String text) async {
+    sentChannelIndex = channelIndex;
+    sentChannelText = text;
+    return true;
+  }
 
   @override
   Uint8List getPublicKey() => identity.publicKey;
@@ -93,7 +102,7 @@ class TestBridge extends CompanionBridge {
   int getPathHashMode() => pathHash;
 
   @override
-  void setPathHashMode(int mode) => pathHash = mode;
+  Future<void> setPathHashMode(int mode) async => pathHash = mode;
 
   @override
   Future<TuningParams> getTuningParams() async => tuning;
@@ -365,6 +374,12 @@ void main() {
     expect((await client.frames.next())[0], respCodeEndOfContacts);
   });
 
+  test('raw RX frames are forwarded as PUSH_CODE_LOG_RX_DATA', () async {
+    final raw = Uint8List.fromList([1, 2, 3, 4]);
+    server.pushRawRxData(6.0, -70, raw);
+    expect(await client.frames.next(), [pushCodeLogRxData, 24, 186, ...raw]);
+  });
+
   test('SET_CHANNEL then GET_CHANNEL round trips', () async {
     final psk = Uint8List.fromList(List.generate(16, (i) => i));
     final w = BufferWriter()
@@ -379,6 +394,25 @@ void main() {
     expect(resp[0], respCodeChannelInfo);
     expect(resp[1], 3);
     expect(resp.sublist(34, 50), psk);
+  });
+
+  test('SEND_CHANNEL_TXT_MSG skips the client timestamp', () async {
+    bridge.channels[0] = Channel(
+      name: 'Public',
+      secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
+    );
+    final w = BufferWriter()
+      ..writeByte(cmdSendChannelTxtMsg)
+      ..writeByte(txtTypePlain)
+      ..writeByte(0)
+      ..writeUInt32Le(0x6AD05965)
+      ..writeString('P')
+      ..writeByte(0);
+    client.send(w.toBytes());
+
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.sentChannelIndex, 0);
+    expect(bridge.sentChannelText, 'P');
   });
 
   test('SET_RADIO_PARAMS validates and forwards', () async {
@@ -455,6 +489,24 @@ void main() {
     // The bridge advances its cursor: the queue is now empty.
     client.send([cmdSyncNextMessage]);
     expect((await client.frames.next())[0], respCodeNoMoreMessages);
+  });
+
+  test('SYNC_NEXT_MESSAGE preserves the channel path-hash width (V3)', () async {
+    client.send([cmdDeviceQuery, 3]);
+    await client.frames.next();
+    bridge.nextMessage = QueuedMessage(
+      senderKey: Uint8List(32),
+      timestamp: 0x11223344,
+      text: 'heard',
+      isChannel: true,
+      channelIdx: 1,
+      pathLen: 0x42,
+    );
+
+    client.send([cmdSyncNextMessage]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeChannelMsgRecvV3);
+    expect(resp[5], 0x42);
   });
 
   test('SIGN_START/DATA/FINISH returns a 64-byte signature', () async {

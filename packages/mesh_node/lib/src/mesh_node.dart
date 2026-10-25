@@ -114,6 +114,7 @@ class MeshNode extends CompanionBridge {
   /// openHop's `_check_dedup` (300s TTL, 1000 entries). Dart's Map preserves
   /// insertion order, so the oldest entry is `keys.first`.
   final Map<String, int> _seenPackets = {};
+  final Map<String, int> _sentGroupPacketHashes = {};
   static const int _seenPacketTtlSecs = 300;
   static const int _seenPacketMax = 1000;
 
@@ -135,7 +136,7 @@ class MeshNode extends CompanionBridge {
   }
 
   static Channel _defaultChannel() => Channel(
-        name: 'public',
+        name: 'Public',
         secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
       );
 
@@ -153,6 +154,13 @@ class MeshNode extends CompanionBridge {
       ..clear()
       ..addAll(state.channels);
     channels.putIfAbsent(0, _defaultChannel);
+    final publicSecret = LocalIdentity.defaultPublicChannelSecret;
+    final publicChannel = channels[0];
+    if (publicChannel != null &&
+        _bytesEqual(publicChannel.secret, publicSecret) &&
+        publicChannel.name.toLowerCase() == 'public') {
+      channels[0] = _defaultChannel();
+    }
     _messageQueue
       ..clear()
       ..addAll(state.queue);
@@ -463,6 +471,12 @@ class MeshNode extends CompanionBridge {
       message: text,
       senderName: prefs.nodeName,
     );
+    final hash = bytesToHex(packet.calculatePacketHash());
+    _sentGroupPacketHashes.update(hash, (count) => count + 1,
+        ifAbsent: () => 1);
+    while (_sentGroupPacketHashes.length > _seenPacketMax) {
+      _sentGroupPacketHashes.remove(_sentGroupPacketHashes.keys.first);
+    }
     await _transmit(packet, flood: true, scoped: true);
     return true;
   }
@@ -676,7 +690,11 @@ class MeshNode extends CompanionBridge {
   @override
   Future<bool> sendRawPacket(Packet packet, int priority) async {
     // Transmitted verbatim; route type and path come from the packet itself.
-    await _transmit(packet, flood: packet.isRouteFlood);
+    await _transmit(
+      packet,
+      flood: packet.isRouteFlood,
+      preservePath: true,
+    );
     return true;
   }
 
@@ -997,13 +1015,13 @@ class MeshNode extends CompanionBridge {
   int getPathHashMode() => prefs.pathHashMode;
 
   @override
-  void setPathHashMode(int mode) {
-    final clamped = mode.clamp(0, 3);
+  Future<void> setPathHashMode(int mode) async {
+    final clamped = mode.clamp(0, 2);
     prefs.pathHashMode = clamped;
     _persist();
     // Path-hash mode is a firmware v10+ feature; older devices ignore it.
     if (deviceInfo_.firmwareVerCode >= 10) {
-      unawaited(link.setPathHashMode(clamped));
+      await link.setPathHashMode(clamped);
     }
   }
 
@@ -1085,7 +1103,14 @@ class MeshNode extends CompanionBridge {
   // -------------------------------------------------------------------------
 
   Future<void> _transmit(Packet packet,
-      {required bool flood, bool scoped = false}) async {
+      {required bool flood, bool scoped = false, bool preservePath = false}) async {
+    if (flood && !preservePath) {
+      packet.path = Uint8List(0);
+      packet.pathLenByte = PathUtils.encodePathLen(
+        prefs.pathHashMode.clamp(0, 2) + 1,
+        0,
+      );
+    }
     if (scoped && flood) {
       final scope = _effectiveFloodScope();
       if (scope != null) packet.applyFloodScope(scope);
@@ -1099,6 +1124,7 @@ class MeshNode extends CompanionBridge {
   }
 
   Future<void> _onRawFrame(double snr, int rssi, Uint8List raw) async {
+    pushSink?.pushRawRxData(snr, rssi, raw);
     _rxAirMicros += _airtimeMicrosFor(raw.length);
     final packet = Packet.readFrom(raw);
     if (packet == null) {
@@ -1310,11 +1336,24 @@ class MeshNode extends CompanionBridge {
     } catch (_) {
       return;
     }
+    final packetHash = bytesToHex(packet.calculatePacketHash());
+    final sentCount = _sentGroupPacketHashes[packetHash];
+    if (sentCount != null) {
+      if (sentCount == 1) {
+        _sentGroupPacketHashes.remove(packetHash);
+      } else {
+        _sentGroupPacketHashes[packetHash] = sentCount - 1;
+      }
+      return;
+    }
     if (plaintext.length < 5) return;
     final r = BufferReader(plaintext);
     final ts = r.readUInt32Le();
     r.skipBytes(1); // flags
     final text = r.readCString();
+    // Raw RX is forwarded separately for path/repeat tracking; don't queue our
+    // own channel TX as a new incoming message.
+    if (text.startsWith('${prefs.nodeName}: ')) return;
     if (_isDuplicate(packet.calculatePacketHash())) return;
     _enqueueMessage(QueuedMessage(
       senderKey: Uint8List(32),
@@ -1322,6 +1361,7 @@ class MeshNode extends CompanionBridge {
       text: text,
       isChannel: true,
       channelIdx: channelIdx ?? 0,
+      pathLen: packet.isRouteFlood ? packet.pathLenByte : 0xFF,
       snr: packet.snr,
       rssi: packet.rssi,
     ));

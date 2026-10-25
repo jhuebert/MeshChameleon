@@ -10,6 +10,7 @@ class RecordingSink implements CompanionPushSink {
   int msgWaiting = 0;
   final List<int> confirmed = [];
   final List<Uint8List> adverts = [];
+  final List<Uint8List> rawRxFrames = [];
   final List<Uint8List> newAdverts = [];
   final List<Uint8List> pathUpdated = [];
 
@@ -21,6 +22,10 @@ class RecordingSink implements CompanionPushSink {
 
   @override
   void pushAdvert(Uint8List pubkey) => adverts.add(pubkey);
+
+  @override
+  void pushRawRxData(double snr, int rssi, Uint8List raw) =>
+      rawRxFrames.add(Uint8List.fromList(raw));
 
   @override
   void pushNewAdvert(Uint8List contactFrame) => newAdverts.add(contactFrame);
@@ -167,14 +172,47 @@ void main() {
   });
 
   test('channel text is delivered on the default channel', () async {
+    expect(alice.getChannel(0)?.name, 'Public');
     await alice.sendChannelMessage(0, 'hello channel');
+    final echo = (alice.link as FakeDeviceLink).transmitted.last;
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, echo);
     await pump();
+    expect(alice.syncNextMessage(), isNull);
+    expect(aliceSink.rawRxFrames, hasLength(1));
+    expect(bobSink.rawRxFrames, hasLength(1));
     expect(bobSink.msgWaiting, 1);
     final msg = bob.syncNextMessage();
     expect(msg, isNotNull);
     expect(msg!.isChannel, isTrue);
     expect(msg.text, 'alice: hello channel');
     expect(msg.channelIdx, 0);
+  });
+
+  test('channel messages preserve the encoded path hash width', () async {
+    final packet = PacketBuilder.createGroupText(
+      channel: alice.getChannel(0)!,
+      message: 'heard',
+      senderName: 'alice',
+    )
+      ..pathLenByte = 0x42
+      ..path = Uint8List.fromList([1, 2, 3, 4]);
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, packet.writeTo());
+    await pump();
+
+    final message = bob.syncNextMessage();
+    expect(message, isNotNull);
+    expect(message!.pathLen, 0x42);
+  });
+
+  test('a direct channel echo from the local name is not queued', () async {
+    final packet = PacketBuilder.createGroupText(
+      channel: alice.getChannel(0)!,
+      message: 'Test',
+      senderName: alice.prefs.nodeName,
+    );
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, packet.writeTo());
+    await pump();
+    expect(alice.syncNextMessage(), isNull);
   });
 
   test('syncNextMessage drains and returns null when empty', () async {
@@ -884,9 +922,24 @@ void main() {
     expect(aliceSink.telemetry.first.sublist(6, 11), lpp);
   });
 
+  test('flood packet path length uses the configured hash width', () async {
+    await alice.setPathHashMode(2);
+    await alice.sendChannelMessage(0, 'three-byte path mode');
+
+    final packet = Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
+    expect(packet.pathHashSize, 3);
+    expect(packet.pathHashCount, 0);
+
+    await alice.setPathHashMode(1);
+    await alice.sendChannelMessage(0, 'two-byte path mode');
+    final twoBytePacket =
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
+    expect(twoBytePacket.pathHashSize, 2);
+    expect(twoBytePacket.pathHashCount, 0);
+  });
+
   test('setPathHashMode forwards to the device on fw>=10', () async {
-    alice.setPathHashMode(2);
-    await pump();
+    await alice.setPathHashMode(2);
     expect(alice.getPathHashMode(), 2);
     expect((alice.link as FakeDeviceLink).pathHashMode, 2);
   });

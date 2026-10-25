@@ -12,14 +12,14 @@ class MeshCoreUuids {
   static const tx = '6e400003-b5a3-f393-e0a9-e50e24dcca9e'; // device -> phone
   static final serviceGuid = Guid(service);
 
-  /// Scan for MeshCore companion devices advertising the NUS service.
-  static Stream<List<ScanResult>> scanForDevices() {
-    FlutterBluePlus.startScan(
-      withServices: [serviceGuid],
-      timeout: const Duration(seconds: 15),
-    );
-    return FlutterBluePlus.scanResults;
-  }
+  /// Results from the active MeshCore companion scan.
+  static Stream<List<ScanResult>> get scanResults => FlutterBluePlus.scanResults;
+
+  /// Start scanning for MeshCore companion devices advertising the NUS service.
+  static Future<void> startScan() => FlutterBluePlus.startScan(
+        withServices: [serviceGuid],
+        timeout: const Duration(seconds: 15),
+      );
 }
 
 /// [RadioLink] over BLE (NUS). BLE carries raw frames: one GATT write/notify is
@@ -190,13 +190,16 @@ class BleDeviceLink implements RadioLink {
   }
 
   @override
-  Future<RadioParams> radioParams() async {
+  Future<ParsedSelfInfo> selfInfo() async {
     final frame =
         await _request(DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
     final info = ParsedSelfInfo.parse(frame);
     if (info == null) throw StateError('invalid SELF_INFO from device');
-    return info.radioParams;
+    return info;
   }
+
+  @override
+  Future<RadioParams> radioParams() async => (await selfInfo()).radioParams;
 
   @override
   Future<void> setRadioParams(RadioParams params) async {

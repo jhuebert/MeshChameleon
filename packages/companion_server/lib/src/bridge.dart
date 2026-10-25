@@ -28,6 +28,9 @@ abstract class CompanionPushSink {
   /// response payload. Emitted as `PUSH_CODE_BINARY_RESPONSE`.
   void pushBinaryResponse(int tag, Uint8List data);
 
+  /// A raw over-air packet was received, matching `PUSH_CODE_LOG_RX_DATA`.
+  void pushRawRxData(double snr, int rssi, Uint8List raw);
+
   /// A raw control-data packet was received.
   void pushControlData(double snr, int rssi, int pathLen, Uint8List data);
 
@@ -156,7 +159,7 @@ class CompanionBridge {
   int getPathHashMode() => getDeviceInfo().pathHashMode;
 
   /// Set the path-hash mode (`CMD_SET_PATH_HASH_MODE`, fw v10+).
-  void setPathHashMode(int mode) {}
+  Future<void> setPathHashMode(int mode) async {}
 
   /// Current device radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
   Future<TuningParams> getTuningParams() async =>

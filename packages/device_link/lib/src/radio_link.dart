@@ -23,6 +23,7 @@ abstract class RadioLink {
   void setRawRxListener(RawRxListener? listener);
 
   Future<DeviceInfo> deviceInfo();
+  Future<ParsedSelfInfo> selfInfo();
   Future<RadioParams> radioParams();
   Future<void> setRadioParams(RadioParams params);
   Future<void> setTxPower(int dbm);

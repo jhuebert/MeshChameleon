@@ -16,5 +16,8 @@ void main() {
     expect(find.text('Device link'), findsOneWidget);
     expect(find.text('Identity'), findsOneWidget);
     expect(find.text('Proxy server'), findsOneWidget);
+    expect(find.text('Proxy server port'), findsOneWidget);
+    expect(find.text('Recent log'), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
   });
 }
