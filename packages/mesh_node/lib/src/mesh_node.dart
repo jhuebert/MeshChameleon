@@ -11,6 +11,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'battery_service.dart';
 import 'cli.dart';
 import 'identity_persistence.dart';
+import 'local_peer_router.dart';
 import 'node_store.dart';
 import 'reset.dart';
 import 'scheduler.dart';
@@ -71,6 +72,9 @@ class MeshNode extends CompanionBridge {
     this.identityPersistence,
     this.onIdentityChanged,
     this.onPoweredOff,
+    this.localRouter,
+    this.onStateChanged,
+    this.onPhysicalConfigChanged,
     VirtualClock? clock,
   })  : prefs = prefs ?? NodePrefs(),
         clock = clock ?? VirtualClock() {
@@ -103,6 +107,17 @@ class MeshNode extends CompanionBridge {
 
   /// Invoked after a successful physical poweroff dispatch.
   final Future<void> Function()? onPoweredOff;
+
+  /// In-process mirror to the other live virtual identities.
+  final LocalPeerRouter? localRouter;
+
+  /// Invoked after durable state publication/reset and queue drain. May be
+  /// called often; hosts are expected to debounce UI notifications.
+  final void Function()? onStateChanged;
+
+  /// Invoked after a confirmed physical RF/tuning change or readback so the
+  /// host can propagate the shared snapshot to the other identities.
+  final void Function()? onPhysicalConfigChanged;
 
   /// Virtual wall/monotonic clock. Wall changes never touch the host clock or
   /// the radio RTC (the radio is used purely as a packet transport).
@@ -284,10 +299,15 @@ class MeshNode extends CompanionBridge {
   Completer<void>? _physicalTxIdle;
   bool _poweredOff = false;
   bool _resetInProgress = false;
+  bool _retired = false;
   int _lifecycleGeneration = 0;
 
   /// True after a successful local shutdown until an explicit node start.
   bool get poweredOff => _poweredOff;
+
+  /// True once this runtime has been retired by its owner. A retired node never
+  /// transmits, receives, or persists again.
+  bool get retired => _retired;
 
   @override
   int get lifecycleGeneration => _lifecycleGeneration;
@@ -432,6 +452,7 @@ class MeshNode extends CompanionBridge {
 
   /// Attach the raw RX listener. Call once the device link is connected.
   void start() {
+    if (_retired) throw StateError('cannot start a retired mesh node');
     _poweredOff = false;
     _startedAtMonotonicMillis = clock.monotonicMilliseconds;
     link.setRawRxListener(_onRawFrame);
@@ -452,6 +473,23 @@ class MeshNode extends CompanionBridge {
     _connections.clear();
   }
 
+  /// Permanently stop semantic work for a runtime that is being replaced or
+  /// deleted. Files are left intact for the owner to remove, but a late packet
+  /// can no longer save or recreate state after this completes.
+  Future<void> retire() async {
+    if (_retired) return;
+    _retired = true;
+    stop();
+    await _waitForPhysicalTxIdle();
+    try {
+      await _identityTail;
+      await _stateTail;
+      await store?.flush();
+    } catch (_) {
+      // Failures were already reported through their save futures.
+    }
+  }
+
   // -------------------------------------------------------------------------
   // CompanionBridge: identity / info
   // -------------------------------------------------------------------------
@@ -465,7 +503,7 @@ class MeshNode extends CompanionBridge {
   bool get _identityBlocked => _identityPaused || _identitySwapping;
 
   bool get _semanticBlocked =>
-      _poweredOff || _resetInProgress || _identityBlocked;
+      _retired || _poweredOff || _resetInProgress || _identityBlocked;
 
   bool _identityCurrent(int generation) =>
       !_semanticBlocked && generation == _identityGeneration;
@@ -554,6 +592,7 @@ class MeshNode extends CompanionBridge {
   /// partial result; it is never rolled back or reported as full success.
   Future<VirtualResetResult> resetVirtualData({
     bool rotateIdentity = false,
+    bool preserveName = false,
   }) {
     return _runIdentity(() async {
       LocalIdentity? candidate;
@@ -571,12 +610,14 @@ class MeshNode extends CompanionBridge {
       _identityGeneration++;
       try {
         final fresh = freshVirtualState(sensorSettings);
+        if (preserveName) fresh.prefs.nodeName = prefs.nodeName;
         await _runState(() async {
           final s = store;
           if (s != null) await s.flush();
           await _saveState(fresh);
           _publish(fresh);
         });
+        _notifyStateChanged();
 
         _clearIdentityRuntimeState();
         _storageDiagnostic = null;
@@ -1911,6 +1952,7 @@ class MeshNode extends CompanionBridge {
       _physicalDiagnostic = null;
       _persist();
       await _readBackSelfInfo();
+      _notifyPhysicalConfigChanged();
     });
   }
 
@@ -1942,6 +1984,7 @@ class MeshNode extends CompanionBridge {
       _physicalDiagnostic = null;
       _persist();
       await _readBackSelfInfo();
+      _notifyPhysicalConfigChanged();
     });
   }
 
@@ -2068,6 +2111,7 @@ class MeshNode extends CompanionBridge {
         _needsReconcile = true;
         _physicalDiagnostic = e.message ?? e.toString();
       }
+      _notifyPhysicalConfigChanged();
     });
   }
 
@@ -2266,6 +2310,9 @@ class MeshNode extends CompanionBridge {
     }
     if (spec.refreshTuning) {
       await _refreshTuningCacheDirect();
+    }
+    if (spec.refreshRadio || spec.refreshTuning) {
+      _notifyPhysicalConfigChanged();
     }
   }
 
@@ -3397,6 +3444,36 @@ class MeshNode extends CompanionBridge {
   // Persistence
   // -------------------------------------------------------------------------
 
+  /// Number of persistent contacts (transient anonymous slots excluded).
+  int get persistentContactCount => contacts.length;
+
+  /// Configured channel count, including the default Public channel.
+  int get channelCount => channels.length;
+
+  /// Messages waiting for `CMD_SYNC_NEXT_MESSAGE`.
+  int get queuedMessageCount => _messageQueue.length;
+
+  int get queuedDirectCount =>
+      _messageQueue.where((message) => !message.isChannel).length;
+
+  int get queuedChannelCount =>
+      _messageQueue.where((message) => message.isChannel).length;
+
+  /// Shared physical RF values currently reported by this virtual node.
+  RadioParams get radioParams => RadioParams(
+        frequencyHz: prefs.frequencyHz,
+        bandwidthHz: prefs.bandwidthHz,
+        spreadingFactor: prefs.spreadingFactor,
+        codingRate: prefs.codingRate,
+        txPowerDbm: prefs.txPowerDbm,
+      );
+
+  /// Last known physical tuning values.
+  TuningParams get tuningParams => TuningParams(
+        rxDelayBaseMs: prefs.rxDelayBaseMs,
+        airtimeFactorMs: prefs.airtimeFactorMs,
+      );
+
   /// Current virtual storage usage in compact canonical bytes.
   int get storageUsedBytes => _snapshot().storageBytes;
 
@@ -3491,6 +3568,12 @@ class MeshNode extends CompanionBridge {
   /// [identityGeneration] scopes background RX mutations so a completion from
   /// the previous identity cannot save/publish over a successful switch.
   Future<void> _commit(NodeState candidate, {int? identityGeneration}) {
+    if (_retired) {
+      return Future<void>.error(const CompanionOperationError(
+        errCodeBadState,
+        message: 'mesh node has been retired',
+      ));
+    }
     if (_resetInProgress) {
       return Future<void>.error(const CompanionOperationError(
         errCodeBadState,
@@ -3508,7 +3591,54 @@ class MeshNode extends CompanionBridge {
         return;
       }
       _publish(candidate);
+      _notifyStateChanged();
     });
+  }
+
+  void _notifyStateChanged() {
+    try {
+      onStateChanged?.call();
+    } catch (_) {
+      // A host notification failure must never roll back durable state.
+    }
+  }
+
+  void _notifyPhysicalConfigChanged() {
+    try {
+      onPhysicalConfigChanged?.call();
+    } catch (_) {
+      // Propagation is best-effort; the active node remains authoritative.
+    }
+  }
+
+  /// Adopt a shared physical snapshot without touching the device.
+  ///
+  /// Used to keep inactive identities' `SELF_INFO`/tuning values consistent
+  /// with the active identity after attach, reconnect, or a confirmed write.
+  void syncPhysicalState({
+    RadioParams? params,
+    TuningParams? tuning,
+    PhysicalCapabilities? capabilities,
+  }) {
+    if (params != null) {
+      prefs.frequencyHz = params.frequencyHz;
+      prefs.bandwidthHz = params.bandwidthHz;
+      prefs.spreadingFactor = params.spreadingFactor;
+      prefs.codingRate = params.codingRate;
+      prefs.txPowerDbm = params.txPowerDbm;
+      _radioCacheUncertain = false;
+      _radioCacheVerified = true;
+      _needsReconcile = false;
+    }
+    if (tuning != null) {
+      prefs.rxDelayBaseMs = tuning.rxDelayBaseMs;
+      prefs.airtimeFactorMs = tuning.airtimeFactorMs;
+      _hasTuningCache = true;
+      _tuningCacheVerified = true;
+    }
+    if (capabilities != null) physical = capabilities;
+    _physicalDiagnostic = null;
+    _persist();
   }
 
   /// Wait for queued persistence writes to settle.
@@ -3524,6 +3654,7 @@ class MeshNode extends CompanionBridge {
     QueuedMessage message, {
     int? identityGeneration,
   }) async {
+    if (_retired) return;
     if (identityGeneration != null &&
         !_identityCurrent(identityGeneration)) {
       return;
@@ -3569,10 +3700,12 @@ class MeshNode extends CompanionBridge {
   /// Fire-and-forget persistence for internal state updates. Client-facing
   /// durable mutations use the awaitable [_commit] path instead.
   void _persist() {
+    if (_retired) return;
     unawaited(_persistCurrent());
   }
 
   Future<void> _persistCurrent() async {
+    if (_retired) return;
     try {
       await _runState(() async {
         await _saveState(_snapshot());

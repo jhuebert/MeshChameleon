@@ -5,6 +5,7 @@ export 'src/mesh_node.dart';
 export 'src/battery_service.dart';
 export 'src/cli.dart';
 export 'src/identity_persistence.dart';
+export 'src/local_peer_router.dart';
 export 'src/node_store.dart';
 export 'src/reset.dart';
 export 'src/scheduler.dart';
