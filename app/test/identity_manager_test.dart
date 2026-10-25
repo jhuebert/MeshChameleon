@@ -323,6 +323,55 @@ void main() {
     expect((await repository.records()).single.publicKey, before);
   });
 
+  test('confirmed RF changes propagate without retuning on activation',
+      () async {
+    await manager.load();
+    final second = await repository.create(name: 'Second');
+    await start();
+    final a = manager.activeNode!;
+    final b = manager.runtimes
+        .firstWhere((runtime) => runtime.record.id == second.id)
+        .node!;
+
+    await a.setRadioParams(869525000, 125000, 9, 6, clientRepeat: true);
+    await a.setTxPower(14);
+    await a.setTuningParams(12, 34);
+    await a.setPathHashMode(2);
+
+    expect(b.radioParams.frequencyHz, 869525000);
+    expect(b.radioParams.bandwidthHz, 125000);
+    expect(b.radioParams.spreadingFactor, 9);
+    expect(b.radioParams.txPowerDbm, 14);
+    expect(b.tuningParams.rxDelayBaseMs, 12);
+    expect(b.tuningParams.airtimeFactorMs, 34);
+    expect(b.getDeviceInfo().clientRepeat, 1);
+    expect(b.prefs.pathHashMode, 0,
+        reason: 'path-hash mode remains identity-local');
+    expect(a.prefs.pathHashMode, 2);
+
+    final writesBefore = link.calls
+        .where((call) =>
+            call == 'setRadioParams' ||
+            call == 'setTxPower' ||
+            call == 'setTuningParams')
+        .length;
+    await manager.activate(second.id);
+    final writesAfter = link.calls
+        .where((call) =>
+            call == 'setRadioParams' ||
+            call == 'setTxPower' ||
+            call == 'setTuningParams')
+        .length;
+
+    expect(writesAfter, writesBefore,
+        reason: 'activation must not retune the shared radio');
+    expect(manager.activeNode!.getSelfInfo().frequencyHz, 869525000);
+    expect(manager.activeNode!.getSelfInfo().pathHashMode, 0);
+    final tuning = await manager.activeNode!.getTuningParams();
+    expect(tuning.rxDelayBaseMs, 12);
+    expect(tuning.airtimeFactorMs, 34);
+  });
+
   test('create_is_inactive_and_delete_removes_files', () async {
     await manager.load();
     final first = manager.summaries.single.id;
