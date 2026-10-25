@@ -150,10 +150,16 @@ class TestBridge extends CompanionBridge {
   }
 
   bool? advertisedFlood;
+  Completer<void>? advertiseGate;
+  Completer<void>? advertiseEntered;
+  bool advertised = false;
 
   @override
   Future<bool> advertise({bool flood = false}) async {
     advertisedFlood = flood;
+    advertiseEntered?.complete();
+    if (advertiseGate != null) await advertiseGate!.future;
+    advertised = true;
     return true;
   }
 
@@ -1859,6 +1865,81 @@ void main() {
     expect(sig[0], respCodeSignature);
     expect(sig.length, 65);
   });
+
+  test('switchBridge disconnects the client and serves the new identity',
+      () async {
+    final secondIdentity = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 2);
+    final secondBridge = TestBridge(secondIdentity)
+      ..selfInfo = NodePrefs(nodeName: 'Second');
+
+    await server.switchBridge(secondBridge);
+
+    final next = FramedClient(await Socket.connect('127.0.0.1', server.port!));
+    addTearDown(next.close);
+    final info = await appStart(next, appProtocolVersion);
+    expect(info[0], respCodeSelfInfo);
+    expect(info.sublist(4, 36), secondIdentity.publicKey);
+    expect(server.bridge, same(secondBridge));
+  });
+
+  test('a client connecting mid-switch waits for the new bridge', () async {
+    final oldClient = client;
+    bridge.advertiseGate = Completer<void>();
+    bridge.advertiseEntered = Completer<void>();
+    oldClient.send([cmdSendSelfAdvert, 0]);
+    await bridge.advertiseEntered!.future;
+
+    final secondIdentity = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 3);
+    final secondBridge = TestBridge(secondIdentity)
+      ..deviceInfo = const DeviceInfo(maxChannels: 4);
+    final switching = server.switchBridge(secondBridge);
+
+    final next = FramedClient(await Socket.connect('127.0.0.1', server.port!));
+    addTearDown(next.close);
+    next.send([cmdDeviceQuery, appProtocolVersion]);
+    expect(
+      await next.frames.nextWithin(const Duration(milliseconds: 50)),
+      isNull,
+      reason: 'commands from a mid-switch client must wait for the barrier',
+    );
+
+    bridge.advertiseGate!.complete();
+    await switching;
+
+    final deviceInfo = await next.frames.next();
+    expect(deviceInfo[0], respCodeDeviceInfo);
+    expect(deviceInfo[3], 4, reason: 'served by the new bridge');
+    expect(
+      serverLogs.any((line) => line.contains('dropping reply')),
+      isTrue,
+      reason: 'the old in-flight reply must not reach the new client',
+    );
+  });
+
+  test('disconnectClient keeps the listener available for a reconnect',
+      () async {
+    await server.disconnectClient(reason: 'clear local data');
+    expect(server.hasClient, isFalse);
+
+    final next = FramedClient(await Socket.connect('127.0.0.1', server.port!));
+    addTearDown(next.close);
+    final info = await appStart(next, appProtocolVersion);
+    expect(info[0], respCodeSelfInfo);
+  });
+}
+
+Future<Uint8List> appStart(
+  FramedClient client,
+  int appVersion,
+) async {
+  final w = BufferWriter()
+    ..writeByte(cmdAppStart)
+    ..writeByte(appVersion)
+    ..writeBytes(List.filled(6, 0))
+    ..writeString('test')
+    ..writeByte(0);
+  client.send(w.toBytes());
+  return client.frames.next();
 }
 
 List<int> utf8Bytes(String s) => utf8.encode(s);

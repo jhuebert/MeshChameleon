@@ -33,12 +33,16 @@ class CompanionServerConfig {
 /// connection evicts the previous one.
 class CompanionServer implements CompanionPushSink {
   CompanionServer({
-    required this.bridge,
+    required CompanionBridge bridge,
     this.config = const CompanionServerConfig(),
     this.onLog,
-  });
+  }) : _bridge = bridge;
 
-  final CompanionBridge bridge;
+  CompanionBridge _bridge;
+
+  /// The bridge currently bound to the app-facing session.
+  CompanionBridge get bridge => _bridge;
+
   final CompanionServerConfig config;
   final void Function(String message)? onLog;
 
@@ -80,8 +84,42 @@ class CompanionServer implements CompanionPushSink {
     _idleTimer?.cancel();
     _idleTimer = null;
     _disconnectClient(reason: 'server stop');
+    _bridge.setPushSink(null);
     await _server?.close();
     _server = null;
+  }
+
+  /// Disconnect the current app client without closing the listener.
+  Future<void> disconnectClient({required String reason}) async {
+    if (_client != null) _disconnectClient(reason: reason);
+  }
+
+  /// Install [next] as the bridge for future clients.
+  ///
+  /// The current client is disconnected immediately so no old-session command
+  /// can be accepted. A barrier on the command tail waits for the in-flight
+  /// command to finish before the bridge changes; commands enqueued by a client
+  /// that connects during the barrier run only after the new bridge is in
+  /// place. The listener socket stays open.
+  Future<void> switchBridge(CompanionBridge next) {
+    _disconnectClient(reason: 'identity switch');
+    final completer = Completer<void>();
+    _commandTail = _commandTail.then((_) async {
+      try {
+        final previous = _bridge;
+        if (!identical(previous, next)) {
+          previous.setPushSink(null);
+          _bridge = next;
+        }
+        _bridge.setPushSink(_client == null ? null : this);
+      } finally {
+        if (!completer.isCompleted) completer.complete();
+      }
+    }).catchError((Object e) {
+      _log('bridge switch error: $e');
+      if (!completer.isCompleted) completer.complete();
+    });
+    return completer.future;
   }
 
   // -------------------------------------------------------------------------
@@ -102,7 +140,7 @@ class CompanionServer implements CompanionPushSink {
     _codec.reset();
     _signBuffer.clear();
     socket.setOption(SocketOption.tcpNoDelay, true);
-    bridge.setPushSink(this);
+    _bridge.setPushSink(this);
     _appTargetVer = 0;
 
     socket.listen(
@@ -150,7 +188,7 @@ class CompanionServer implements CompanionPushSink {
     _connectionGeneration++;
     _signBuffer.clear();
     _log('client disconnected: $reason');
-    bridge.setPushSink(null);
+    _bridge.setPushSink(null);
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _idleTimer?.cancel();
