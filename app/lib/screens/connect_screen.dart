@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../services/ble_device_link.dart';
 import '../services/device_capabilities.dart';
+import '../services/network_connection_store.dart';
 import '../services/session_store.dart';
 
 enum _ConnectTab {
@@ -35,9 +36,9 @@ class _ConnectScreenState extends State<ConnectScreen>
   late final DeviceCapabilities _capabilities =
       widget.capabilities ?? DeviceCapabilities.current();
   late final List<_ConnectTab> _tabs;
-  final _hostController = TextEditingController(text: '192.168.1.100');
-  final _portController =
-      TextEditingController(text: defaultCompanionPort.toString());
+  final _formKey = GlobalKey<FormState>();
+  final _hostController = TextEditingController();
+  final _portController = TextEditingController();
   TabController? _tabController;
   late final Stream<List<ScanResult>> _scanResults;
   bool _scanning = false;
@@ -46,12 +47,14 @@ class _ConnectScreenState extends State<ConnectScreen>
   @override
   void initState() {
     super.initState();
-    final lastKind = context.read<AppState>().lastSession?.kind;
+    final app = context.read<AppState>();
+    final lastKind = app.lastSession?.kind;
     _tabs = [
       if (_capabilities.supportsBle) _ConnectTab.bluetooth,
       _ConnectTab.network,
       if (_capabilities.supportsSimulatedCompanion) _ConnectTab.simulated,
     ];
+    _setInitialTarget(app);
     if (_tabs.length > 1) {
       final controller = TabController(
         length: _tabs.length,
@@ -77,6 +80,25 @@ class _ConnectScreenState extends State<ConnectScreen>
     _hostController.dispose();
     _portController.dispose();
     super.dispose();
+  }
+
+  void _setInitialTarget(AppState app) {
+    final saved = app.savedNetworkConnections;
+    if (saved.isNotEmpty) {
+      _hostController.text = saved.first.host;
+      _portController.text = saved.first.port.toString();
+      return;
+    }
+    final session = app.lastSession;
+    if (session != null &&
+        session.kind == DeviceTargetKind.tcp &&
+        session.host != null) {
+      _hostController.text = session.host!;
+      _portController.text = session.devicePort.toString();
+      return;
+    }
+    _hostController.text = '192.168.1.100';
+    _portController.text = defaultCompanionPort.toString();
   }
 
   int _initialIndex(DeviceTargetKind? lastKind) {
@@ -124,18 +146,69 @@ class _ConnectScreenState extends State<ConnectScreen>
     } catch (_) {}
   }
 
+  String? _validateHost(String? value) =>
+      (value ?? '').trim().isEmpty ? 'Enter a host' : null;
+
+  String? _validatePort(String? value) {
+    final text = (value ?? '').trim();
+    if (text.isEmpty) return 'Enter a port';
+    final port = int.tryParse(text);
+    if (port == null || port < 1 || port > 65535) {
+      return 'Enter a port between 1 and 65535';
+    }
+    return null;
+  }
+
   Future<void> _connectTcp() async {
     final app = context.read<AppState>();
+    if (!(_formKey.currentState?.validate() ?? false)) return;
     final host = _hostController.text.trim();
-    final port = int.tryParse(_portController.text.trim());
+    final port = int.parse(_portController.text.trim());
+    FocusScope.of(context).unfocus();
     final ok = await app.connectTcp(host: host, tcpPort: port);
     if (!mounted) return;
     if (ok) {
       Navigator.of(context).pop();
       return;
     }
-    _showFailure('Could not connect to $host:${port ?? defaultCompanionPort}. '
-        'See the log for details.');
+    _showFailure(
+      'Could not connect to ${formatNetworkAddress(host, port)}. '
+      'See the log for details.',
+    );
+  }
+
+  Future<void> _connectSaved(SavedNetworkConnection connection) async {
+    _hostController.text = connection.host;
+    _portController.text = connection.port.toString();
+    await _connectTcp();
+  }
+
+  Future<void> _deleteSaved(SavedNetworkConnection connection) async {
+    final app = context.read<AppState>();
+    final ok = await app.removeSavedNetworkConnection(connection);
+    if (!mounted) return;
+    if (!ok) {
+      _showFailure('Could not remove the saved connection.');
+      return;
+    }
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text('Removed ${connection.displayAddress}'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () => unawaited(_restoreSaved(connection)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _restoreSaved(SavedNetworkConnection connection) async {
+    final app = context.read<AppState>();
+    if (!await app.restoreSavedNetworkConnection(connection)) {
+      if (mounted) _showFailure('Could not restore the saved connection.');
+    }
   }
 
   Future<void> _connectBle(BluetoothDevice device) async {
@@ -273,6 +346,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Widget _buildNetworkTab(AppState app) {
+    final saved = app.savedNetworkConnections;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -281,21 +355,49 @@ class _ConnectScreenState extends State<ConnectScreen>
         const SizedBox(height: 4),
         const Text('Connect to a companion over Wi-Fi or Ethernet.'),
         const SizedBox(height: 16),
-        TextField(
-          controller: _hostController,
-          decoration: const InputDecoration(labelText: 'Host'),
+        Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              TextFormField(
+                controller: _hostController,
+                decoration: const InputDecoration(labelText: 'Host'),
+                textInputAction: TextInputAction.next,
+                validator: _validateHost,
+              ),
+              const SizedBox(height: 8),
+              TextFormField(
+                controller: _portController,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.done,
+                decoration: const InputDecoration(labelText: 'Port'),
+                validator: _validatePort,
+                onFieldSubmitted: app.busy ? null : (_) => _connectTcp(),
+              ),
+              const SizedBox(height: 8),
+              FilledButton(
+                onPressed: app.busy ? null : _connectTcp,
+                child: const Text('Connect over TCP'),
+              ),
+            ],
+          ),
         ),
+        const SizedBox(height: 24),
+        Text('Saved connections',
+            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 8),
-        TextField(
-          controller: _portController,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'Port'),
-        ),
-        const SizedBox(height: 8),
-        FilledButton(
-          onPressed: app.busy ? null : _connectTcp,
-          child: const Text('Connect over TCP'),
-        ),
+        if (saved.isEmpty)
+          const Text(
+            'Successful network connections appear here for quick reconnects.',
+          )
+        else
+          for (final connection in saved)
+            _SavedConnectionCard(
+              connection: connection,
+              busy: app.busy,
+              onTap: () => _connectSaved(connection),
+              onDelete: () => _deleteSaved(connection),
+            ),
       ],
     );
   }
@@ -324,6 +426,56 @@ class _ConnectScreenState extends State<ConnectScreen>
     );
   }
 }
+
+class _SavedConnectionCard extends StatelessWidget {
+  const _SavedConnectionCard({
+    required this.connection,
+    required this.busy,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final SavedNetworkConnection connection;
+  final bool busy;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final localizations = MaterialLocalizations.of(context);
+    return Card(
+      child: ListTile(
+        title: Text(connection.displayAddress),
+        subtitle: Text(
+          'Last connected '
+          '${_relativeTime(connection.lastConnectedAt, localizations)}',
+        ),
+        trailing: IconButton(
+          icon: const Icon(Icons.delete_outline),
+          tooltip: 'Remove saved connection',
+          onPressed: busy ? null : onDelete,
+        ),
+        onTap: busy ? null : onTap,
+      ),
+    );
+  }
+}
+
+String _relativeTime(
+  int lastConnectedAt,
+  MaterialLocalizations localizations,
+) {
+  final connectedAt = DateTime.fromMillisecondsSinceEpoch(lastConnectedAt);
+  final elapsed = DateTime.now().difference(connectedAt);
+  if (elapsed.isNegative || elapsed.inMinutes < 1) return 'just now';
+  if (elapsed.inHours < 1) return _ago(elapsed.inMinutes, 'minute');
+  if (elapsed.inDays < 1) return _ago(elapsed.inHours, 'hour');
+  if (elapsed.inDays < 7) return _ago(elapsed.inDays, 'day');
+  return localizations.formatShortDate(connectedAt);
+}
+
+String _ago(int value, String unit) =>
+    '$value $unit${value == 1 ? '' : 's'} ago';
 
 class _ConnectedDeviceCard extends StatelessWidget {
   const _ConnectedDeviceCard({required this.app});

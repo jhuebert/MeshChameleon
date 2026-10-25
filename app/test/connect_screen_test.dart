@@ -1,8 +1,10 @@
 import 'dart:io';
 
+import 'package:device_link/device_link.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/screens/connect_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
@@ -184,6 +186,237 @@ void main() {
 
     expect(find.text('Bluetooth companion'), findsOneWidget);
     expect(find.text('Network companion'), findsNothing);
+  });
+
+  testWidgets('saved cards render newest-first and prefill the form',
+      (tester) async {
+    final store = NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+    final now = DateTime.now().toUtc();
+    await tester.runAsync(() async {
+      await store.save([
+        SavedNetworkConnection(
+          host: 'older.example',
+          port: 5000,
+          lastConnectedAt:
+              now.subtract(const Duration(hours: 3)).millisecondsSinceEpoch,
+        ),
+        SavedNetworkConnection(
+          host: 'newer.example',
+          port: 6000,
+          lastConnectedAt:
+              now.subtract(const Duration(minutes: 5)).millisecondsSinceEpoch,
+        ),
+      ]);
+    });
+
+    await pumpScreen(tester, _networkCapabilities, networkStore: store);
+
+    expect(find.text('Saved connections'), findsOneWidget);
+    expect(find.text('newer.example:6000'), findsOneWidget);
+    expect(find.text('older.example:5000'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('newer.example:6000')).dy,
+      lessThan(tester.getTopLeft(find.text('older.example:5000')).dy),
+    );
+    expect(find.text('Last connected 5 minutes ago'), findsOneWidget);
+
+    final fields =
+        tester.widgetList<TextFormField>(find.byType(TextFormField)).toList();
+    expect(fields[0].controller!.text, 'newer.example');
+    expect(fields[1].controller!.text, '6000');
+  });
+
+  testWidgets('an empty history keeps the form usable and explains the list',
+      (tester) async {
+    await pumpScreen(tester, _networkCapabilities);
+
+    expect(
+      find.text(
+        'Successful network connections appear here for quick reconnects.',
+      ),
+      findsOneWidget,
+    );
+    final fields =
+        tester.widgetList<TextFormField>(find.byType(TextFormField)).toList();
+    expect(fields[0].controller!.text, '192.168.1.100');
+    expect(fields[1].controller!.text, defaultCompanionPort.toString());
+  });
+
+  testWidgets('an empty history falls back to the last TCP session',
+      (tester) async {
+    await pumpScreen(
+      tester,
+      _networkCapabilities,
+      session: const SessionConfig(
+        kind: DeviceTargetKind.tcp,
+        host: 'session.example',
+        devicePort: 5001,
+        proxyPort: 0,
+      ),
+    );
+
+    final fields =
+        tester.widgetList<TextFormField>(find.byType(TextFormField)).toList();
+    expect(fields[0].controller!.text, 'session.example');
+    expect(fields[1].controller!.text, '5001');
+  });
+
+  testWidgets('deleting a saved connection removes it and Undo restores it',
+      (tester) async {
+    final original = SavedNetworkConnection(
+      host: 'delete.example',
+      port: 5000,
+      lastConnectedAt: DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
+    );
+    final store = NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+    await tester.runAsync(() => store.save([original]));
+    final app = await pumpScreen(
+      tester,
+      _networkCapabilities,
+      networkStore: store,
+    );
+
+    await tester.runAsync(() async {
+      await tester.tap(find.byTooltip('Remove saved connection'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.text('delete.example:5000'), findsNothing);
+    expect(find.text('Removed delete.example:5000'), findsOneWidget);
+    expect(find.text('Undo'), findsOneWidget);
+    expect(app.savedNetworkConnections, isEmpty);
+    expect(await tester.runAsync(() => store.load()), isEmpty);
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('Undo'));
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.text('delete.example:5000'), findsOneWidget);
+    final restored = await tester.runAsync(() => store.load());
+    expect(restored, hasLength(1));
+    expect(restored!.single.displayAddress, 'delete.example:5000');
+    expect(restored.single.lastConnectedAt, original.lastConnectedAt);
+  });
+
+  testWidgets('tapping a saved card connects and pops only on success',
+      (tester) async {
+    final original = SavedNetworkConnection(
+      host: '192.168.1.55',
+      port: 5000,
+      lastConnectedAt: DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
+    );
+    final store = NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+    await tester.runAsync(() => store.save([original]));
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    var attempts = 0;
+    final app = await pumpScreen(
+      tester,
+      _networkCapabilities,
+      networkStore: store,
+      tcpLinkFactory: (host, port, onLog) {
+        attempts++;
+        return fake;
+      },
+      push: true,
+    );
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('192.168.1.55:5000'));
+      while (app.busy) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+
+    expect(attempts, 1);
+    expect(find.text('open connect'), findsOneWidget);
+    expect(app.deviceConnected, isTrue, reason: app.logs.join('\n'));
+    final saved = app.savedNetworkConnections.single;
+    expect(saved.host, '192.168.1.55');
+    expect(saved.port, 5000);
+    expect(saved.lastConnectedAt, greaterThan(original.lastConnectedAt));
+    final persisted = await tester.runAsync(() => store.load());
+    expect(persisted!.single.lastConnectedAt, saved.lastConnectedAt);
+  });
+
+  testWidgets('a failed saved-card attempt keeps the screen and values',
+      (tester) async {
+    final original = SavedNetworkConnection(
+      host: '192.168.1.55',
+      port: 5000,
+      lastConnectedAt: DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
+    );
+    final store = NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+    await tester.runAsync(() => store.save([original]));
+    final fake = FakeDeviceLink()
+      ..deviceInfoError =
+          const DeviceCommandError.malformed(message: 'device unavailable');
+    final app = await pumpScreen(
+      tester,
+      _networkCapabilities,
+      networkStore: store,
+      tcpLinkFactory: (host, port, onLog) => fake,
+      push: true,
+    );
+
+    await tester.runAsync(() async {
+      await tester.tap(find.text('192.168.1.55:5000'));
+      while (app.busy) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ConnectScreen), findsOneWidget);
+    expect(
+      find.text(
+        'Could not connect to 192.168.1.55:5000. See the log for details.',
+      ),
+      findsOneWidget,
+    );
+    final fields =
+        tester.widgetList<TextFormField>(find.byType(TextFormField)).toList();
+    expect(fields[0].controller!.text, '192.168.1.55');
+    expect(fields[1].controller!.text, '5000');
+    expect(app.savedNetworkConnections.single, original);
+  });
+
+  testWidgets('invalid host and port show errors without connecting',
+      (tester) async {
+    var attempts = 0;
+    final app = await pumpScreen(
+      tester,
+      _networkCapabilities,
+      tcpLinkFactory: (host, port, onLog) {
+        attempts++;
+        return FakeDeviceLink();
+      },
+    );
+
+    await tester.enterText(find.byType(TextFormField).at(0), '   ');
+    await tester.enterText(find.byType(TextFormField).at(1), '70000');
+    await tester.tap(find.text('Connect over TCP'));
+    await tester.pump();
+
+    expect(find.text('Enter a host'), findsOneWidget);
+    expect(find.text('Enter a port between 1 and 65535'), findsOneWidget);
+    expect(attempts, 0);
+    expect(app.deviceConnected, isFalse);
   });
 
   testWidgets('the simulated companion entry connects and returns',
