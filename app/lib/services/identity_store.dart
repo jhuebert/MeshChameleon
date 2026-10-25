@@ -1,17 +1,17 @@
-import 'dart:typed_data';
-
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
-/// Stores the MeshCore identity (64-byte expanded key) in Android
+/// Stores each virtual identity (64-byte expanded key) in Android
 /// Keystore-backed secure storage.
 ///
-/// On Android the value is kept in Jetpack Security `EncryptedSharedPreferences`
+/// On Android the values live in Jetpack Security `EncryptedSharedPreferences`
 /// (AES-256-GCM, with the master key held in the hardware-backed Android
-/// Keystore). The 64-byte identity is never written to plaintext storage, logs,
-/// or the app UI unless the user explicitly reveals it (see [exportKey]).
-class IdentityStore implements VirtualIdentityPersistence {
+/// Keystore). Keys are never written to plaintext storage, logs, or the app UI.
+///
+/// The pre-multi-identity `meshcore_identity_v1` entry is deliberately ignored;
+/// this store only addresses the per-record `meshcore_identity_v2/<id>` slots.
+class IdentityStore {
   IdentityStore({FlutterSecureStorage? storage})
       : _storage = storage ?? _defaultStorage();
 
@@ -22,16 +22,17 @@ class IdentityStore implements VirtualIdentityPersistence {
         aOptions: AndroidOptions(encryptedSharedPreferences: true),
       );
 
-  static const _key = 'meshcore_identity_v1';
+  static const _prefix = 'meshcore_identity_v2/';
   final FlutterSecureStorage _storage;
 
-  @override
-  Future<LocalIdentity?> load() async {
-    final hex = await _storage.read(key: _key);
+  static String storageKey(String id) => '$_prefix$id';
+
+  Future<LocalIdentity?> loadById(String id) async {
+    final hex = await _storage.read(key: storageKey(id));
     if (hex == null || hex.isEmpty) return null;
     try {
       final bytes = hexToBytes(hex);
-      if (bytes.length == 64 &&
+      if (bytes.length != 64 ||
           !await LocalIdentity.validateMeshcore64(bytes)) {
         return null;
       }
@@ -41,31 +42,38 @@ class IdentityStore implements VirtualIdentityPersistence {
     }
   }
 
-  Future<LocalIdentity> generate() async {
-    final identity = await LocalIdentity.generate();
-    await save(identity);
-    return identity;
-  }
+  Future<void> saveById(String id, LocalIdentity identity) =>
+      _storage.write(
+        key: storageKey(id),
+        value: bytesToHex(identity.meshcore64),
+      );
 
-  Future<LocalIdentity> import(Uint8List key) async {
-    if (key.length == 64 &&
-        !await LocalIdentity.validateMeshcore64(key)) {
-      throw const FormatException('invalid 64-byte identity key');
-    }
-    final identity = await LocalIdentity.import(key);
-    await save(identity);
-    return identity;
-  }
+  Future<void> deleteById(String id) => _storage.delete(key: storageKey(id));
+
+  /// A [VirtualIdentityPersistence] scoped to one identity record.
+  ///
+  /// [validate] runs before the durable write so protocol key imports can
+  /// reject a duplicate or attached-radio key without changing storage.
+  VirtualIdentityPersistence persistenceFor(
+    String id, {
+    Future<void> Function(LocalIdentity identity)? validate,
+  }) =>
+      _RecordPersistence(this, id, validate);
+}
+
+class _RecordPersistence implements VirtualIdentityPersistence {
+  _RecordPersistence(this._store, this._id, this._validate);
+
+  final IdentityStore _store;
+  final String _id;
+  final Future<void> Function(LocalIdentity identity)? _validate;
 
   @override
-  Future<void> save(LocalIdentity identity) =>
-      _storage.write(key: _key, value: bytesToHex(identity.meshcore64));
+  Future<LocalIdentity?> load() => _store.loadById(_id);
 
-  /// The exportable 64-byte MeshCore key form. Never log this.
-  Future<Uint8List?> exportKey() async {
-    final identity = await load();
-    return identity?.meshcore64;
+  @override
+  Future<void> save(LocalIdentity identity) async {
+    await _validate?.call(identity);
+    await _store.saveById(_id, identity);
   }
-
-  Future<void> clear() => _storage.delete(key: _key);
 }
