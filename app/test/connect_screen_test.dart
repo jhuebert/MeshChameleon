@@ -419,6 +419,72 @@ void main() {
     expect(app.deviceConnected, isFalse);
   });
 
+  testWidgets('the connected banner stays above the tabs while switching',
+      (tester) async {
+    final app = await pumpScreen(tester, _simulatedCapabilities);
+
+    await tester.runAsync(() => app.connectSimulated());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connected'), findsOneWidget);
+    expect(find.text('Disconnect'), findsOneWidget);
+    expect(find.text('Simulated companion'), findsOneWidget);
+
+    await tester.tap(find.text('Simulated'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Connected'), findsOneWidget);
+    expect(find.text('Disconnect'), findsOneWidget);
+    expect(find.text('Simulated companion'), findsNWidgets(2));
+  });
+
+  testWidgets('a busy connection disables actions but keeps tabs usable',
+      (tester) async {
+    final store = NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+    await tester.runAsync(() => store.save([
+          SavedNetworkConnection(
+            host: '192.168.1.55',
+            port: 5000,
+            lastConnectedAt:
+                DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
+          ),
+        ]));
+    final app = await pumpScreen(
+      tester,
+      _simulatedCapabilities,
+      networkStore: store,
+    );
+
+    app.busy = true;
+    app.log('test: hold busy');
+    await tester.pump();
+
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    final connect = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Connect over TCP'),
+    );
+    expect(connect.onPressed, isNull);
+    final delete = tester.widget<IconButton>(
+      find.widgetWithIcon(IconButton, Icons.delete_outline),
+    );
+    expect(delete.onPressed, isNull);
+
+    await tester.tap(find.text('Simulated'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.text('Simulated companion'), findsOneWidget);
+    final simulatedButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, 'Connect simulated companion'),
+    );
+    expect(simulatedButton.onPressed, isNull);
+
+    app.busy = false;
+    app.log('test: release busy');
+    await tester.pump();
+  });
+
   testWidgets('the simulated companion entry connects and returns',
       (tester) async {
     final app = await pumpScreen(tester, _simulatedCapabilities, push: true);
