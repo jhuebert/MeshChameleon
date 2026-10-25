@@ -111,6 +111,7 @@ class AppState extends ChangeNotifier {
   bool autoResume = false;
 
   List<SavedNetworkConnection> _savedNetworkConnections = const [];
+  Future<void> _networkConnectionMutations = Future<void>.value();
 
   /// Successful network targets, newest first.
   List<SavedNetworkConnection> get savedNetworkConnections =>
@@ -378,59 +379,80 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Future<void> _recordNetworkConnection(String host, int port) async {
-    _savedNetworkConnections = withRecordedNetworkConnection(
-      _savedNetworkConnections,
-      host: host,
-      port: port,
-      connectedAt: DateTime.now().toUtc().millisecondsSinceEpoch,
-    );
+  Future<void> _recordNetworkConnection(String host, int port) =>
+      _mutateNetworkConnections(() async {
+        _publishNetworkConnections(
+          withRecordedNetworkConnection(
+            _savedNetworkConnections,
+            host: host,
+            port: port,
+            connectedAt: DateTime.now().toUtc().millisecondsSinceEpoch,
+          ),
+        );
+        try {
+          await networkConnectionStore.save(_savedNetworkConnections);
+        } catch (e) {
+          log('Could not save network connection history: $e');
+        }
+      });
+
+  /// Serializes history read-modify-write operations.
+  ///
+  /// The store already serializes file writes; this also prevents a delete,
+  /// Undo, or successful connect from publishing a stale in-memory snapshot.
+  Future<T> _mutateNetworkConnections<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    _networkConnectionMutations = _networkConnectionMutations.then((_) async {
+      try {
+        completer.complete(await action());
+      } catch (e, stack) {
+        completer.completeError(e, stack);
+      }
+    });
+    return completer.future;
+  }
+
+  void _publishNetworkConnections(List<SavedNetworkConnection> connections) {
+    _savedNetworkConnections = connections;
     notifyListeners();
-    try {
-      await networkConnectionStore.save(_savedNetworkConnections);
-    } catch (e) {
-      log('Could not save network connection history: $e');
-    }
   }
 
   /// Remove a saved target. The in-memory list changes only after the file
   /// write succeeds, so a failed delete leaves the card visible.
   Future<bool> removeSavedNetworkConnection(
     SavedNetworkConnection connection,
-  ) async {
-    final next = withoutNetworkConnection(
-      _savedNetworkConnections,
-      connection.key,
-    );
-    try {
-      await networkConnectionStore.save(next);
-    } catch (e) {
-      log('Could not remove the saved network connection: $e');
-      return false;
-    }
-    _savedNetworkConnections = next;
-    notifyListeners();
-    return true;
-  }
+  ) =>
+      _mutateNetworkConnections(
+        () => _saveNetworkConnections(
+          withoutNetworkConnection(_savedNetworkConnections, connection.key),
+          failureLog: 'Could not remove the saved network connection',
+        ),
+      );
 
   /// Restore a removed target with its original timestamp.
   ///
   /// A newer entry for the same key wins if the user reconnected before Undo.
   Future<bool> restoreSavedNetworkConnection(
     SavedNetworkConnection connection,
-  ) async {
-    final next = withRestoredNetworkConnection(
-      _savedNetworkConnections,
-      connection,
-    );
+  ) =>
+      _mutateNetworkConnections(
+        () => _saveNetworkConnections(
+          withRestoredNetworkConnection(_savedNetworkConnections, connection),
+          failureLog: 'Could not restore the saved network connection',
+        ),
+      );
+
+  Future<bool> _saveNetworkConnections(
+    List<SavedNetworkConnection> next, {
+    required String failureLog,
+  }) async {
     try {
       await networkConnectionStore.save(next);
     } catch (e) {
-      log('Could not restore the saved network connection: $e');
+      log('$failureLog: $e');
       return false;
     }
-    _savedNetworkConnections = next;
-    notifyListeners();
+    _publishNetworkConnections(next);
     return true;
   }
 

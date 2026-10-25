@@ -10,6 +10,16 @@ const int networkConnectionHistoryVersion = 1;
 /// Maximum number of saved network targets kept after a successful connection.
 const int maxSavedNetworkConnections = 20;
 
+/// Largest timestamp representable by [DateTime] (UTC epoch milliseconds).
+const int _maxTimestampMilliseconds = 8640000000000000;
+
+bool _isValidHost(String host) => host.trim().isNotEmpty;
+
+bool _isValidPort(int port) => port >= 1 && port <= 65535;
+
+bool _isValidTimestamp(int timestamp) =>
+    timestamp > 0 && timestamp <= _maxTimestampMilliseconds;
+
 /// A successfully reached TCP companion target.
 ///
 /// Host casing is preserved for display; [key] normalizes it for duplicate
@@ -47,11 +57,10 @@ class SavedNetworkConnection {
     final trimmedHost = host.trim();
     final portValue = port.toInt();
     final connectedAt = lastConnectedAt.toInt();
-    if (trimmedHost.isEmpty ||
-        portValue < 1 ||
-        portValue > 65535 ||
+    if (!_isValidHost(trimmedHost) ||
+        !_isValidPort(portValue) ||
         portValue != port ||
-        connectedAt <= 0 ||
+        !_isValidTimestamp(connectedAt) ||
         connectedAt != lastConnectedAt) {
       return null;
     }
@@ -94,7 +103,9 @@ List<SavedNetworkConnection> withRecordedNetworkConnection(
   required int connectedAt,
 }) {
   final trimmedHost = host.trim();
-  if (trimmedHost.isEmpty || port < 1 || port > 65535 || connectedAt <= 0) {
+  if (!_isValidHost(trimmedHost) ||
+      !_isValidPort(port) ||
+      !_isValidTimestamp(connectedAt)) {
     return List<SavedNetworkConnection>.unmodifiable(current);
   }
   return _replaceAndOrder(
@@ -122,6 +133,11 @@ List<SavedNetworkConnection> withRestoredNetworkConnection(
   List<SavedNetworkConnection> current,
   SavedNetworkConnection connection,
 ) {
+  if (!_isValidHost(connection.host) ||
+      !_isValidPort(connection.port) ||
+      !_isValidTimestamp(connection.lastConnectedAt)) {
+    return _order(current);
+  }
   for (final existing in current) {
     if (existing.key == connection.key &&
         existing.lastConnectedAt >= connection.lastConnectedAt) {
@@ -186,8 +202,6 @@ class NetworkConnectionStore {
     return _file = File('${dir.path}/network_connections.json');
   }
 
-  File get _tempFile => File('${_file!.path}.tmp');
-
   Future<List<SavedNetworkConnection>> load() async {
     try {
       final file = await _resolve();
@@ -233,7 +247,8 @@ class NetworkConnectionStore {
           .map((connection) => connection.toJson())
           .toList(growable: false),
     });
-    await _tempFile.writeAsString(encoded, flush: true);
-    await _tempFile.rename(file.path);
+    final temp = File('${file.path}.tmp');
+    await temp.writeAsString(encoded, flush: true);
+    await temp.rename(file.path);
   }
 }

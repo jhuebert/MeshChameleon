@@ -207,8 +207,8 @@ void main() {
     client = await connectClient();
     addTearDown(client.close);
     expect(app.server!.hasClient, isTrue);
-    expect(
-        app.manager!.activeIdentity!.publicKey, runtimeB.identity!.publicKey);
+    expect(app.manager!.activeIdentity!.publicKey,
+        runtimeB.identity!.publicKey);
 
     client.send([cmdSyncNextMessage]);
     final message = await client.frames.next();
@@ -264,8 +264,7 @@ void main() {
     expect(runtimeD.node, isNotNull);
     expect(
       runtimeD.node!.contacts.any(
-        (contact) =>
-            bytesToHex(contact.publicKey) ==
+        (contact) => bytesToHex(contact.publicKey) ==
             bytesToHex(runtimeB.identity!.publicKey),
       ),
       isFalse,
@@ -275,8 +274,7 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 250));
     expect(
       runtimeD.node!.contacts.any(
-        (contact) =>
-            bytesToHex(contact.publicKey) ==
+        (contact) => bytesToHex(contact.publicKey) ==
             bytesToHex(runtimeB.identity!.publicKey),
       ),
       isTrue,

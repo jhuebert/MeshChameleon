@@ -45,6 +45,18 @@ class _FramedClient {
   }
 }
 
+class _GateStore extends NetworkConnectionStore {
+  _GateStore(File file) : super(file: file);
+
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> save(List<SavedNetworkConnection> connections) async {
+    await gate.future;
+    await super.save(connections);
+  }
+}
+
 class StreamQueue<T> {
   StreamQueue(Stream<T> stream) {
     stream.listen(_add);
@@ -396,6 +408,46 @@ void main() {
     final restored = await networkConnectionStore.load();
     expect(restored, [first, second]);
     expect(restored.first.lastConnectedAt, 300);
+  });
+
+  test('overlapping remove and connect do not lose history', () async {
+    final file = File('${dir.path}/race_connections.json');
+    const first = SavedNetworkConnection(
+      host: 'first.example',
+      port: 5000,
+      lastConnectedAt: 100,
+    );
+    const second = SavedNetworkConnection(
+      host: 'second.example',
+      port: 6000,
+      lastConnectedAt: 200,
+    );
+    await NetworkConnectionStore(file: file).save([first, second]);
+    final store = _GateStore(file);
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final raceApp = buildApp(
+      connections: store,
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    await raceApp.loadIdentities();
+    addTearDown(raceApp.disconnectDevice);
+
+    final remove = raceApp.removeSavedNetworkConnection(first);
+    final connect =
+        raceApp.connectTcp(host: 'connected.example', tcpPort: 7000);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    store.gate.complete();
+
+    expect(await remove, isTrue);
+    expect(await connect, isTrue, reason: raceApp.logs.join('\n'));
+    final history = raceApp.savedNetworkConnections;
+    expect(history, hasLength(2));
+    expect(
+      history.map((connection) => connection.key),
+      containsAll([second.key, 'connected.example:7000']),
+    );
   });
 
   test('a history write failure keeps a successful TCP connection', () async {

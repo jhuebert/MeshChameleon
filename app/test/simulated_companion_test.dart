@@ -77,15 +77,13 @@ void main() {
     expect(app.node, isNotNull, reason: app.logs.join('\n'));
     // Attach performs the handshake, one tuning read, registers the shared RX
     // listener, and reads a battery sample. It never changes a physical setting.
-    expect(
-        link.calls,
-        containsAllInOrder([
-          'connect',
-          'deviceInfo',
-          'selfInfo',
-          'tuningParams',
-          'setRawRxListener',
-        ]));
+    expect(link.calls, containsAllInOrder([
+      'connect',
+      'deviceInfo',
+      'selfInfo',
+      'tuningParams',
+      'setRawRxListener',
+    ]));
     const writes = [
       'sendRawPacket',
       'setRadioParams',

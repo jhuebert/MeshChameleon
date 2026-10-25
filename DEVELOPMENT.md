@@ -16,7 +16,7 @@ DART=~/dev/flutter/bin/dart FLUTTER=~/dev/flutter/bin/flutter ./scripts/check.sh
 ```
 
 The same simulator is also reachable without writing a test: from the Linux
-desktop app's **Simulated companion** entry, or from the headless CLI below.
+desktop app's **Simulated** tab, or from the headless CLI below.
 
 If `meshcli` is installed, the optional external-client smoke test is:
 
@@ -124,8 +124,8 @@ Two hardware-free targets share the pure-Dart core:
 
 - **Linux desktop** (`app/linux/`) — the real UI. BLE is hidden off mobile
   because there is no desktop `flutter_blue_plus` implementation; the
-  debug/profile-only **Simulated companion** entry drives the real `MeshNode`
-  and `CompanionServer` from an in-memory `FakeDeviceLink`.
+  debug/profile-only **Simulated** tab drives the real `MeshNode` and
+  `CompanionServer` from an in-memory `FakeDeviceLink`.
 - **Headless CLI** (`packages/mesh_node/tool/proxy_cli.dart`) — no Flutter, no
   GUI, TCP device link only.
 
@@ -327,6 +327,14 @@ This is a *launch* resume, not a true boot resume. With shape A the engine runs
 in the main isolate, which Android does not start at boot; the proxy cannot come
 back automatically after a reboot until the user opens the app. Boot resume would
 require the shape-B engine-in-task-isolate design (plan §4).
+
+## Device connection history
+
+Successful TCP targets are stored separately from `session.json` in
+`<app-support>/network_connections.json` (`NetworkConnectionStore`, schema v1).
+The file keeps the 20 most recent successful `host:port` targets, newest first;
+failed attempts are never written. History is best-effort: a read or write
+failure cannot block startup or fail an otherwise successful device connection.
 
 ## Release signing
 

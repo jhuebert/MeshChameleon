@@ -166,12 +166,8 @@ class _ConnectScreenState extends State<ConnectScreen>
     final port = int.parse(_portController.text.trim());
     FocusScope.of(context).unfocus();
     final ok = await app.connectTcp(host: host, tcpPort: port);
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
-    }
-    _showFailure(
+    _finishConnection(
+      ok,
       'Could not connect to ${formatNetworkAddress(host, port)}. '
       'See the log for details.',
     );
@@ -205,9 +201,11 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Future<void> _restoreSaved(SavedNetworkConnection connection) async {
+    if (!mounted) return;
     final app = context.read<AppState>();
-    if (!await app.restoreSavedNetworkConnection(connection)) {
-      if (mounted) _showFailure('Could not restore the saved connection.');
+    final ok = await app.restoreSavedNetworkConnection(connection);
+    if (!ok && mounted) {
+      _showFailure('Could not restore the saved connection.');
     }
   }
 
@@ -216,29 +214,34 @@ class _ConnectScreenState extends State<ConnectScreen>
     final name = _deviceName(device);
     await _stopScan();
     final ok = await app.connectBle(device);
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
-    }
-    _showFailure('Could not connect to $name. See the log for details.');
+    _finishConnection(
+      ok,
+      'Could not connect to $name. See the log for details.',
+    );
   }
 
   Future<void> _connectSimulated() async {
     final app = context.read<AppState>();
     final ok = await app.connectSimulated();
+    _finishConnection(
+      ok,
+      'Could not start the simulated companion. See the log for details.',
+    );
+  }
+
+  void _finishConnection(bool connected, String failureMessage) {
     if (!mounted) return;
-    if (ok) {
+    if (connected) {
       Navigator.of(context).pop();
-      return;
+    } else {
+      _showFailure(failureMessage);
     }
-    _showFailure(
-        'Could not start the simulated companion. See the log for details.');
   }
 
   void _showFailure(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
   static String _deviceName(BluetoothDevice device) =>

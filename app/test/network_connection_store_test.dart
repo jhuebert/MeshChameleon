@@ -134,6 +134,15 @@ void main() {
       ),
       current,
     );
+    expect(
+      withRecordedNetworkConnection(
+        current,
+        host: 'host',
+        port: 5000,
+        connectedAt: 8640000000000001,
+      ),
+      current,
+    );
   });
 
   test('recording beyond the cap drops the oldest entries', () async {
@@ -162,6 +171,11 @@ void main() {
         {'host': 'bad-port-high', 'port': 70000, 'last_connected_at': 200},
         {'host': 'bad-port-type', 'port': '5000', 'last_connected_at': 200},
         {'host': 'bad-time', 'port': 5000, 'last_connected_at': 0},
+        {
+          'host': 'bad-time-range',
+          'port': 5000,
+          'last_connected_at': 8640000000000001,
+        },
         {'host': 'bad-time-type', 'port': 5000, 'last_connected_at': 'now'},
         'not-a-record',
         {'host': 'another.example', 'port': 6000, 'last_connected_at': 100},
@@ -230,6 +244,13 @@ void main() {
 
     expect(restored, hasLength(1));
     expect(restored.single.lastConnectedAt, 300);
+  });
+
+  test('restore ignores an invalid record', () async {
+    final current = [_connection('host', 5000, 100)];
+    final invalid = _connection('', 5000, 200);
+
+    expect(withRestoredNetworkConnection(current, invalid), current);
   });
 
   test('IPv6 literals are bracketed for display', () {

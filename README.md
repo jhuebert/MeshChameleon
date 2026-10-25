@@ -85,6 +85,16 @@ development data from those builds is intentionally ignored. Storage uses
 slots. The identity database is never silently replaced; a corrupt catalog shows
 a recovery screen with retry.
 
+## Connecting a device
+
+The **Connect device** screen shows one tab per available transport: Bluetooth
+when the platform supports BLE, Network always, and Simulated only in
+development builds. The tab bar is hidden when only Network is available.
+Successful TCP `host:port` targets are saved newest-first (maximum 20) in
+`<app-support>/network_connections.json`; tap a saved card to reconnect, or use
+delete with Undo. Failed attempts are never saved, and BLE or simulated sessions
+do not create network history entries.
+
 ## Compatibility notes
 
 The advertised virtual `DEVICE_INFO` baseline is firmware code **14** /

@@ -29,6 +29,22 @@ const _simulatedCapabilities = DeviceCapabilities(
   supportsSimulatedCompanion: true,
 );
 
+NetworkConnectionStore _historyStore(Directory dir) => NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+
+SavedNetworkConnection _recentConnection(
+  String host, {
+  int port = defaultCompanionPort,
+  Duration age = const Duration(minutes: 2),
+}) =>
+    SavedNetworkConnection(
+      host: host,
+      port: port,
+      lastConnectedAt:
+          DateTime.now().toUtc().subtract(age).millisecondsSinceEpoch,
+    );
+
 void main() {
   late Directory dir;
 
@@ -59,10 +75,7 @@ void main() {
           secureStore: IdentityStore(),
         ),
         sessionStore: sessionStore,
-        networkConnectionStore: networkStore ??
-            NetworkConnectionStore(
-              file: File('${dir.path}/network_connections.json'),
-            ),
+        networkConnectionStore: networkStore ?? _historyStore(dir),
         tcpLinkFactory: tcpLinkFactory,
         capabilities: capabilities,
       );
@@ -190,23 +203,18 @@ void main() {
 
   testWidgets('saved cards render newest-first and prefill the form',
       (tester) async {
-    final store = NetworkConnectionStore(
-      file: File('${dir.path}/network_connections.json'),
-    );
-    final now = DateTime.now().toUtc();
+    final store = _historyStore(dir);
     await tester.runAsync(() async {
       await store.save([
-        SavedNetworkConnection(
-          host: 'older.example',
+        _recentConnection(
+          'older.example',
           port: 5000,
-          lastConnectedAt:
-              now.subtract(const Duration(hours: 3)).millisecondsSinceEpoch,
+          age: const Duration(hours: 3),
         ),
-        SavedNetworkConnection(
-          host: 'newer.example',
+        _recentConnection(
+          'newer.example',
           port: 6000,
-          lastConnectedAt:
-              now.subtract(const Duration(minutes: 5)).millisecondsSinceEpoch,
+          age: const Duration(minutes: 5),
         ),
       ]);
     });
@@ -265,14 +273,8 @@ void main() {
 
   testWidgets('deleting a saved connection removes it and Undo restores it',
       (tester) async {
-    final original = SavedNetworkConnection(
-      host: 'delete.example',
-      port: 5000,
-      lastConnectedAt: DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
-    );
-    final store = NetworkConnectionStore(
-      file: File('${dir.path}/network_connections.json'),
-    );
+    final original = _recentConnection('delete.example');
+    final store = _historyStore(dir);
     await tester.runAsync(() => store.save([original]));
     final app = await pumpScreen(
       tester,
@@ -307,14 +309,8 @@ void main() {
 
   testWidgets('tapping a saved card connects and pops only on success',
       (tester) async {
-    final original = SavedNetworkConnection(
-      host: '192.168.1.55',
-      port: 5000,
-      lastConnectedAt: DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
-    );
-    final store = NetworkConnectionStore(
-      file: File('${dir.path}/network_connections.json'),
-    );
+    final original = _recentConnection('192.168.1.55');
+    final store = _historyStore(dir);
     await tester.runAsync(() => store.save([original]));
     final fake = FakeDeviceLink(
       deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
@@ -353,14 +349,8 @@ void main() {
 
   testWidgets('a failed saved-card attempt keeps the screen and values',
       (tester) async {
-    final original = SavedNetworkConnection(
-      host: '192.168.1.55',
-      port: 5000,
-      lastConnectedAt: DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
-    );
-    final store = NetworkConnectionStore(
-      file: File('${dir.path}/network_connections.json'),
-    );
+    final original = _recentConnection('192.168.1.55');
+    final store = _historyStore(dir);
     await tester.runAsync(() => store.save([original]));
     final fake = FakeDeviceLink()
       ..deviceInfoError =
@@ -440,17 +430,9 @@ void main() {
 
   testWidgets('a busy connection disables actions but keeps tabs usable',
       (tester) async {
-    final store = NetworkConnectionStore(
-      file: File('${dir.path}/network_connections.json'),
-    );
-    await tester.runAsync(() => store.save([
-          SavedNetworkConnection(
-            host: '192.168.1.55',
-            port: 5000,
-            lastConnectedAt:
-                DateTime.now().toUtc().millisecondsSinceEpoch - 120000,
-          ),
-        ]));
+    final store = _historyStore(dir);
+    await tester
+        .runAsync(() => store.save([_recentConnection('192.168.1.55')]));
     final app = await pumpScreen(
       tester,
       _simulatedCapabilities,

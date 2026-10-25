@@ -136,8 +136,8 @@ void main() {
     expect(betaIndex, greaterThan(alphaIndex));
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('1 channels · 1 contacts'), findsOneWidget);
-    expect(
-        find.text('1 DMs queued · 1 channel messages queued'), findsOneWidget);
+    expect(find.text('1 DMs queued · 1 channel messages queued'),
+        findsOneWidget);
     expect(find.textContaining(first), findsNothing);
   });
 
@@ -162,13 +162,9 @@ void main() {
 
     expect(find.text('Custom Node'), findsOneWidget);
     expect(app.identities, hasLength(3));
-    expect(
-        app.activeIdentityId,
-        isNot(
-          app.identities
-              .firstWhere((summary) => summary.name == 'Custom Node')
-              .id,
-        ));
+    expect(app.activeIdentityId, isNot(
+      app.identities.firstWhere((summary) => summary.name == 'Custom Node').id,
+    ));
   });
 
   testWidgets('create wizard rejects an invalid name', (tester) async {
@@ -203,8 +199,8 @@ void main() {
 
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(app.activeIdentityId, secondId);
-    expect(
-        find.textContaining('#${app.activeIdentity!.prefixHex}'), findsWidgets);
+    expect(find.textContaining('#${app.activeIdentity!.prefixHex}'),
+        findsWidgets);
   });
 
   testWidgets('delete is disabled for the active identity and clear is present',
