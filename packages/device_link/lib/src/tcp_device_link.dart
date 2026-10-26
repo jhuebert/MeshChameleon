@@ -222,6 +222,21 @@ class TcpDeviceLink implements RadioLink {
   @override
   Future<RadioParams> radioParams() async => (await selfInfo()).radioParams;
 
+  @override
+  Future<RadioStats> radioStats() async {
+    final frame = await _request(
+      DeviceFrames.getStats(statsTypeRadio),
+      {respCodeStats, respCodeErr},
+    );
+    final stats = RadioStats.parse(frame);
+    if (stats == null) {
+      throw const DeviceCommandError.malformed(
+        message: 'invalid radio stats from device',
+      );
+    }
+    return stats;
+  }
+
   /// Read the full device SELF_INFO (radio params + name + location).
   @override
   Future<ParsedSelfInfo> selfInfo() async {

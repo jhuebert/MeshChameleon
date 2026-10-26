@@ -23,7 +23,8 @@ class RecordingSink implements CompanionPushSink {
   void pushMsgWaiting() => msgWaiting++;
 
   @override
-  void pushSendConfirmed(int ackCrc) => confirmed.add(ackCrc);
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
+      confirmed.add(ackCrc);
 
   @override
   void pushAdvert(Uint8List pubkey) {
@@ -299,6 +300,34 @@ void main() {
     // Alice received the ACK.
     expect(aliceSink.confirmed.length, 1);
     expect(aliceSink.confirmed.first, result.expectedAck);
+  });
+
+  test('direct text uses the client timestamp and attempt verbatim',
+      () async {
+    await alice.addUpdateContact(Contact(
+      publicKey: bob.identity.publicKey,
+      name: 'bob',
+      outPathLen: 0,
+    ));
+    const timestamp = 1700000123;
+    final result = await alice.sendTextMessage(
+      bob.identity.publicKey,
+      'timestamped',
+      attempt: 2,
+      timestamp: timestamp,
+    );
+    expect(result.success, isTrue);
+    final sent = (alice.link as FakeDeviceLink).transmitted.last;
+    final packet = Packet.readFrom(sent)!;
+    final secret = await alice.identity.sharedSecret(bob.identity.publicKey);
+    final plaintext = CryptoUtils.macThenDecrypt(
+      secret.sublist(0, 16),
+      secret,
+      packet.payload.sublist(2),
+    );
+    final r = BufferReader(plaintext);
+    expect(r.readUInt32Le(), timestamp);
+    expect(r.readByte(), (txtTypePlain << 2) | 2);
   });
 
   test('channel text is delivered on the default channel', () async {
@@ -1951,6 +1980,7 @@ void main() {
     expect(core['uptime_secs'], isA<int>());
 
     final radio = await bob.getStats(statsTypeRadio);
+    expect(radio['noise_floor'], -110);
     expect(radio['last_rssi'], -70);
     expect(radio['last_snr_scaled'], 24);
     expect(radio['tx_air_secs'], isA<int>());
@@ -2713,6 +2743,68 @@ void main() {
       ...b.identity.publicKey,
     ]).sublist(0, 4);
     expect(signedAck.payload, expectedSigned);
+  });
+
+  test('flood_text_timeout_matches_firmware_airtime_estimate', () async {
+    final (a, bNode, aLink, _, _) = await _schedulerPair();
+    addTearDown(a.stop);
+    addTearDown(bNode.stop);
+    final peer = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 242);
+    await a.addUpdateContact(Contact(
+      publicKey: peer.publicKey,
+      name: 'peer',
+      outPathLen: -1,
+    ));
+
+    final result =
+        await a.sendTextMessage(peer.publicKey, 'x' * 150);
+    expect(result.isFlood, isTrue);
+    final packet = Packet.readFrom(aLink.transmitted.last)!;
+    final cr = a.prefs.codingRate <= 4
+        ? a.prefs.codingRate + 4
+        : a.prefs.codingRate;
+    final airtimeMs = loraTimeOnAirMicros(
+          payloadBytes: packet.rawLength,
+          spreadingFactor: a.prefs.spreadingFactor,
+          bandwidthHz: a.prefs.bandwidthHz,
+          codingRate: cr,
+        ) ~/
+        1000;
+    expect(result.timeoutMs, 500 + 16 * airtimeMs);
+    expect(result.timeoutMs, greaterThan(5000),
+        reason: 'a fixed 5s deadline expires before a flooded ACK');
+  });
+
+  test('flood path-return learns a zero-hop direct route', () async {
+    final (a, b, aLink, _, scheduler) = await _schedulerPair();
+    addTearDown(a.stop);
+    addTearDown(b.stop);
+    await a.addUpdateContact(Contact(
+      publicKey: b.identity.publicKey,
+      name: 'b',
+      outPathLen: -1,
+    ));
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      outPathLen: -1,
+    ));
+
+    final first = await a.sendTextMessage(b.identity.publicKey, 'learn path');
+    expect(first.isFlood, isTrue);
+    await pump();
+    scheduler.advance(const Duration(milliseconds: 200));
+    await pump();
+
+    final learned = a.getContactByKey(b.identity.publicKey)!;
+    expect(learned.outPathLen, 0,
+        reason: 'a zero-hop path-return must not be discarded');
+    expect(learned.hasDirectRoute, isTrue);
+
+    final second = await a.sendTextMessage(b.identity.publicKey, 'direct now');
+    expect(second.isFlood, isFalse);
+    final sent = Packet.readFrom(aLink.transmitted.last)!;
+    expect(sent.routeType, routeTypeDirect);
   });
 
   test('flood_dm_ack_is_path_return_and_duplicate_reacked_not_queued_twice',

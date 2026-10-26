@@ -35,7 +35,7 @@ abstract class CompanionPushSink {
   void pushMsgWaiting();
 
   /// A sent message was acknowledged (4-byte ACK CRC).
-  void pushSendConfirmed(int ackCrc);
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0});
 
   /// An advert from a known contact was seen (full pubkey).
   void pushAdvert(Uint8List pubkey);
@@ -177,6 +177,7 @@ class CompanionBridge {
     String text, {
     int txtType = txtTypePlain,
     int attempt = 0,
+    int? timestamp,
     bool waitForAck = false,
   }) async =>
       const SentResult.failure();

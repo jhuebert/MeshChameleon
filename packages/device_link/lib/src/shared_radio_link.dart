@@ -179,6 +179,9 @@ class _SharedRadioLinkView implements RadioLink {
   Future<RadioParams> radioParams() => _hub.base.radioParams();
 
   @override
+  Future<RadioStats> radioStats() => _hub.base.radioStats();
+
+  @override
   Future<void> setRadioParams(RadioParams params, {bool? clientRepeat}) =>
       _hub.base.setRadioParams(params, clientRepeat: clientRepeat);
 

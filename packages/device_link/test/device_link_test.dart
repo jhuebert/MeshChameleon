@@ -121,6 +121,39 @@ void main() {
     expect(DeviceFrames.getAllowedRepeatFreq(), [cmdGetAllowedRepeatFreq]);
   });
 
+  test('DeviceFrames.getStats selects the radio stats subtype', () {
+    expect(DeviceFrames.getStats(statsTypeRadio), [
+      cmdGetStats,
+      statsTypeRadio,
+    ]);
+  });
+
+  test('RadioStats.parse reads the physical noise floor as signed', () {
+    final w = BufferWriter()
+      ..writeByte(respCodeStats)
+      ..writeByte(statsTypeRadio)
+      ..writeUInt16Le(0xFF92) // -110 dBm
+      ..writeByte(0xC0) // -64 dBm
+      ..writeByte(24) // 6.0 dB
+      ..writeUInt32Le(11)
+      ..writeUInt32Le(22);
+    final stats = RadioStats.parse(w.toBytes());
+    expect(stats, isNotNull);
+    expect(stats!.noiseFloorDbm, -110);
+    expect(stats.lastRssiDbm, -64);
+    expect(stats.lastSnrScaled, 24);
+    expect(stats.txAirSecs, 11);
+    expect(stats.rxAirSecs, 22);
+    expect(RadioStats.parse(Uint8List(13)), isNull);
+  });
+
+  test('FakeDeviceLink reports its configured noise floor', () async {
+    final link = FakeDeviceLink(noiseFloorDbm: -107);
+    final stats = await link.radioStats();
+    expect(stats.noiseFloorDbm, -107);
+    expect(link.calls, contains('radioStats'));
+  });
+
   test('FakeDeviceLink reports self info before radio params are read',
       () async {
     final link = FakeDeviceLink(deviceNodeName: 'sim-nc1');

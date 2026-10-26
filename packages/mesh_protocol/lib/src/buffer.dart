@@ -51,6 +51,11 @@ class BufferReader {
     return b[0] | (b[1] << 8);
   }
 
+  int readInt16Le() {
+    final v = readUInt16Le();
+    return v >= 0x8000 ? v - 0x10000 : v;
+  }
+
   int readUInt32Le() {
     final b = readBytes(4);
     return (b[0] | (b[1] << 8) | (b[2] << 16) | (b[3] << 24)) & 0xFFFFFFFF;

@@ -75,6 +75,7 @@ class FakeDeviceLink implements RadioLink {
     this.echoSelf = false,
     this.deviceNodeName = 'Fake companion',
     this.maxTxPower = 22,
+    this.noiseFloorDbm = -110,
     this.connectFailures = 0,
     this.rebootDisconnects = false,
     this.shutdownDisconnects = true,
@@ -105,6 +106,9 @@ class FakeDeviceLink implements RadioLink {
 
   /// Maximum TX power reported by the simulated device's `SELF_INFO`.
   final int maxTxPower;
+
+  /// Noise floor reported by `CMD_GET_STATS` + `STATS_TYPE_RADIO`.
+  final int noiseFloorDbm;
 
   /// Number of initial [connect] calls that should fail (for backoff tests).
   int connectFailures;
@@ -239,6 +243,18 @@ class FakeDeviceLink implements RadioLink {
   Future<RadioParams> radioParams() async {
     calls.add('radioParams');
     return _currentParams;
+  }
+
+  @override
+  Future<RadioStats> radioStats() async {
+    calls.add('radioStats');
+    return RadioStats(
+      noiseFloorDbm: noiseFloorDbm,
+      lastRssiDbm: rssi,
+      lastSnrScaled: (snr * 4).round(),
+      txAirSecs: 0,
+      rxAirSecs: 0,
+    );
   }
 
   @override

@@ -141,26 +141,83 @@ void main() {
       expect(contact.sublist(1, 33), bobId.publicKey);
       expect((await client.next())[0], respCodeEndOfContacts);
 
-      // The client sends a direct message to bob.
+      // The client sends a direct message to bob. The proxy must echo the app's
+      // timestamp and attempt verbatim so the client's precomputed ACK hash
+      // matches RESP_CODE_SENT.
+      const timestamp = 1700000123;
+      const attempt = 1;
       final w = BufferWriter()
         ..writeByte(cmdSendTxtMsg)
         ..writeByte(txtTypePlain)
-        ..writeByte(0)
-        ..writeUInt32Le(0)
+        ..writeByte(attempt)
+        ..writeUInt32Le(timestamp)
         ..writeBytes(bobId.publicKey.sublist(0, 6))
         ..writeString('hi from cli')
         ..writeByte(0);
       client.send(w.toBytes());
       final sent = await client.next();
       expect(sent[0], respCodeSent);
+      final sentReader = BufferReader(sent)..skipBytes(2);
+      expect(
+        sentReader.readUInt32Le(),
+        PacketBuilder.computeAckCrc(
+          timestamp: timestamp,
+          flagsByte: (txtTypePlain << 2) | attempt,
+          message: 'hi from cli',
+          selfPubkey: aliceId.publicKey,
+        ),
+        reason: 'client-precomputed ACK hash must match',
+      );
       await pump();
       final bobMsg = await bob.syncNextMessage();
       expect(bobMsg, isNotNull);
       expect(bobMsg!.text, 'hi from cli');
 
       // Bob acknowledged the message, so the proxy pushed SEND_CONFIRMED.
-      expect((await client.next())[0], pushCodeSendConfirmed);
+      // Learning the zero-hop route also pushes PATH_UPDATED first.
+      var confirmed = await client.next();
+      while (confirmed[0] == pushCodePathUpdated) {
+        confirmed = await client.next();
+      }
+      expect(confirmed[0], pushCodeSendConfirmed);
       expect(client.rawRxFrames, greaterThan(0));
+
+      // Forcing flood resets the contact route. The send must use the flood
+      // timeout and still return the client's expected ACK hash.
+      client.send([cmdResetPath, ...bobId.publicKey]);
+      expect((await client.next())[0], respCodeOk);
+      const floodTimestamp = timestamp + 1;
+      final fw = BufferWriter()
+        ..writeByte(cmdSendTxtMsg)
+        ..writeByte(txtTypePlain)
+        ..writeByte(0)
+        ..writeUInt32Le(floodTimestamp)
+        ..writeBytes(bobId.publicKey.sublist(0, 6))
+        ..writeString('flood from cli')
+        ..writeByte(0);
+      client.send(fw.toBytes());
+      final floodSent = await client.next();
+      expect(floodSent[0], respCodeSent);
+      expect(floodSent[1], 1, reason: 'reset path forces flood');
+      final floodReader = BufferReader(floodSent)..skipBytes(2);
+      expect(
+        floodReader.readUInt32Le(),
+        PacketBuilder.computeAckCrc(
+          timestamp: floodTimestamp,
+          flagsByte: txtTypePlain << 2,
+          message: 'flood from cli',
+          selfPubkey: aliceId.publicKey,
+        ),
+      );
+      final floodTimeoutMs = floodReader.readUInt32Le();
+      expect(floodTimeoutMs, greaterThan(0));
+      await pump();
+      expect((await bob.syncNextMessage())!.text, 'flood from cli');
+      var floodConfirmed = await client.next();
+      while (floodConfirmed[0] == pushCodePathUpdated) {
+        floodConfirmed = await client.next();
+      }
+      expect(floodConfirmed[0], pushCodeSendConfirmed);
 
       // Bob replies; the proxy pushes MSG_WAITING and serves the message.
       final reply = await bob.sendTextMessage(aliceId.publicKey, 'hi alice');

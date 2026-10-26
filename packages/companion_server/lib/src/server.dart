@@ -285,8 +285,13 @@ class CompanionServer implements CompanionPushSink {
       _sendPushFrame(Uint8List.fromList([pushCodeMsgWaiting]));
 
   @override
-  void pushSendConfirmed(int ackCrc) =>
-      _sendPushFrame(_u32Frame(pushCodeSendConfirmed, ackCrc));
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) => _sendPushFrame(
+        (BufferWriter()
+              ..writeByte(pushCodeSendConfirmed)
+              ..writeUInt32Le(ackCrc)
+              ..writeUInt32Le(tripTimeMs))
+            .toBytes(),
+      );
 
   @override
   void pushAdvert(Uint8List pubkey) => _sendPushFrame(
@@ -1069,7 +1074,7 @@ class CompanionServer implements CompanionPushSink {
     final r = BufferReader(data);
     final txtType = r.readByte();
     final attempt = r.readByte();
-    r.skipBytes(4); // timestamp
+    final timestamp = r.readUInt32Le();
     final prefix = r.readBytes(6);
     final text = r.readCString();
     final contact = bridge.getContactByKeyPrefix(prefix);
@@ -1078,7 +1083,10 @@ class CompanionServer implements CompanionPushSink {
       contact.publicKey,
       text,
       txtType: txtType,
-      attempt: attempt + 1,
+      // The firmware uses the app's timestamp and attempt verbatim; the ACK
+      // hash the client precomputes is derived from these exact bytes.
+      attempt: attempt,
+      timestamp: timestamp,
     );
     if (!result.success) return sendErr(errCodeBadState);
     final w = BufferWriter()

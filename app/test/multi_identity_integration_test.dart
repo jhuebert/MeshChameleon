@@ -25,7 +25,8 @@ class _Sink implements CompanionPushSink {
   final List<int> confirmed = [];
 
   @override
-  void pushSendConfirmed(int ackCrc) => confirmed.add(ackCrc);
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
+      confirmed.add(ackCrc);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;

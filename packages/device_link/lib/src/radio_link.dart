@@ -26,6 +26,10 @@ abstract class RadioLink {
   Future<ParsedSelfInfo> selfInfo();
   Future<RadioParams> radioParams();
 
+  /// The physical radio's noise floor and airtime counters
+  /// (`CMD_GET_STATS` + `STATS_TYPE_RADIO`).
+  Future<RadioStats> radioStats();
+
   /// Write radio parameters. When [clientRepeat] is supplied it is encoded
   /// explicitly (0 or 1); `null` leaves the optional byte out.
   Future<void> setRadioParams(RadioParams params, {bool? clientRepeat});
@@ -89,6 +93,9 @@ class DeviceFrames {
 
   static Uint8List getBattAndStorage() =>
       Uint8List.fromList([cmdGetBattAndStorage]);
+
+  static Uint8List getStats(int statsType) =>
+      Uint8List.fromList([cmdGetStats, statsType]);
 
   static Uint8List sendRawPacket(Uint8List packet, [int priority = 0]) =>
       Uint8List.fromList([cmdSendRawPacket, priority, ...packet]);

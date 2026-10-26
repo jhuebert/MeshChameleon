@@ -19,10 +19,16 @@ import 'sensor_settings.dart';
 import 'virtual_clock.dart';
 
 class _PendingAck {
-  _PendingAck(this.crc, this.contactPubkey, this.timer);
+  _PendingAck(
+    this.crc,
+    this.contactPubkey,
+    this.timer,
+    this.sentAtMonotonicMillis,
+  );
   final int crc;
   final Uint8List contactPubkey;
   final Timer timer;
+  final int sentAtMonotonicMillis;
 }
 
 /// A login keep-alive session with a repeater/room server.
@@ -438,6 +444,10 @@ class MeshNode extends CompanionBridge {
   int _lastRxRssi = 0;
   int _lastRxSnrScaled = 0;
 
+  /// Last noise floor read from the physical radio. The proxy does not measure
+  /// RF itself, so this is relayed rather than synthesized.
+  int _lastNoiseFloorDbm = 0;
+
   /// Accumulated on-air time (microseconds) for the radio stats counters.
   int _txAirMicros = 0;
   int _rxAirMicros = 0;
@@ -459,6 +469,27 @@ class MeshNode extends CompanionBridge {
       bandwidthHz: prefs.bandwidthHz,
       codingRate: cr,
     );
+  }
+
+  /// Firmware-compatible send timeout estimate.
+  ///
+  /// Mirrors MeshCore's `calcFloodTimeoutMillisFor` and
+  /// `calcDirectTimeoutMillisFor`. Flooded sends need a multiple of the packet
+  /// airtime because repeaters add their own transmission and contention delay;
+  /// a short fixed timeout makes the client retry before the ACK can arrive.
+  int? _sendTimeoutMillisFor(
+    Packet packet, {
+    required bool flood,
+    bool scoped = false,
+  }) {
+    final scopedFlood = flood && scoped && _effectiveFloodScope() != null;
+    final rawLength = flood
+        ? packet.payload.length + 2 + (scopedFlood ? 4 : 0)
+        : packet.rawLength;
+    final airtimeMs = _airtimeMicrosFor(rawLength) ~/ 1000;
+    if (airtimeMs <= 0) return null;
+    if (flood) return 500 + 16 * airtimeMs;
+    return 500 + ((airtimeMs * 6 + 250) * (packet.pathHashCount + 1));
   }
 
   int get _selfHash => identity.publicKey[0];
@@ -1164,6 +1195,7 @@ class MeshNode extends CompanionBridge {
     String text, {
     int txtType = txtTypePlain,
     int attempt = 0,
+    int? timestamp,
     bool waitForAck = false,
   }) async {
     if (_semanticBlocked) return const SentResult.failure();
@@ -1171,27 +1203,43 @@ class MeshNode extends CompanionBridge {
     final generation = _identityGeneration;
     final contact = getContactByKey(pubkey);
     if (contact == null) return const SentResult.failure();
+    final isCli = txtType == txtTypeCliData || txtType == txtTypeCliCommand;
+    // Stock firmware uses the app-supplied timestamp for normal messages so the
+    // client's precomputed ACK hash matches. CLI sends use the node RTC.
+    final messageTimestamp = isCli
+        ? _nextVirtualTimestamp()
+        : (timestamp ?? _nextVirtualTimestamp());
+    if (messageTimestamp > _lastPacketTimestamp) {
+      _lastPacketTimestamp = messageTimestamp;
+    }
     final (packet, ackCrc) = await PacketBuilder.createTextMessage(
       contact: contact,
       identity: identity,
       message: text,
       attempt: attempt,
       txtType: txtType,
-      timestamp: _nextVirtualTimestamp(),
+      timestamp: messageTimestamp,
     );
     if (!_identityCurrent(generation)) return const SentResult.failure();
     final flood = !contact.hasDirectRoute;
+    final timeoutMs =
+        _sendTimeoutMillisFor(packet, flood: flood, scoped: true) ??
+            ackTimeout.inMilliseconds;
     // CLI data/commands are not acknowledged; don't track a pending ACK.
-    final isCommand =
-        txtType == txtTypeCliData || txtType == txtTypeCliCommand;
+    final isCommand = isCli;
     _PendingAck? pending;
     if (!isCommand) {
       // Register before transmit: a synchronous local mirror can deliver the
       // ACK before the RF round-trip completes.
-      final timer = Timer(ackTimeout, () {
+      final timer = Timer(Duration(milliseconds: timeoutMs), () {
         _pendingAcks.removeWhere((a) => a.crc == ackCrc);
       });
-      pending = _PendingAck(ackCrc, contact.publicKey, timer);
+      pending = _PendingAck(
+        ackCrc,
+        contact.publicKey,
+        timer,
+        clock.monotonicMilliseconds,
+      );
       _pendingAcks.add(pending);
     }
     try {
@@ -1220,14 +1268,14 @@ class MeshNode extends CompanionBridge {
         success: true,
         isFlood: flood,
         expectedAck: 0,
-        timeoutMs: waitForAck ? ackTimeout.inMilliseconds : 5000,
+        timeoutMs: timeoutMs,
       );
     }
     return SentResult(
       success: true,
       isFlood: flood,
       expectedAck: ackCrc,
-      timeoutMs: waitForAck ? ackTimeout.inMilliseconds : 5000,
+      timeoutMs: timeoutMs,
     );
   }
 
@@ -2424,8 +2472,18 @@ class MeshNode extends CompanionBridge {
           'queue_len': _messageQueue.length,
         };
       case statsTypeRadio:
+        var noiseFloor = _lastNoiseFloorDbm;
+        if (link.currentState == LinkState.connected) {
+          try {
+            noiseFloor = (await link.radioStats()).noiseFloorDbm;
+            _lastNoiseFloorDbm = noiseFloor;
+          } catch (_) {
+            // Keep the last known physical value rather than reporting 0 if
+            // the device link is briefly unavailable.
+          }
+        }
         return {
-          'noise_floor': 0,
+          'noise_floor': noiseFloor,
           'last_rssi': _lastRxRssi,
           'last_snr_scaled': _lastRxSnrScaled,
           'tx_air_secs': _txAirMicros ~/ 1000000,
@@ -3370,8 +3428,15 @@ class MeshNode extends CompanionBridge {
   void _confirmAck(int crc) {
     final idx = _pendingAcks.indexWhere((a) => a.crc == (crc & 0xFFFFFFFF));
     if (idx < 0) return;
-    _pendingAcks.removeAt(idx).timer.cancel();
-    pushSink?.pushSendConfirmed(crc & 0xFFFFFFFF);
+    final pending = _pendingAcks.removeAt(idx);
+    pending.timer.cancel();
+    final tripTime = (clock.monotonicMilliseconds -
+            pending.sentAtMonotonicMillis)
+        .clamp(0, 0xFFFFFFFF);
+    pushSink?.pushSendConfirmed(
+      crc & 0xFFFFFFFF,
+      tripTimeMs: tripTime,
+    );
   }
 
   /// Handle a returned-path packet (payload type `0x08`). The encrypted inner
@@ -3398,7 +3463,9 @@ class MeshNode extends CompanionBridge {
     final extraType = plaintext[extraStart];
     final extra = plaintext.sublist(extraStart + 1);
 
-    if (pathByteLen > 0 && PathUtils.isValidPathLen(pathLenEncoded)) {
+    if (PathUtils.isValidPathLen(pathLenEncoded)) {
+      // A zero-length path is a valid zero-hop direct route. Store it like the
+      // firmware does instead of leaving the contact in the flood/unknown state.
       sender.outPath = Uint8List.fromList(plaintext.sublist(1, extraStart));
       sender.outPathLen = pathLenEncoded;
       sender.lastmod = clock.wallSeconds;

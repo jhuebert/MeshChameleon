@@ -75,7 +75,13 @@ class BleDeviceLink implements RadioLink {
 
   @override
   Future<void> connect() async {
-    if (_state == LinkState.connected) return;
+    if (_state == LinkState.connected || _state == LinkState.connecting) {
+      return;
+    }
+    // A prior connection's platform-wide streams are not tied to the old
+    // characteristic object. Cancel them before subscribing again or every
+    // notification is delivered once per reconnect.
+    await _cancelSubscriptions();
     _setState(LinkState.connecting);
     try {
       await device.connect(timeout: const Duration(seconds: 15));
@@ -99,18 +105,19 @@ class BleDeviceLink implements RadioLink {
       );
       // Surface an unexpected drop (e.g. the device rebooting) so the app's
       // link watcher can reconnect.
-      await _connSub?.cancel();
       _connSub = device.connectionState.listen((s) {
         if (s == BluetoothConnectionState.disconnected &&
             _state == LinkState.connected) {
           onLog?.call('[BleDeviceLink] device disconnected');
           _failAll(const DeviceCommandError.disconnected(
               message: 'BLE disconnected'));
+          _cancelNotifySubscription();
           _setState(LinkState.disconnected);
         }
       });
       _setState(LinkState.connected);
     } catch (e) {
+      await _cancelSubscriptions();
       _setState(LinkState.disconnected);
       rethrow;
     }
@@ -118,16 +125,28 @@ class BleDeviceLink implements RadioLink {
 
   @override
   Future<void> disconnect() async {
-    await _notifySub?.cancel();
-    _notifySub = null;
-    await _connSub?.cancel();
-    _connSub = null;
+    await _cancelSubscriptions();
     _failAll(
         const DeviceCommandError.disconnected(message: 'disconnected'));
     try {
       await device.disconnect();
     } catch (_) {}
     _setState(LinkState.disconnected);
+  }
+
+  void _cancelNotifySubscription() {
+    final subscription = _notifySub;
+    _notifySub = null;
+    unawaited(subscription?.cancel());
+  }
+
+  Future<void> _cancelSubscriptions() async {
+    final notify = _notifySub;
+    _notifySub = null;
+    await notify?.cancel();
+    final connection = _connSub;
+    _connSub = null;
+    await connection?.cancel();
   }
 
   @override
@@ -276,6 +295,21 @@ class BleDeviceLink implements RadioLink {
 
   @override
   Future<RadioParams> radioParams() async => (await selfInfo()).radioParams;
+
+  @override
+  Future<RadioStats> radioStats() async {
+    final frame = await _request(
+      DeviceFrames.getStats(statsTypeRadio),
+      {respCodeStats, respCodeErr},
+    );
+    final stats = RadioStats.parse(frame);
+    if (stats == null) {
+      throw const DeviceCommandError.malformed(
+        message: 'invalid radio stats from device',
+      );
+    }
+    return stats;
+  }
 
   @override
   Future<void> setRadioParams(RadioParams params, {bool? clientRepeat}) async {

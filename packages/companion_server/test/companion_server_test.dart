@@ -134,6 +134,15 @@ class TestBridge extends CompanionBridge {
         'queue_len': 0,
       };
     }
+    if (statsType == statsTypeRadio) {
+      return {
+        'noise_floor': -110,
+        'last_rssi': -70,
+        'last_snr_scaled': 24,
+        'tx_air_secs': 1,
+        'rx_air_secs': 2,
+      };
+    }
     return const {};
   }
 
@@ -299,14 +308,19 @@ class TestBridge extends CompanionBridge {
 
   Uint8List? sentTextPubkey;
   String? sentText;
+  int? sentTextAttempt;
+  int? sentTextTimestamp;
 
   @override
   Future<SentResult> sendTextMessage(Uint8List pubkey, String text,
       {int txtType = txtTypePlain,
       int attempt = 0,
+      int? timestamp,
       bool waitForAck = false}) async {
     sentTextPubkey = pubkey;
     sentText = text;
+    sentTextAttempt = attempt;
+    sentTextTimestamp = timestamp;
     return const SentResult(
         success: true, expectedAck: 0x1234, timeoutMs: 5000);
   }
@@ -727,6 +741,19 @@ void main() {
     expect(bridge.statsReads, 1);
   });
 
+  test('GET_STATS radio relays a signed noise floor', () async {
+    client.send([cmdGetStats, statsTypeRadio]);
+    final stats = await client.frames.next();
+    expect(stats[0], respCodeStats);
+    expect(stats[1], statsTypeRadio);
+    final r = BufferReader(stats)..skipBytes(2);
+    expect(r.readInt16Le(), -110);
+    expect(r.readInt8(), -70);
+    expect(r.readInt8(), 24);
+    expect(r.readUInt32Le(), 1);
+    expect(r.readUInt32Le(), 2);
+  });
+
   test('GET_CUSTOM_VARS returns custom vars frame', () async {
     client.send([cmdGetCustomVars]);
     final resp = await client.frames.next();
@@ -1032,14 +1059,18 @@ void main() {
     final w = BufferWriter()
       ..writeByte(cmdSendTxtMsg)
       ..writeByte(txtTypePlain)
-      ..writeByte(0)
-      ..writeUInt32Le(0)
+      ..writeByte(2)
+      ..writeUInt32Le(0x11223344)
       ..writeBytes(pubkey.sublist(0, 6))
       ..writeString('hi')
       ..writeByte(0);
     client.send(w.toBytes());
     final resp = await client.frames.next();
     expect(resp[0], respCodeSent);
+    expect(bridge.sentTextAttempt, 2,
+        reason: 'the client attempt byte is not rewritten');
+    expect(bridge.sentTextTimestamp, 0x11223344,
+        reason: 'the client timestamp is used for the ACK hash');
     final rr = BufferReader(resp)..skipBytes(2);
     expect(rr.readUInt32Le(), 0x1234);
   });
@@ -1475,6 +1506,16 @@ void main() {
     final r = BufferReader(resp)..skipBytes(2);
     expect(r.readUInt32Le(), 0x11223344);
     expect(r.readRemainingBytes(), [9, 8]);
+  });
+
+  test('pushSendConfirmed includes the firmware trip time', () async {
+    bridge.pushSink!.pushSendConfirmed(0x11223344, tripTimeMs: 1234);
+    final resp = await client.frames.next();
+    expect(resp, hasLength(9));
+    expect(resp[0], pushCodeSendConfirmed);
+    final r = BufferReader(resp)..skipBytes(1);
+    expect(r.readUInt32Le(), 0x11223344);
+    expect(r.readUInt32Le(), 1234);
   });
 
   test('EXPORT_CONTACT returns the advert blob', () async {

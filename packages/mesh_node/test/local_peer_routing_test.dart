@@ -14,7 +14,8 @@ class _Sink implements CompanionPushSink {
   int msgWaiting = 0;
 
   @override
-  void pushSendConfirmed(int ackCrc) => confirmed.add(ackCrc);
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
+      confirmed.add(ackCrc);
 
   @override
   void pushRawData(double snr, int rssi, Uint8List payload) =>

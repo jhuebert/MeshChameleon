@@ -20,7 +20,8 @@ class _TestSink implements CompanionPushSink {
   void pushMsgWaiting() => msgWaiting++;
 
   @override
-  void pushSendConfirmed(int ackCrc) => confirmed.add(ackCrc);
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
+      confirmed.add(ackCrc);
 
   @override
   void pushAdvert(Uint8List pubkey) {}

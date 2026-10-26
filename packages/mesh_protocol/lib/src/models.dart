@@ -337,6 +337,50 @@ class BatteryReading {
   final int storageTotalKb;
 }
 
+/// Parsed `RESP_CODE_STATS` + `STATS_TYPE_RADIO` from the physical companion.
+class RadioStats {
+  const RadioStats({
+    required this.noiseFloorDbm,
+    required this.lastRssiDbm,
+    required this.lastSnrScaled,
+    required this.txAirSecs,
+    required this.rxAirSecs,
+  });
+
+  final int noiseFloorDbm;
+  final int lastRssiDbm;
+  final int lastSnrScaled;
+  final int txAirSecs;
+  final int rxAirSecs;
+
+  /// Parse `[RESP_CODE_STATS][STATS_TYPE_RADIO][noise i16][rssi i8][snr*4 i8]`
+  /// followed by the TX/RX airtime counters.
+  static RadioStats? parse(Uint8List frame) {
+    if (frame.length < 14 ||
+        frame[0] != respCodeStats ||
+        frame[1] != statsTypeRadio) {
+      return null;
+    }
+    try {
+      final r = BufferReader(frame)..skipBytes(2);
+      final noiseFloor = r.readInt16Le();
+      final lastRssi = r.readInt8();
+      final lastSnrScaled = r.readInt8();
+      final txAirSecs = r.readUInt32Le();
+      final rxAirSecs = r.readUInt32Le();
+      return RadioStats(
+        noiseFloorDbm: noiseFloor,
+        lastRssiDbm: lastRssi,
+        lastSnrScaled: lastSnrScaled,
+        txAirSecs: txAirSecs,
+        rxAirSecs: rxAirSecs,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}
+
 /// An inbound message awaiting delivery via `CMD_SYNC_NEXT_MESSAGE`.
 class QueuedMessage {
   QueuedMessage({
