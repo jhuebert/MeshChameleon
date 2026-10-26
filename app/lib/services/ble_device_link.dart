@@ -22,6 +22,21 @@ class MeshCoreUuids {
       );
 }
 
+/// The user-facing name from a scan result.
+///
+/// Android can return a stale, MAC-derived name from
+/// [BluetoothDevice.platformName] after a device has changed its GAP name.
+/// The current name in the advertisement is authoritative; use the platform
+/// name only when the advertisement has no name.
+String bleCompanionDisplayName(ScanResult result) {
+  final advertised = result.advertisementData.advName.trim();
+  if (advertised.isNotEmpty) return advertised;
+  final platformName = result.device.platformName.trim();
+  return platformName.isNotEmpty
+      ? platformName
+      : result.device.remoteId.toString();
+}
+
 /// [RadioLink] over BLE (NUS). BLE carries raw frames: one GATT write/notify is
 /// one companion frame, with no `'<'`/`'>'` wrapper.
 class BleDeviceLink implements RadioLink {

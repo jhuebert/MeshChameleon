@@ -336,15 +336,22 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> connectBle(BluetoothDevice device) async {
+  Future<bool> connectBle(BluetoothDevice device, {String? displayName}) async {
     if (!capabilities.supportsBle) {
       log('BLE is not available in this build');
       return false;
     }
     final link = BleDeviceLink(device: device, onLog: log);
-    final name = device.platformName.isEmpty
-        ? device.remoteId.toString()
-        : device.platformName;
+    final preferred = displayName?.trim();
+    final advertisedName = device.advName.trim();
+    final platformName = device.platformName.trim();
+    final name = preferred != null && preferred.isNotEmpty
+        ? preferred
+        : advertisedName.isNotEmpty
+            ? advertisedName
+            : platformName.isNotEmpty
+                ? platformName
+                : device.remoteId.toString();
     final ok = await _attachLink(link, 'BLE $name');
     if (!ok) return false;
     await _recordSession(SessionConfig(
@@ -597,7 +604,10 @@ class AppState extends ChangeNotifier {
           }
           final remoteId = session.bleRemoteId;
           if (remoteId == null) return;
-          await connectBle(BluetoothDevice.fromId(remoteId));
+          await connectBle(
+            BluetoothDevice.fromId(remoteId),
+            displayName: session.bleName,
+          );
         case DeviceTargetKind.simulated:
           if (!capabilities.supportsSimulatedCompanion) {
             log('Saved session used the simulated companion, unavailable here');

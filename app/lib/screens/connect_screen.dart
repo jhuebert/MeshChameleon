@@ -209,11 +209,11 @@ class _ConnectScreenState extends State<ConnectScreen>
     }
   }
 
-  Future<void> _connectBle(BluetoothDevice device) async {
+  Future<void> _connectBle(ScanResult result) async {
     final app = context.read<AppState>();
-    final name = _deviceName(device);
+    final name = bleCompanionDisplayName(result);
     await _stopScan();
-    final ok = await app.connectBle(device);
+    final ok = await app.connectBle(result.device, displayName: name);
     _finishConnection(
       ok,
       'Could not connect to $name. See the log for details.',
@@ -244,10 +244,8 @@ class _ConnectScreenState extends State<ConnectScreen>
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  static String _deviceName(BluetoothDevice device) =>
-      device.platformName.isEmpty
-          ? device.remoteId.toString()
-          : device.platformName;
+  static String _deviceName(ScanResult result) =>
+      bleCompanionDisplayName(result);
 
   @override
   Widget build(BuildContext context) {
@@ -334,10 +332,10 @@ class _ConnectScreenState extends State<ConnectScreen>
                   for (final result in results)
                     ListTile(
                       leading: const Icon(Icons.bluetooth),
-                      title: Text(_deviceName(result.device)),
+                      title: Text(_deviceName(result)),
                       subtitle: Text('RSSI ${result.rssi}'),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: app.busy ? null : () => _connectBle(result.device),
+                      onTap: app.busy ? null : () => _connectBle(result),
                     ),
                 ],
               );

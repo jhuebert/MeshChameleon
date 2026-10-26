@@ -109,6 +109,10 @@ package checks, then the full script before finishing.
   Only the raw packet should be delivered to `MeshNode.process` logic.
 - The device identity is not the proxy identity. Do not expose it in `SELF_INFO`
   or use its high-level contact/message stack.
+- Android BLE display names: `BluetoothDevice.platformName` can be a stale
+  MAC-derived GAP cache. Prefer `ScanResult.advertisementData.advName` and use
+  `platformName` only as fallback; the current node names are `advName` values
+  such as `MeshCore-nc1v` and `MeshCore-nc3`.
 - Never log private or expanded identity key material. The private identity is
   stored through `flutter_secure_storage`; app UI reveal is an explicit user
   action, while the local companion protocol also exposes explicit export/import
