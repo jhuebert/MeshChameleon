@@ -549,15 +549,16 @@ void main() {
     expect(await bob.syncNextMessage(), isNull);
   });
 
-  test('group_tx165_channel_rx167_are_distinct', () async {
+  test('group_tx157_channel_rx167_are_distinct', () async {
     expect(maxGroupDataLength, 165);
+    expect(maxGroupDataLengthOverCompanion, 157);
     expect(maxChannelDataLength, 167);
     final link = alice.link as FakeDeviceLink;
     final before = link.transmitted.length;
 
-    // 165-byte group TX is accepted.
+    // The stock companion raw-packet frame caps group TX at 157 bytes.
     final maxPayload =
-        Uint8List.fromList(List<int>.generate(165, (i) => i & 0xFF));
+        Uint8List.fromList(List<int>.generate(157, (i) => i & 0xFF));
     expect(await alice.sendChannelData(0, 0x1234, maxPayload), isTrue);
     expect(link.transmitted.length, before + 1);
     final sent = Packet.readFrom(link.transmitted.last)!;
@@ -570,23 +571,29 @@ void main() {
       sent.payload.sublist(1),
     );
     expect(plaintext[0] | (plaintext[1] << 8), 0x1234);
-    expect(plaintext[2], 165);
-    expect(plaintext.sublist(3, 3 + 165), maxPayload);
+    expect(plaintext[2], 157);
+    expect(plaintext.sublist(3, 3 + 157), maxPayload);
 
-    // 166 bytes exceeds the radio-side group-data limit; nothing is sent.
+    // 158 bytes pads to a 186-byte companion frame, which stock 1.18 drops;
+    // 165 (the theoretical on-air cap) and 166 are likewise rejected with no
+    // partial transmit.
+    expect(await alice.sendChannelData(0, 0x1234, Uint8List(158)), isFalse);
+    expect(await alice.sendChannelData(0, 0x1234, Uint8List(165)), isFalse);
     expect(await alice.sendChannelData(0, 0x1234, Uint8List(166)), isFalse);
     expect(link.transmitted.length, before + 1, reason: 'no partial transmit');
 
     // A long path reduces the whole-command budget: 64 path bytes + 107 data
     // fits exactly in the 176-byte companion payload; 108 does not.
     final longPath = List<int>.generate(64, (i) => i);
-    // 32 two-byte hashes encode to 64 path bytes.
+    // 32 two-byte hashes encode to 64 path bytes; the raw frame then fits only
+    // 93 data bytes (96-byte padded plaintext).
     final longPathLen = PathUtils.encodePathLen(2, 32);
+    expect(maxGroupDataLengthForCompanionPath(64), 93);
     expect(
       await alice.sendChannelData(
         0,
         0x1234,
-        Uint8List(107),
+        Uint8List(93),
         path: longPath,
         pathLenEncoded: longPathLen,
       ),
@@ -597,7 +604,7 @@ void main() {
       await alice.sendChannelData(
         0,
         0x1234,
-        Uint8List(108),
+        Uint8List(94),
         path: longPath,
         pathLenEncoded: longPathLen,
       ),

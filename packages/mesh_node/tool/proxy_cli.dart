@@ -187,6 +187,7 @@ Future<ProxyCliHandle> startProxyCli(
     physical: physical,
     store: store,
     identityPersistence: identityPersistence,
+    attachedDevicePublicKey: selfInfo.publicKey,
   );
   await node.load();
   node.adoptPhysicalCapabilities(physical);

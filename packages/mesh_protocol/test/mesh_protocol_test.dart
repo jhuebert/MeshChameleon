@@ -106,6 +106,9 @@ void main() {
 
     test('group_tx_and_channel_rx_limits_are_distinct', () {
       expect(maxGroupDataLength, 165);
+      expect(maxGroupDataLengthOverCompanion, 157);
+      expect(maxGroupDataLengthForCompanionPath(0), 157);
+      expect(maxGroupDataLengthForCompanionPath(64), 93);
       expect(maxChannelDataLength, 167);
       expect(maxCompanionPayloadSize, 176);
       expect(maxSerialFrameSize, 179);

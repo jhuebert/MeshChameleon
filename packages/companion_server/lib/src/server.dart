@@ -1127,7 +1127,9 @@ class CompanionServer implements CompanionPushSink {
     // The radio-side group-data limit is 165; the 167-byte channel-data limit
     // applies only to CHANNEL_DATA_RECV pushes. The whole command must also fit
     // the 176-byte companion payload, so a long path reduces the data budget.
-    if (payload.length > maxGroupDataLength) {
+    if (payload.length > maxGroupDataLength ||
+        payload.length >
+            maxGroupDataLengthForCompanionPath(pathBytes.length)) {
       return sendErr(errCodeIllegalArg);
     }
     final commandLength = 5 + pathBytes.length + payload.length;

@@ -256,6 +256,33 @@ const int maxPacketPayloadSize = 184;
 /// 184-byte packet payload - 16-byte cipher block - 3 plaintext bytes).
 const int maxGroupDataLength = maxPacketPayloadSize - cipherBlockSize - 3;
 
+/// Practical group-data limit when a packet is carried over a stock
+/// companion's `CMD_SEND_RAW_PACKET` frame.
+///
+/// The companion payload is capped at [maxCompanionPayloadSize] (176). A raw
+/// packet frame adds the command + priority (2), header (1), path length (1),
+/// channel hash (1) and MAC (2), plus AES block padding. For an empty/flood
+/// path the largest plaintext that fits is 160 bytes, i.e. 157 application
+/// bytes. 158+ data bytes pad to 176-byte ciphertext and need a 186-byte
+/// companion frame, which the Xiao 1.18 firmware silently drops; the radio
+/// remains alive but never transmits.
+const int maxGroupDataLengthOverCompanion = 157;
+
+/// Largest group-data payload that fits [pathBytes] route bytes through a
+/// stock companion raw-packet frame.
+int maxGroupDataLengthForCompanionPath(int pathBytes) {
+  final available = maxCompanionPayloadSize -
+      2 - // command + priority
+      1 - // packet header
+      1 - // encoded path length
+      pathBytes -
+      1 - // channel hash
+      2; // MAC
+  final padded = (available ~/ cipherBlockSize) * cipherBlockSize;
+  final data = padded - 3; // data type (2) + length (1)
+  return data < maxGroupDataLength ? data : maxGroupDataLength;
+}
+
 /// Fixed bytes in a `RESP_CODE_CHANNEL_DATA_RECV` push before the payload:
 /// code, SNR, RSSI, reserved, channel index, path length, data type (u16),
 /// data length.

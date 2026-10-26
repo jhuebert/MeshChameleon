@@ -90,8 +90,11 @@ package checks, then the full script before finishing.
   firmware `MAX_FRAME_SIZE` excludes that header. The server accepts only
   `'<'`, and the TCP device link accepts only `'>'`. BLE NUS carries a raw
   payload per write/notify without the TCP header, also limited to 176 bytes.
-  Group-data TX is capped at 165 application bytes, while channel-data RX
-  pushes allow 167 (the limits differ).
+  Group-data TX over a stock companion is capped at **157** application bytes:
+  158+ data bytes pad to a 176-byte ciphertext and need a 186-byte
+  `SEND_RAW_PACKET` frame, which 1.18 firmware silently drops (the radio stays
+  alive). The theoretical on-air group-data cap is 165 and channel-data RX
+  pushes allow 167; a long route path reduces the TX cap further.
 - `SELF_INFO` and `CMD_SET_RADIO_PARAMS` frequency fields are in **kHz** on
   the wire, while bandwidth is in **Hz**. `RadioParams.frequencyHz` is
   normalized to Hz internally; convert only at protocol boundaries.

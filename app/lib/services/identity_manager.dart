@@ -257,6 +257,7 @@ class IdentityManager {
         onPhysicalConfigChanged: () => _handlePhysicalConfigChanged(runtime),
         onPoweredOff: onPoweredOff,
         localRouter: _router,
+        attachedDevicePublicKey: _devicePublicKey,
       );
       await node.load();
       node.adoptPhysicalCapabilities(physical);

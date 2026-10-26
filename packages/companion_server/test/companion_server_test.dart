@@ -599,12 +599,13 @@ void main() {
     expect(String.fromCharCodes(resp), isNot(contains('Physical')));
   });
 
-  test('SEND_CHANNEL_DATA accepts 165 bytes and rejects 166', () async {
+  test('SEND_CHANNEL_DATA accepts 157 stock-frame bytes and rejects 158/165',
+      () async {
     bridge.channels[0] = Channel(
       name: 'Public',
       secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
     );
-    final payload = List<int>.filled(165, 0xAB);
+    final payload = List<int>.filled(157, 0xAB);
     final accepted = BufferWriter()
       ..writeByte(cmdSendChannelData)
       ..writeByte(0)
@@ -615,14 +616,17 @@ void main() {
     expect((await client.frames.next())[0], respCodeOk);
     expect(bridge.sentChannelDataPayload, payload);
 
-    final rejected = BufferWriter()
-      ..writeByte(cmdSendChannelData)
-      ..writeByte(0)
-      ..writeByte(0xFF)
-      ..writeUInt16Le(0x1234)
-      ..writeBytes(List<int>.filled(166, 0xCD));
-    client.send(rejected.toBytes());
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    for (final length in [158, 165, 166]) {
+      final rejected = BufferWriter()
+        ..writeByte(cmdSendChannelData)
+        ..writeByte(0)
+        ..writeByte(0xFF)
+        ..writeUInt16Le(0x1234)
+        ..writeBytes(List<int>.filled(length, 0xCD));
+      client.send(rejected.toBytes());
+      expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg],
+          reason: '$length bytes cannot fit the 176-byte companion frame');
+    }
     expect(bridge.sentChannelDataPayload, payload, reason: 'no partial send');
   });
 

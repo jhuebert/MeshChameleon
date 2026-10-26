@@ -73,6 +73,7 @@ class MeshNode extends CompanionBridge {
     this.onIdentityChanged,
     this.onPoweredOff,
     this.localRouter,
+    this.attachedDevicePublicKey,
     this.onStateChanged,
     this.onPhysicalConfigChanged,
     VirtualClock? clock,
@@ -110,6 +111,11 @@ class MeshNode extends CompanionBridge {
 
   /// In-process mirror to the other live virtual identities.
   final LocalPeerRouter? localRouter;
+
+  /// The attached radio's own companion public key, when known. Unicasts to it
+  /// are rejected even in single-identity/headless hosts that have no
+  /// [localRouter].
+  final Uint8List? attachedDevicePublicKey;
 
   /// Invoked after durable state publication/reset and queue drain. May be
   /// called often; hosts are expected to debounce UI notifications.
@@ -1140,7 +1146,11 @@ class MeshNode extends CompanionBridge {
   /// The device transmits but does not receive its own raw TX, so such a
   /// message could never be acknowledged.
   void _ensureNotBlockedPeer(Uint8List pubkey) {
-    if (localRouter?.isBlockedPeer(pubkey) ?? false) {
+    final device = attachedDevicePublicKey;
+    final isDevice = device != null &&
+        device.length == pubkey.length &&
+        _bytesEqual(device, pubkey);
+    if (isDevice || (localRouter?.isBlockedPeer(pubkey) ?? false)) {
       throw const CompanionOperationError(
         errCodeIllegalArg,
         message: 'the attached companion identity cannot be messaged',
@@ -1271,6 +1281,10 @@ class MeshNode extends CompanionBridge {
     }
     if (dataType == dataTypeReserved) return false;
     if (payload.length > maxGroupDataLength) return false;
+    if (payload.length >
+        maxGroupDataLengthForCompanionPath(pathBytes.length)) {
+      return false;
+    }
     // The whole SEND_CHANNEL_DATA payload must fit the companion frame, in
     // addition to the 165-byte radio-side group-data limit.
     final commandLength =
