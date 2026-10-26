@@ -12,11 +12,11 @@ radio that holds your identity and handles sending and receiving messages.
 
 MeshChameleon is an open-source Android app that flips that around. It takes
 over the companion role and uses an ordinary MeshCore radio as a simple radio
-link. Like its namesake, it blends in: to your MeshCore app, MeshChameleon looks
-and behaves like a normal companion.
+link. Like its namesake, it blends in: to your MeshCore app, it looks and
+behaves like a normal companion.
 
-MeshChameleon is not a messaging app. You still use your MeshCore app to read
-and send messages; MeshChameleon is the companion behind it.
+It is not a messaging app: you still use your MeshCore app to read and send
+messages.
 
 ## Why use it?
 
