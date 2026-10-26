@@ -59,10 +59,15 @@ class TcpDeviceLink implements RadioLink {
       _codec.reset();
       socket.listen(
         _onData,
-        onError: (Object e) => _failAll(
-          DeviceCommandError.disconnected(message: 'device link error: $e'),
-        ),
+        onError: (Object e) {
+          if (identical(_socket, socket)) _socket = null;
+          _failAll(
+            DeviceCommandError.disconnected(message: 'device link error: $e'),
+          );
+          _setState(LinkState.disconnected);
+        },
         onDone: () {
+          if (identical(_socket, socket)) _socket = null;
           _failAll(
             const DeviceCommandError.disconnected(
                 message: 'device link closed'),
@@ -154,6 +159,13 @@ class TcpDeviceLink implements RadioLink {
       _expected = expected;
       try {
         socket.add(_codec.encodeFrame(frame, prefix: frameInboundPrefix));
+      } on SocketException catch (e) {
+        _pending = null;
+        throw DeviceCommandError.disconnected(
+          message: 'device write failed: ${e.message}',
+        );
+      }
+      try {
         return await completer.future.timeout(requestTimeout);
       } on TimeoutException {
         throw DeviceCommandError.timeout(
