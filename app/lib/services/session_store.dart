@@ -10,6 +10,12 @@ import 'package:path_provider/path_provider.dart';
 /// restored by builds that offer it (see `DeviceCapabilities`).
 enum DeviceTargetKind { tcp, ble, simulated }
 
+/// Current on-disk saved-session schema.
+///
+/// Versionless files come from pre-0.1.0 development builds and are read as
+/// version 1.
+const int sessionConfigVersion = 1;
+
 /// Persisted description of the last device session.
 ///
 /// This is deliberately small and separate from [NodeStore]: it captures *how
@@ -66,6 +72,7 @@ class SessionConfig {
       );
 
   Map<String, dynamic> toJson() => {
+        'version': sessionConfigVersion,
         'kind': kind.name,
         'host': host,
         'devicePort': devicePort,
@@ -77,6 +84,13 @@ class SessionConfig {
       };
 
   static SessionConfig? fromJson(Map<String, dynamic> json) {
+    final version = json['version'];
+    if (version != null &&
+        (version is! num ||
+            version != version.toInt() ||
+            version.toInt() != sessionConfigVersion)) {
+      return null;
+    }
     DeviceTargetKind? kind;
     for (final candidate in DeviceTargetKind.values) {
       if (candidate.name == json['kind']) {

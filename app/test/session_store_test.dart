@@ -14,6 +14,7 @@ void main() {
       autoResume: true,
       intentionallyOff: true,
     );
+    expect(config.toJson()['version'], sessionConfigVersion);
     final restored = SessionConfig.fromJson(config.toJson());
     expect(restored, isNotNull);
     expect(restored!.kind, DeviceTargetKind.ble);
@@ -37,6 +38,21 @@ void main() {
 
   test('SessionConfig.fromJson rejects an unknown kind', () {
     expect(SessionConfig.fromJson({'kind': 'carrier-pigeon'}), isNull);
+  });
+
+  test('SessionConfig.fromJson treats a versionless file as version 1', () {
+    final restored = SessionConfig.fromJson(
+        {'kind': 'tcp', 'host': '10.0.0.5', 'proxyPort': 5200});
+    expect(restored, isNotNull);
+    expect(restored!.proxyPort, 5200);
+  });
+
+  test('SessionConfig.fromJson rejects an unsupported version', () {
+    expect(
+      SessionConfig.fromJson(
+          {'version': sessionConfigVersion + 1, 'kind': 'tcp'}),
+      isNull,
+    );
   });
 
   test('SessionStore round-trips through a file', () async {
