@@ -18,6 +18,9 @@ behaves like a normal companion.
 It is not a messaging app: you still use your MeshCore app to read and send
 messages.
 
+**New here?** The [User Guide](docs/USER_GUIDE.md) walks through setup,
+screens, identities, and troubleshooting with dark-mode screenshots.
+
 ## Why use it?
 
 - **Your identity stays with you.** Your MeshCore name, key, contacts, channels,
@@ -99,7 +102,10 @@ The important part: **your phone owns the identity, not the radio.**
 MeshChameleon is an early 0.1.0 project and is not in an app store yet. For now,
 install it by building the Android app from source; the linked instructions
 cover the required tools. See
-[Building the app](DEVELOPMENT.md#building-the-app).
+[Building the app](DEVELOPMENT.md#building-the-app). For step-by-step help with
+screenshots, use the [User Guide](docs/USER_GUIDE.md).
+
+Short version:
 
 1. Open MeshChameleon. On first launch it creates a default identity named
    `MeshChameleon`.
@@ -156,8 +162,10 @@ implemented and pass automated tests, but this is still an early project:
 
 See [`SECURITY.md`](SECURITY.md) for the full security model and its caveats.
 
-## Technical details
+## Documentation
 
+- [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md) — complete setup and usage guide
+  with screenshots, identity management, background tips, and troubleshooting.
 - [`DEVELOPMENT.md`](DEVELOPMENT.md) — architecture, repository layout, build
   and test instructions, protocol notes, compatibility, and known limitations.
 - [`SECURITY.md`](SECURITY.md) — identity storage, threat model, and endpoint
