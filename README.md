@@ -31,21 +31,20 @@ logic). See `ATTRIBUTION.md`.
 
 ## Status
 
-Milestones **M0–M4 are complete** and the **MeshCore 1.18 virtual-companion
-handoff (T01–T16) is implemented**: strict 176-byte framing, virtual
+**0.1.0 is the initial release baseline.** The MeshCore 1.18 virtual-companion
+handoff (T01–T16) is implemented: strict 176-byte framing, virtual
 identity/capabilities/state, contacts/channels/adverts, persistence and quota,
 battery/storage, key import/export, allowlisted CLI, lifecycle, app-only reset,
 remote CLI, telemetry and raw endpoints. **Multi-identity management is also
 implemented:** several virtual identities stay live on one shared radio while
-the selected identity is served to the MeshCore app. **M5 (polish + release)
-remains in progress.**
+the selected identity is served to the MeshCore app.
 
 The pure-Dart core is fully unit-testable without hardware via the included
 device simulator. The conformance suite drives a real TCP session against the
 proxy and a peer node on a simulated radio bus. The 1.18 additions are
 simulator/byte-level validated; the hardware matrix (BLE/TCP, RF, WiFi, repeat,
 background survival, remote CLI, sensor telemetry) remains **pending** and is
-not inferred from a green test suite. See `PROGRESS.md` and `DEVELOPMENT.md`.
+not inferred from a green test suite. See `DEVELOPMENT.md`.
 
 Identity storage and the threat model are described in `SECURITY.md`.
 
@@ -78,12 +77,13 @@ app reconnects and syncs that identity's contacts, channels, and queued messages
   its own raw TX. Unicasts to that key are rejected. A *different* physical
   companion works normally over RF.
 
-There is no migration from the pre-multi-identity single-key/single-state layout;
-development data from those builds is intentionally ignored. Storage uses
-`<app-support>/identities/index.json`, per-identity
-`<app-support>/identities/<id>/node_state.json`, and per-identity secure-storage
-slots. The identity database is never silently replaced; a corrupt catalog shows
-a recovery screen with retry.
+Persistence is versioned. **0.1.0 is the migration baseline:** pre-0.1.0
+single-identity development data is ignored, but every subsequent schema change
+must migrate released data. Storage uses `<app-support>/identities/index.json`,
+per-identity `<app-support>/identities/<id>/node_state.json`, and per-identity
+secure-storage slots. The identity database is never silently replaced; a
+corrupt catalog shows a recovery screen with retry. See
+`DEVELOPMENT.md#persistence-versions-and-migrations`.
 
 ## Connecting a device
 

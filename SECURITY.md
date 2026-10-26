@@ -1,6 +1,7 @@
 # Security notes
 
-This document records the security model and the M5 review of identity storage.
+This document records the security model and the initial-release review of
+identity storage.
 It is a description of the current implementation, not a guarantee—this is a
 personal project and has not been independently audited.
 
@@ -42,12 +43,13 @@ AndroidOptions(encryptedSharedPreferences: true)
   Keystore-encrypted blob is useless off-device anyway, and this avoids
   cloud-exfiltrating contacts/message state.
 
-### Legacy data note
+### Pre-baseline data note
 
-Multi-identity builds deliberately do not migrate the pre-multi-identity
-`meshcore_identity_v1` secure key or root `node_state.json`. Those entries are
-ignored and a fresh identity is created. This is a pre-1.0 change; release
-installs start clean.
+0.1.0 is the initial release baseline. Pre-0.1.0 development layouts (the
+single-identity `meshcore_identity_v1` secure key and root `node_state.json`)
+are ignored and a fresh identity is created. From 0.1.0 onward, any storage or
+configuration schema change must migrate released data; see
+`DEVELOPMENT.md#persistence-versions-and-migrations`.
 
 ## What this does *not* address
 

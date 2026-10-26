@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// Schema version written into every persisted [NodeState]. Bump when the
-/// layout changes so older blobs can be migrated or discarded.
+/// layout changes and migrate the previous released version.
 const int nodeStateSchemaVersion = 2;
 
 /// Thrown when a candidate state would exceed the deterministic virtual quota.

@@ -15,14 +15,14 @@ keep `ATTRIBUTION.md` accurate.
 
 ## Before starting work
 
-1. Read `PROGRESS.md` for the current implementation state and immediate next
-   steps.
-2. Read `plans/2026-10-14-meshcore-companion-proxy-android.md` for scope,
-   protocol layouts, risks, and milestones.
-3. Check `git status` before editing. The plan and progress note are temporary
-   handoff files and must remain untracked; do not stage, commit, or push them.
-4. Inspect the relevant package code and reference implementation before
+1. Read `README.md` and `DEVELOPMENT.md` for the current implementation state,
+   compatibility target, and known limitations.
+2. Check `git status` before editing and leave unrelated work alone.
+3. Inspect the relevant package code and reference implementation before
    changing protocol behavior.
+4. Persisted data is at the 0.1.0 baseline. Any incompatible storage or
+   configuration change must include a migration from the previous released
+   layout and tests with old-format fixtures; never silently discard user data.
 
 ## Repository layout
 
@@ -35,9 +35,10 @@ keep `ATTRIBUTION.md` accurate.
   fake device/radio bus for tests.
 - `app/` — Flutter UI, secure identity storage, BLE NUS transport, and app
   orchestration.
+- `app/integration_test/` — hardware-in-the-loop validation, not part of the
+  default gate. See its `README.md` for required defines.
+- `packages/*/tool/` — headless and hardware-in-the-loop debugging tools.
 - `scripts/check.sh` — full analysis and test gate.
-- `plans/` and `PROGRESS.md` — temporary implementation handoff material; do
-  not commit these files unless Jason explicitly asks.
 
 Keep protocol/core packages free of Flutter or Android imports. Platform code
 belongs in `app/`.
@@ -58,9 +59,11 @@ one shared radio, the active identity is served over the companion endpoint,
 and outbound packets are mirrored in-process to the other live identities after
 the RF send. Per-identity keys live in
 `meshcore_identity_v2/<id>` secure slots and state in
-`<support>/identities/<id>/node_state.json`; there is intentionally no migration
-from the old single-identity layout. The attached radio's own companion identity
-cannot be messaged through the virtual stack and unicasts to it are rejected.
+`<support>/identities/<id>/node_state.json`. **0.1.0 is the initial release
+baseline**; pre-baseline single-identity development layouts are ignored, but
+every schema change from here must migrate existing data. The attached radio's
+own companion identity cannot be messaged through the virtual stack and unicasts
+to it are rejected.
 
 Do not claim hardware validation unless it was run against real hardware. BLE,
 multi-identity radio behavior, and background execution are currently not
@@ -130,6 +133,5 @@ package checks, then the full script before finishing.
 - Do not create a GitHub issue, PR, release, or publish artifacts without
   Jason's explicit request. Pushing code to the personal repo is allowed when
   Jason explicitly requests it.
-- Do not commit the temporary plan or progress files. For other changes, make
-  commits only when requested or when Jason has clearly asked for a commit; never
-  bundle temporary handoff notes with implementation commits.
+- Make commits only when requested or when Jason has clearly asked for a commit.
+  Never bundle unrelated cleanup with an implementation commit.

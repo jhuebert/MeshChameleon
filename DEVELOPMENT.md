@@ -31,6 +31,17 @@ The 1.18 signoff used `meshcore-cli v1.6.6` against this simulated proxy. It
 reported firmware code 14 / `v1.18.0` and the virtual board. This is a client
 handshake check, not radio or hardware validation.
 
+## Hardware-in-the-loop tests
+
+`app/integration_test/` contains the opt-in hardware harnesses (BLE and TCP
+device links, RF send/receive, reboot/reconnect, battery, foreground service).
+They are never part of `scripts/check.sh` and have no built-in device names,
+hosts, or peer keys; pass them with `--dart-define`. See
+`app/integration_test/README.md` for the test list, required defines, and
+warnings about RF transmission and radio reboots. Reusable headless clients and
+fault injectors live in `packages/companion_server/tool/` and
+`packages/device_link/tool/`.
+
 ## Compatibility target and intentional differences
 
 The virtual companion advertises MeshCore 1.18 (`DEVICE_INFO` fw code 14,
@@ -58,9 +69,10 @@ not bugs:
   `atoi`/`atof` acceptance. Persistence failures return honest errors.
 
 Other deliberate limits: no dependency upgrades, no iOS/USB transport work, no
-virtual repeater routing/forwarding, no mandatory authentication redesign, no
-sensor-node implementation, and no migration from the pre-multi-identity
-single-key layout.
+virtual repeater routing/forwarding, no mandatory authentication redesign, and
+no sensor-node implementation. Pre-0.1.0 single-identity development data is
+outside the migration baseline; see
+[Persistence versions and migrations](#persistence-versions-and-migrations).
 
 ## Multi-identity runtime
 
@@ -97,6 +109,34 @@ Rules worth preserving:
   It is never exposed as a contact or virtual identity.
 - `--identity-file` headless proxy runs remain single-identity; the feature
   targets the app.
+
+## Persistence versions and migrations
+
+0.1.0 is the initial release baseline for all persisted data. Every file below
+carries an explicit schema version:
+
+| Data | Location | Version | Constant |
+|---|---|---|---|
+| Identity catalog | `<app-support>/identities/index.json` | 1 | `identityIndexVersion` |
+| Per-identity node state | `<app-support>/identities/<id>/node_state.json` | 2 | `nodeStateSchemaVersion` |
+| Saved network targets | `<app-support>/network_connections.json` | 1 | `networkConnectionHistoryVersion` |
+| Last session | `<app-support>/session.json` | 1 | `sessionConfigVersion` |
+| Secure identity slots | `meshcore_identity_v2/<id>` | 2 (namespace) | `IdentityStore` |
+
+Rules for any change after 0.1.0:
+
+- Bump the affected schema version and keep reading the previous released
+  version through an explicit migration path.
+- Add fixtures for each released on-disk layout and test the migration, not only
+  the new format.
+- Never discard a user's identity catalog or node state because the version is
+  unknown. Surface a recovery error instead of silently creating a fresh
+  identity.
+- Update this table when a version or storage location changes. Pre-0.1.0
+  development layouts (single-identity `meshcore_identity_v1`, root
+  `node_state.json`) are outside the baseline and are not migrated. The one
+  exception is a versionless `session.json`: its fields are unchanged, so it is
+  read as version 1.
 
 ## Co-client and raw-modem limitations
 
@@ -148,7 +188,7 @@ Run the headless proxy:
 ```sh
 cd packages/mesh_node
 ~/dev/flutter/bin/dart run tool/proxy_cli.dart --simulated
-~/dev/flutter/bin/dart run tool/proxy_cli.dart --device 192.168.1.50:5000
+~/dev/flutter/bin/dart run tool/proxy_cli.dart --device <companion-host>:5000
 ```
 
 Other options: `--proxy-port` (default 5000, `0` picks a free port),
@@ -305,9 +345,10 @@ adverts/TX or firmware flashing is part of the default test gate.
 
 Each identity key is kept in its own Android Keystore-backed
 `EncryptedSharedPreferences` slot (`meshcore_identity_v2/<id>`, AES-256-GCM).
-Android backup is disabled (`allowBackup="false"`). The old single-identity
-`meshcore_identity_v1` slot and root-level `node_state.json` are deliberately not
-read or migrated. See `SECURITY.md` for the full model and its caveats.
+Android backup is disabled (`allowBackup="false"`). Pre-0.1.0 single-identity
+data (`meshcore_identity_v1`, root-level `node_state.json`) is outside the
+migration baseline and is deliberately ignored. See `SECURITY.md` for the full
+model and its caveats.
 
 ## Background execution (Android)
 
@@ -326,7 +367,7 @@ isolate). Two home-screen controls make that reliable:
 This is a *launch* resume, not a true boot resume. With shape A the engine runs
 in the main isolate, which Android does not start at boot; the proxy cannot come
 back automatically after a reboot until the user opens the app. Boot resume would
-require the shape-B engine-in-task-isolate design (plan §4).
+require a shape-B engine-in-task-isolate design.
 
 ## Device connection history
 
