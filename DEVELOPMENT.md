@@ -1,5 +1,43 @@
 # Development notes
 
+## Architecture and repository layout
+
+MeshChameleon is a standalone reimplementation. It reuses/ports MIT-licensed
+code from [`meshcore-open`](https://github.com/zjs81/meshcore-open) (framing,
+protocol constants, crypto stack) and
+[`openhop_core`](https://github.com/openhop-dev/openhop_core) (companion node
+logic). See `ATTRIBUTION.md`.
+
+```mermaid
+flowchart LR
+    client["MeshCore client app<br/>(e.g. meshcore-open)"]
+    proxy["MeshChameleon<br/>virtual companion<br/>identity, contacts, queue"]
+    radio["MeshCore companion<br/>stock firmware<br/>used as a raw radio"]
+
+    client <-->|"TCP · 0x3c/0x3e frames"| proxy
+    proxy <-->|"BLE (NUS) or TCP · raw frames"| radio
+```
+
+MeshChameleon exposes a **TCP server** that speaks the MeshCore companion
+protocol (the same wire format a client uses for a Wi-Fi companion). It
+generates, stores, and uses its own Ed25519 MeshCore identity on the phone and
+reports that identity in `SELF_INFO`/adverts. Behind the scenes it connects to a
+real companion over **BLE (NUS)** or **TCP**, treating that device as a **raw
+radio**: it transmits arbitrary MeshCore packets with `CMD_SEND_RAW_PACKET` and
+receives every over-air frame via `PUSH_CODE_LOG_RX_DATA`.
+
+Repository layout:
+
+```text
+packages/
+  mesh_protocol/    on-air packet codec + crypto + identity + shared models
+  companion_server/ TCP listener + serial framing + command router (app-facing)
+  mesh_node/        contacts/channels/messages/adverts/acks and mesh node logic
+  device_link/      RadioLink SPI + TCP device client + device simulator
+app/                Flutter app: UI, foreground service, secure storage
+app/integration_test/  opt-in hardware tests (see its README)
+```
+
 ## Running an end-to-end test without hardware
 
 The pure-Dart packages include a stock-companion simulator (`FakeDeviceLink`)
@@ -46,9 +84,9 @@ fault injectors live in `packages/companion_server/tool/` and
 
 The virtual companion advertises MeshCore 1.18 (`DEVICE_INFO` fw code 14,
 version `v1.18.0`) with the virtual board string, 350-contact/40-channel
-capacities, 4 MiB virtual storage, and the virtual identity/capabilities. The
-following differences from a bare physical companion are intentional and are
-not bugs:
+capacities, 4 MiB virtual storage, the virtual identity/capabilities, and the
+physical radio's repeat byte and real max TX/RF values. The following
+differences from a bare physical companion are intentional and are not bugs:
 
 - No automatic physical state writes: virtual preferences, contacts, channels,
   paths, queues, malformed inputs and storage errors never silently reconfigure
@@ -94,6 +132,9 @@ secure storage: meshcore_identity_v2/<id>     64-byte expanded key
 
 Rules worth preserving:
 
+- Inactive identities still receive, decrypt, ACK, and queue traffic, but never
+  send unsolicited adverts. Each identity keeps up to 512 queued messages with
+  drop-oldest behavior.
 - `active_id` must reference a record; a missing active selection is repaired to
   a readable identity at startup.
 - Public keys are unique across records. A protocol key import updates the
@@ -394,17 +435,20 @@ The Android `applicationId` is `org.huebert.meshchameleon` (matching the
 
 ## Building the app
 
+Install [Flutter](https://docs.flutter.dev/get-started/install) and the Android
+toolchain, then check the setup with `flutter doctor`.
+
 ```sh
 cd app
-~/dev/flutter/bin/flutter build apk --debug
-~/dev/android-sdk/platform-tools/adb install -r build/app/outputs/flutter-apk/app-debug.apk
+flutter build apk --debug
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
 ```
 
 Desktop:
 
 ```sh
 cd app
-~/dev/flutter/bin/flutter build linux --debug
+flutter build linux --debug
 ```
 
 ## Branding (icon + splash)

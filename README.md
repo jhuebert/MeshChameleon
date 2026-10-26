@@ -1,139 +1,171 @@
+<p align="center">
+  <img src="app/assets/branding/icon.png" alt="MeshChameleon app icon" width="140">
+</p>
+
 # MeshChameleon
 
-A mobile app that sits between an existing **MeshCore client app** (e.g.
-`meshcore-open`) and an existing **MeshCore companion device**. Like its namesake,
-it blends in: to the client it *is* the companion, while the identity it serves
-lives on the phone and the stock companion device is reduced to a raw radio.
+**A MeshCore companion that lives on your phone.**
+
+MeshCore is a long-range radio messaging system that works without cell service
+or an internet connection. Most MeshCore apps expect a **companion**: a small
+radio that holds your identity and handles sending and receiving messages.
+
+MeshChameleon is an open-source Android app that flips that around. It takes
+over the companion role and uses an ordinary MeshCore radio as a simple radio
+link. Like its namesake, it blends in: to your MeshCore app, MeshChameleon looks
+and behaves like a normal companion.
+
+MeshChameleon is not a messaging app. You still use your MeshCore app to read
+and send messages; MeshChameleon is the companion behind it.
+
+## Why use it?
+
+- **Your identity stays with you.** Your MeshCore name, key, contacts, channels,
+  and message queue live on the phone. You can replace or reconnect the radio
+  without losing them.
+- **Use the radio you already have.** Keep your existing MeshCore companion;
+  MeshChameleon uses it as the radio.
+- **Keep more than one identity.** Run several MeshCore identities at once and
+  switch which one your app sees, without needing a separate radio for each.
+  They all keep receiving while connected.
+- **Keep using your MeshCore app.** Point your existing client at MeshChameleon
+  over the local network and carry on as usual.
+- **Leave it running.** MeshChameleon is designed to keep the link alive while
+  you use other apps, and can reconnect on launch.
+
+## What you can do
+
+With MeshChameleon connected, your MeshCore app can do the things it normally
+does through a companion:
+
+- send and receive direct messages
+- join channels and exchange group messages
+- manage contacts and announce yourself to the mesh
+- request status and sensor telemetry where the mesh supports it
+- see radio battery and storage information
+- switch between identities without touching the radio
+- reconnect on launch, if **Resume on launch** is enabled
+
+## Using more than one identity
+
+Each identity has its own name, key, contacts, channels, and message queue. While
+a device is connected, **all identities keep receiving**, so messages still
+arrive for the ones you are not currently using. The **active** identity is the
+one your MeshCore app sees; tap another identity to switch, and the MeshCore app
+reconnects to that identity.
+
+You can create extra identities from the identity screen. **Clear local data**
+keeps the identity and its name but resets its contacts, channels, and messages.
+**Delete** removes an identity permanently and is only available for inactive
+identities, not the last remaining one.
+
+## How it works
+
+1. MeshChameleon connects to a normal MeshCore companion over Bluetooth or your
+   local network.
+2. It keeps your identity, contacts, channels, and queued messages on the phone.
+3. It offers a local connection that your MeshCore app can use.
+4. Your app talks to MeshChameleon exactly as it would talk to a companion.
+5. MeshChameleon uses the connected radio to send and receive over the mesh.
 
 ```mermaid
 flowchart LR
-    client["MeshCore app<br/>(meshcore-open)"]
-    proxy["MeshChameleon<br/>virtual companion<br/>holds identity/keys<br/>full mesh node logic"]
-    radio["MeshCore companion<br/>stock firmware<br/>used as a dumb LoRa radio"]
+    app["MeshCore app<br/>(the app you already use)"]
+    phone["MeshChameleon<br/>(Android phone)<br/>identity, contacts, messages"]
+    radio["MeshCore companion<br/>(used as the radio)"]
+    mesh["Other MeshCore<br/>radios"]
 
-    client <-->|"TCP · 0x3c/0x3e frames"| proxy
-    proxy <-->|"BLE (NUS) or TCP · raw frames"| radio
+    app <-->|"local network"| phone
+    phone <-->|"Bluetooth or network"| radio
+    radio <-->|"radio"| mesh
 ```
 
-MeshChameleon exposes a **TCP server** that speaks the MeshCore companion protocol
-(the same wire format the app uses for a WiFi companion). It generates, stores,
-and uses its own Ed25519 MeshCore identity on the phone and reports that identity
-in `SELF_INFO`/adverts. Behind the scenes it connects to a real companion device
-over **BLE (NUS)** or **TCP**, treating that device as a **raw radio**: it
-transmits arbitrary MeshCore packets with `CMD_SEND_RAW_PACKET` and receives
-every over-air frame via `PUSH_CODE_LOG_RX_DATA`.
+The important part: **your phone owns the identity, not the radio.**
 
-This repository is a standalone reimplementation. It reuses/ports MIT-licensed
-code from [`meshcore-open`](https://github.com/zjs81/meshcore-open) (framing,
-protocol constants, crypto stack) and
-[`openhop_core`](https://github.com/openhop-dev/openhop_core) (companion node
-logic). See `ATTRIBUTION.md`.
+## What you need
 
-## Status
+- An Android phone. iOS is not supported yet.
+- A MeshCore companion radio with its normal firmware, reachable over Bluetooth
+  or Wi-Fi/Ethernet.
+- A MeshCore client app that can use a **network companion** (a companion
+  reached over Wi-Fi or Ethernet instead of Bluetooth). For example,
+  [`meshcore-open`](https://github.com/zjs81/meshcore-open).
+- The MeshCore app must be able to reach the phone over a trusted local network.
+- Preferably, permission for MeshChameleon to run without Android battery
+  optimization.
 
-**0.1.0 is the initial release baseline.** The MeshCore 1.18 virtual-companion
-handoff (T01–T16) is implemented: strict 176-byte framing, virtual
-identity/capabilities/state, contacts/channels/adverts, persistence and quota,
-battery/storage, key import/export, allowlisted CLI, lifecycle, app-only reset,
-remote CLI, telemetry and raw endpoints. **Multi-identity management is also
-implemented:** several virtual identities stay live on one shared radio while
-the selected identity is served to the MeshCore app.
+## Getting started
 
-The pure-Dart core is fully unit-testable without hardware via the included
-device simulator. The conformance suite drives a real TCP session against the
-proxy and a peer node on a simulated radio bus. The 1.18 additions are
-simulator/byte-level validated; the hardware matrix (BLE/TCP, RF, WiFi, repeat,
-background survival, remote CLI, sensor telemetry) remains **pending** and is
-not inferred from a green test suite. See `DEVELOPMENT.md`.
+MeshChameleon is an early 0.1.0 project and is not in an app store yet. For now,
+install it by building the Android app from source; the linked instructions
+cover the required tools. See
+[Building the app](DEVELOPMENT.md#building-the-app).
 
-Identity storage and the threat model are described in `SECURITY.md`.
+1. Open MeshChameleon. On first launch it creates a default identity named
+   `MeshChameleon`.
+2. Tap **Device link** and connect your companion. Use **Bluetooth** for a
+   nearby radio, or **Network** for a radio on Wi-Fi or Ethernet.
+3. Turn on **Proxy server**. It listens on port `5000` by default; you can
+   change the port before starting it.
+4. In your MeshCore app, add a network companion using your phone's local IP
+   address (shown in Android's Wi-Fi settings) and the same port.
+5. Optional: turn on **Resume on launch** and exempt MeshChameleon from battery
+   optimization so the connection survives normal use.
+6. Optional: open the identity card and tap **Create identity** to add another
+   identity. Tap an identity to make it active.
 
-## Multi-identity
+## Good to know
 
-A fresh install creates and activates one identity named `MeshChameleon`.
-Additional identities are created inactive with the wizard; tapping one makes
-it the **active** identity served over the companion TCP endpoint. The MeshCore
-app reconnects and syncs that identity's contacts, channels, and queued messages.
+- **Use a trusted network.** The local connection has no password or encryption.
+  Anyone who can reach it can use your MeshChameleon session and the radio
+  settings it exposes.
+- **Use one MeshCore app at a time.** MeshChameleon needs exclusive use of the
+  radio. Do not run another configuration client against the same companion
+  during a session.
+- **The phone must stay running.** The service is designed to survive
+  backgrounding, but battery optimizations and Doze can still interrupt it.
+- **All identities share one radio.** Frequency, transmit power, and other radio
+  settings are shared; names, contacts, channels, and messages are separate.
+- **The radio's own identity is separate.** MeshChameleon does not use or expose
+  the companion's built-in MeshCore identity, and messages sent to that identity
+  do not reach the virtual identities.
+- **It is not a repeater.** MeshChameleon is a companion; it does not relay other
+  people's traffic or extend the mesh's range by itself.
 
-- **Every identity is live while a device is connected.** Each has its own key,
-  contacts, channels, preferences, advert paths, and 512-message drop-oldest
-  queue. Inactive identities still receive, decrypt, ACK, and queue traffic
-  addressed to them, but never send unsolicited adverts.
-- **One physical radio.** Frequency, bandwidth, spreading factor, coding rate,
-  TX power, tuning, and client-repeat are shared. Name, location, path-hash mode,
-  flood scope, telemetry, auto-add, contacts, and channels are per identity.
-- **Every outbound packet is RF-sent and mirrored** in-process to the other live
-  identities, so local delivery does not depend on the radio echoing its own
-  transmission. The RF copy still consumes airtime.
-- **Queued counts** on the identity cards are messages waiting for the MeshCore
-  app to sync; MeshChameleon does not know the app's read state.
-- **Clear local data** keeps the identity key and current name. Deleting an
-  identity requires it to be inactive and is unavailable for the last identity.
-- **Naming belongs to the MeshCore app** after creation. Key import/export is
-  available only through the companion protocol for the active identity; the
-  MeshChameleon UI has no key reveal/import/regenerate controls.
-- **The attached radio's own companion identity cannot be messaged** through the
-  virtual stack, because the same radio transmits the packet and never receives
-  its own raw TX. Unicasts to that key are rejected. A *different* physical
-  companion works normally over RF.
+## Project status
 
-Persistence is versioned. **0.1.0 is the migration baseline:** pre-0.1.0
-single-identity development data is ignored, but every subsequent schema change
-must migrate released data. Storage uses `<app-support>/identities/index.json`,
-per-identity `<app-support>/identities/<id>/node_state.json`, and per-identity
-secure-storage slots. The identity database is never silently replaced; a
-corrupt catalog shows a recovery screen with retry. See
-`DEVELOPMENT.md#persistence-versions-and-migrations`.
+Version **0.1.0** is the initial release baseline. The main features are
+implemented and pass automated tests, but this is still an early project:
 
-## Connecting a device
+- Android only; iOS is deferred.
+- There is no app-store release yet.
+- Real-hardware testing is still in progress for Bluetooth, network links, radio
+  behavior, and Android background survival.
+- Hardware compatibility should be verified on your own radio and phone before
+  relying on it.
 
-The **Connect device** screen shows one tab per available transport: Bluetooth
-when the platform supports BLE, Network always, and Simulated only in
-development builds. The tab bar is hidden when only Network is available.
-Successful TCP `host:port` targets are saved newest-first (maximum 20) in
-`<app-support>/network_connections.json`; tap a saved card to reconnect, or use
-delete with Undo. Failed attempts are never saved, and BLE or simulated sessions
-do not create network history entries.
+## Privacy and security
 
-## Compatibility notes
+- MeshCore identity keys are stored in Android's secure storage.
+- There is no analytics, cloud service, or telemetry upload.
+- Contacts, channels, and message history live in the app's private storage.
+  They are protected by Android's app sandbox but are not separately encrypted
+  at rest.
+- The local connection is not encrypted and has no password. Keep it on a
+  trusted network.
 
-The advertised virtual `DEVICE_INFO` baseline is firmware code **14** /
-**`v1.18.0`**, with the virtual board, 350-contact/40-channel capacities, a
-4 MiB virtual storage partition, and the physical radio's repeat byte and real
-max TX/RF values. Intentional differences from bare firmware are documented in
-`DEVELOPMENT.md`: no automatic physical state writes, saved-vs-active radio
-settings, a host-derived virtual clock, a minimal virtual sensor subset, blocked
-PIN/factory reset, remote physical administration denial, and honest persistence
-errors. The app-facing TCP endpoint is **plaintext and unauthenticated**; keep it
-on trusted networks.
+See [`SECURITY.md`](SECURITY.md) for the full security model and its caveats.
 
-## Repository layout
+## Technical details
 
-```
-packages/
-  mesh_protocol/    On-air packet codec + crypto + identity + shared models
-  companion_server/ TCP listener + serial framing + CMD_* router (app-facing)
-  mesh_node/        MeshNode: contacts/channels/messages/adverts/acks/...
-  device_link/      RadioLink SPI + TCP device client + device simulator
-app/                Flutter app: UI, foreground service, secure storage
-```
-
-## Development
-
-Prerequisites: Flutter (stable) or a standalone Dart SDK for the pure-Dart
-packages.
-
-```sh
-# Pure-Dart packages
-cd packages/mesh_protocol && dart pub get && dart test
-cd packages/companion_server && dart pub get && dart test
-cd packages/mesh_node && dart pub get && dart test
-cd packages/device_link && dart pub get && dart test
-
-# Flutter app
-cd app && flutter pub get && flutter analyze && flutter test
-```
+- [`DEVELOPMENT.md`](DEVELOPMENT.md) — architecture, repository layout, build
+  and test instructions, protocol notes, compatibility, and known limitations.
+- [`SECURITY.md`](SECURITY.md) — identity storage, threat model, and endpoint
+  exposure.
+- [`app/integration_test/README.md`](app/integration_test/README.md) — opt-in
+  hardware-in-the-loop tests and their required configuration.
+- [`ATTRIBUTION.md`](ATTRIBUTION.md) — third-party code and licenses.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT. See [`LICENSE`](LICENSE).
