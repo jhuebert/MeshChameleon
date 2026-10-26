@@ -1,6 +1,6 @@
 // M0 feasibility probe for a stock MeshCore companion over TCP.
 //
-//   dart run tool/probe_device.dart [host] [port] [watch-seconds] [rx|tx]
+//   dart run tool/probe_device.dart <host> [port] [watch-seconds] [rx|tx]
 //
 // rx (default): handshake (DEVICE_QUERY, APP_START, battery) then watch
 //   PUSH_CODE_LOG_RX_DATA.
@@ -18,7 +18,11 @@ import 'package:device_link/device_link.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 Future<void> main(List<String> args) async {
-  final host = args.isNotEmpty ? args[0] : 'aries.huebert.org';
+  if (args.isEmpty) {
+    stderr.writeln('usage: probe_device <host> [port] [watch-seconds] [rx|tx]');
+    exit(2);
+  }
+  final host = args[0];
   final port = args.length > 1 ? int.parse(args[1]) : 9505;
   final watch = Duration(seconds: args.length > 2 ? int.parse(args[2]) : 10);
   final mode = args.length > 3 ? args[3] : 'rx';

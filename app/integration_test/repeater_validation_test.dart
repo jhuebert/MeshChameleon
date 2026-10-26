@@ -1,11 +1,16 @@
-// Temporary hardware validation (not part of the default gate).
+// Hardware validation (not part of the default gate).
 //
 // Drives the app-facing companion protocol against the proxy to log in to a
 // repeater and fetch its status, using a real BLE companion tuned to the
 // repeater's channel.
 //
 //   flutter test integration_test/repeater_validation_test.dart -d <id> \
-//     --dart-define=REPEATER_PUBKEY_HEX=<hex>
+//     --dart-define=BLE_NAME=<name> \
+//     --dart-define=REPEATER_PUBKEY_HEX=<hex> \
+//     --dart-define=REPEATER_PASSWORD=<password> \
+//     [--dart-define=REPEATER_FREQ_HZ=926000000] \
+//     [--dart-define=REPEATER_BW_HZ=125000] \
+//     [--dart-define=REPEATER_SF=8] [--dart-define=REPEATER_CR=5]
 import 'dart:async';
 import 'dart:io';
 
@@ -19,11 +24,17 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'package:meshchameleon/services/ble_device_link.dart';
 
-const _bleName = String.fromEnvironment('BLE_NAME', defaultValue: 'nc1v');
-const _pubkeyHex = String.fromEnvironment('REPEATER_PUBKEY_HEX',
-    defaultValue:
-        '70A3E4B4B9F8A56A769D730608870A0507D30D7069B83691C2324636C5E5EB56');
-const _password = String.fromEnvironment('REPEATER_PASSWORD', defaultValue: 'password');
+const _bleName = String.fromEnvironment('BLE_NAME');
+const _pubkeyHex = String.fromEnvironment('REPEATER_PUBKEY_HEX');
+const _password = String.fromEnvironment('REPEATER_PASSWORD');
+const _repeaterFrequencyHz =
+    int.fromEnvironment('REPEATER_FREQ_HZ', defaultValue: 926000000);
+const _repeaterBandwidthHz =
+    int.fromEnvironment('REPEATER_BW_HZ', defaultValue: 125000);
+const _repeaterSpreadingFactor =
+    int.fromEnvironment('REPEATER_SF', defaultValue: 8);
+const _repeaterCodingRate =
+    int.fromEnvironment('REPEATER_CR', defaultValue: 5);
 
 Future<BluetoothDevice> _scanFor(String needle) async {
   final found = <String, ScanResult>{};
@@ -58,6 +69,9 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets('repeater login + status via the proxy', (tester) async {
+    if (_bleName.isEmpty || _pubkeyHex.isEmpty || _password.isEmpty) {
+      fail('Set BLE_NAME, REPEATER_PUBKEY_HEX, and REPEATER_PASSWORD.');
+    }
     final device = await _scanFor(_bleName);
     final link = BleDeviceLink(device: device, onLog: (m) => debugPrint('[ble] $m'));
     await link.connect();
@@ -65,7 +79,7 @@ void main() {
 
     final info = await link.deviceInfo();
     final orig = await link.radioParams();
-    debugPrint('nc1v fw=${info.firmwareVerCode} orig freq=${orig.frequencyHz} '
+    debugPrint('device fw=${info.firmwareVerCode} orig freq=${orig.frequencyHz} '
         'bw=${orig.bandwidthHz} sf=${orig.spreadingFactor} cr=${orig.codingRate}');
 
     final identity = await LocalIdentity.generate();
@@ -97,23 +111,23 @@ void main() {
 
     final pubkey = Uint8List.fromList(_parseHex(_pubkeyHex));
     const target = RadioParams(
-      frequencyHz: 926000000,
-      bandwidthHz: 125000,
-      spreadingFactor: 8,
-      codingRate: 5,
+      frequencyHz: _repeaterFrequencyHz,
+      bandwidthHz: _repeaterBandwidthHz,
+      spreadingFactor: _repeaterSpreadingFactor,
+      codingRate: _repeaterCodingRate,
     );
     try {
       await link.setRadioParams(target);
       node.syncRadioParams(target);
       final applied = await link.radioParams();
-      debugPrint('nc1v applied: freq=${applied.frequencyHz} '
+      debugPrint('device applied: freq=${applied.frequencyHz} '
           'bw=${applied.bandwidthHz} sf=${applied.spreadingFactor} '
           'cr=${applied.codingRate}');
       await Future<void>.delayed(const Duration(seconds: 2));
 
       node.addUpdateContact(Contact(
         publicKey: pubkey,
-        name: 't1000-e Repeater',
+        name: 'Repeater',
         advType: advTypeRepeater,
       ));
 
@@ -152,7 +166,7 @@ void main() {
           pushCodeTelemetryResponse, const Duration(seconds: 25));
       debugPrint('TELEMETRY ${telemOk ? "OK" : "no response within 25s"}');
     } finally {
-      debugPrint('restoring nc1v radio');
+      debugPrint('restoring device radio');
       await link.setRadioParams(orig);
       node.syncRadioParams(orig);
     }

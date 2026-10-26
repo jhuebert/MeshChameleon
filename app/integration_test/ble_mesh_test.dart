@@ -8,7 +8,7 @@
 //
 // Configuration via --dart-define:
 //   BLE_NAME       substring of the advertised device name to connect to
-//                  (default: "nc1v")
+//                  (required)
 //   DO_TX          "true" to advertise and send a channel text on air
 //                  (default: off — scan/connect/handshake only)
 //   CHANNEL_NAME   channel name when DO_TX (default: the public channel)
@@ -30,7 +30,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'package:meshchameleon/services/ble_device_link.dart';
 
-const _bleName = String.fromEnvironment('BLE_NAME', defaultValue: 'nc1v');
+const _bleName = String.fromEnvironment('BLE_NAME');
 const _doTx = bool.fromEnvironment('DO_TX');
 // Adverts are heard by every node on the mesh; keep them opt-in.
 const _doAdvert = bool.fromEnvironment('DO_ADVERT');
@@ -83,6 +83,9 @@ void main() {
 
   testWidgets('BLE device link: scan, connect, handshake, proxy stack',
       (tester) async {
+    if (_bleName.isEmpty) {
+      fail('Set BLE_NAME to the advertised companion name substring.');
+    }
     final device = await _scanFor(_bleName);
     debugPrint('Connecting to BLE "${device.platformName}" '
         '(${device.remoteId}) ...');
