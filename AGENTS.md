@@ -94,7 +94,10 @@ package checks, then the full script before finishing.
   158+ data bytes pad to a 176-byte ciphertext and need a 186-byte
   `SEND_RAW_PACKET` frame, which 1.18 firmware silently drops (the radio stays
   alive). The theoretical on-air group-data cap is 165 and channel-data RX
-  pushes allow 167; a long route path reduces the TX cap further.
+  pushes allow 167; a long route path reduces the TX cap further. Group **text**
+  has a separate budget because the plaintext is `timestamp | flags |
+  "<name>: <message>"`: with an empty/flood path the message text is at most
+  `153 - UTF-8(name)` bytes (for example 144 bytes for `HIL Alpha`).
 - `SELF_INFO` and `CMD_SET_RADIO_PARAMS` frequency fields are in **kHz** on
   the wire, while bandwidth is in **Hz**. `RadioParams.frequencyHz` is
   normalized to Hz internally; convert only at protocol boundaries.
