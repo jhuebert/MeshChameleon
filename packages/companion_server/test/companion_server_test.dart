@@ -297,12 +297,19 @@ class TestBridge extends CompanionBridge {
           int tag, int authCode, int flags, Uint8List pathBytes) async =>
       true;
 
+  Uint8List? sentTextPubkey;
+  String? sentText;
+
   @override
   Future<SentResult> sendTextMessage(Uint8List pubkey, String text,
-          {int txtType = txtTypePlain,
-          int attempt = 0,
-          bool waitForAck = false}) async =>
-      const SentResult(success: true, expectedAck: 0x1234, timeoutMs: 5000);
+      {int txtType = txtTypePlain,
+      int attempt = 0,
+      bool waitForAck = false}) async {
+    sentTextPubkey = pubkey;
+    sentText = text;
+    return const SentResult(
+        success: true, expectedAck: 0x1234, timeoutMs: 5000);
+  }
 
   @override
   Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async =>
@@ -796,6 +803,24 @@ void main() {
     expect(bridge.sentChannelText, 'P');
   });
 
+  test('SEND_CHANNEL_TXT_MSG decodes UTF-8 text', () async {
+    bridge.channels[0] = Channel(
+      name: 'Public',
+      secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
+    );
+    final w = BufferWriter()
+      ..writeByte(cmdSendChannelTxtMsg)
+      ..writeByte(txtTypePlain)
+      ..writeByte(0)
+      ..writeUInt32Le(0)
+      ..writeString('💯🤣')
+      ..writeByte(0);
+    client.send(w.toBytes());
+
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.sentChannelText, '💯🤣');
+  });
+
   test('SET_RADIO_PARAMS validates and forwards', () async {
     final good = BufferWriter()
       ..writeByte(cmdSetRadioParams)
@@ -1017,6 +1042,24 @@ void main() {
     expect(resp[0], respCodeSent);
     final rr = BufferReader(resp)..skipBytes(2);
     expect(rr.readUInt32Le(), 0x1234);
+  });
+
+  test('SEND_TXT_MSG decodes UTF-8 text', () async {
+    final pubkey = Uint8List(32)..[0] = 7;
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
+    final w = BufferWriter()
+      ..writeByte(cmdSendTxtMsg)
+      ..writeByte(txtTypePlain)
+      ..writeByte(0)
+      ..writeUInt32Le(0)
+      ..writeBytes(pubkey.sublist(0, 6))
+      ..writeString('💯🤣')
+      ..writeByte(0);
+    client.send(w.toBytes());
+
+    expect((await client.frames.next())[0], respCodeSent);
+    expect(bridge.sentTextPubkey, pubkey);
+    expect(bridge.sentText, '💯🤣');
   });
 
   test('SYNC_NEXT_MESSAGE with empty queue returns NO_MORE_MESSAGES', () async {

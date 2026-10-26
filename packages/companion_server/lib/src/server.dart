@@ -1071,8 +1071,7 @@ class CompanionServer implements CompanionPushSink {
     final attempt = r.readByte();
     r.skipBytes(4); // timestamp
     final prefix = r.readBytes(6);
-    final text =
-        String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
+    final text = r.readCString();
     final contact = bridge.getContactByKeyPrefix(prefix);
     if (contact == null) return sendErr(errCodeNotFound);
     final result = await bridge.sendTextMessage(
@@ -1096,8 +1095,7 @@ class CompanionServer implements CompanionPushSink {
     final txtType = r.readByte();
     final channelIdx = r.readByte();
     r.skipBytes(4); // timestamp
-    final text =
-        String.fromCharCodes(r.readRemainingBytes().where((b) => b != 0));
+    final text = r.readCString();
     if (txtType != txtTypePlain) return sendErr(errCodeUnsupportedCmd);
     if (bridge.getChannel(channelIdx) == null) return sendErr(errCodeNotFound);
     sendOk();
