@@ -1,8 +1,6 @@
-<p align="center">
-  <img src="app/assets/branding/icon.png" alt="MeshChameleon app icon" width="140">
-</p>
-
 # MeshChameleon
+
+<img src="app/assets/branding/icon.png" alt="MeshChameleon app icon" width="140"> 
 
 **A MeshCore companion that lives on your phone.**
 
