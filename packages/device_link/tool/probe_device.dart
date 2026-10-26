@@ -92,6 +92,9 @@ Future<void> main(List<String> args) async {
 
   await link.disconnect();
   stdout.writeln('disconnected');
+  // The TCP link can leave the VM alive after a clean disconnect; this is a
+  // one-shot diagnostic, so terminate deterministically for scripted callers.
+  exit(0);
 }
 
 /// Send a single group text on a throwaway random channel and return the
