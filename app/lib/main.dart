@@ -5,23 +5,28 @@ import 'package:provider/provider.dart';
 
 import 'app_state.dart';
 import 'screens/connect_screen.dart';
+import 'screens/diagnostics_screen.dart';
 import 'screens/identities_screen.dart';
 import 'screens/log_screen.dart';
+import 'services/build_info.dart';
 import 'services/foreground_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ForegroundService().initialize();
-  runApp(const ProxyApp());
+  final buildInfo = await BuildInfo.load();
+  runApp(ProxyApp(buildInfo: buildInfo));
 }
 
 class ProxyApp extends StatelessWidget {
-  const ProxyApp({super.key});
+  const ProxyApp({super.key, required this.buildInfo});
+
+  final BuildInfo buildInfo;
 
   @override
   Widget build(BuildContext context) {
     return ChangeNotifierProvider(
-      create: (_) => AppState()..loadIdentities(),
+      create: (_) => AppState(buildInfo: buildInfo)..loadIdentities(),
       child: MaterialApp(
         title: 'MeshChameleon',
         theme: ThemeData(
@@ -64,8 +69,16 @@ class HomeScreen extends StatelessWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.receipt_long),
+            tooltip: 'Log',
             onPressed: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const LogScreen())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'About & diagnostics',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+            ),
           ),
         ],
       ),
@@ -146,7 +159,37 @@ class HomeScreen extends StatelessWidget {
           ),
           const _BatteryOptimizationCard(),
           if (app.busy) const LinearProgressIndicator(),
+          const SizedBox(height: 8),
+          _BuildFooter(buildInfo: app.buildInfo),
         ],
+      ),
+    );
+  }
+}
+
+class _BuildFooter extends StatelessWidget {
+  const _BuildFooter({required this.buildInfo});
+
+  final BuildInfo buildInfo;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: Alignment.center,
+      child: TextButton(
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const DiagnosticsScreen()),
+        ),
+        style: TextButton.styleFrom(
+          foregroundColor: colors.onSurfaceVariant,
+          textStyle: Theme.of(context).textTheme.bodySmall,
+          minimumSize: const Size(48, 40),
+        ),
+        child: Text(
+          'MeshChameleon ${buildInfo.footerLabel}',
+          textAlign: TextAlign.center,
+        ),
       ),
     );
   }

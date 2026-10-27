@@ -25,6 +25,7 @@ dependencies:
     path: ../packages/mesh_node
   device_link:
     path: ../packages/device_link
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:

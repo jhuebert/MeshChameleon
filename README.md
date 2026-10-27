@@ -46,6 +46,8 @@ does through a companion:
 - see radio battery and storage information
 - switch between identities without touching the radio
 - reconnect on launch, if **Resume on launch** is enabled
+- check the installed version and live link statistics in
+  **About & diagnostics**
 
 ## Using more than one identity
 
@@ -151,7 +153,9 @@ implemented and pass automated tests, but this is still an early project:
 ## Privacy and security
 
 - MeshCore identity keys are stored in Android's secure storage.
-- There is no analytics, cloud service, or telemetry upload.
+- There is no analytics, cloud service, or telemetry upload. Connection
+  statistics are session-only and stay in memory; copying diagnostics is an
+  explicit local action.
 - Contacts, channels, and message history live in the app's private storage.
   They are protected by Android's app sandbox but are not separately encrypted
   at rest.

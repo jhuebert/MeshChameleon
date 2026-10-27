@@ -86,6 +86,12 @@ configuration schema change must migrate released data; see
 - **Virtual storage is quota-limited, not confidential.** Each identity's 4 MiB
   partition bounds durable virtual state and returns explicit storage errors; it
   does not encrypt `node_state.json`.
+- **Diagnostics are local and session-only.** About & diagnostics keeps counters
+  in memory and shows local IP addresses, ports, BLE/device names, identity
+  public-key prefixes, and recent log lines. **Copy diagnostics** is an explicit
+  user action and writes that report to the clipboard; nothing is uploaded. The
+  report never includes the 64-byte private identity or any expanded key
+  material.
 
 ## Remote CLI and telemetry exposure
 

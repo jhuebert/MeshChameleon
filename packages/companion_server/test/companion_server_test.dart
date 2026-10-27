@@ -571,6 +571,46 @@ void main() {
     expect(resp[3], 8);
   });
 
+  test('metrics count client traffic and disconnect reasons', () async {
+    expect(server.metrics.clientConnections, 1);
+    expect(server.metrics.clientConnected, isTrue);
+
+    client.send([cmdDeviceQuery, appProtocolVersion]);
+    final resp = await client.frames.next();
+    expect(server.metrics.commandsReceived, 1);
+    expect(server.metrics.payloadBytesIn, 2);
+    expect(server.metrics.repliesSent, 1);
+    expect(server.metrics.payloadBytesOut, resp.length);
+    expect(server.metrics.appTargetVer, appProtocolVersion);
+
+    server.pushRawRxData(6, -70, Uint8List.fromList([1, 2, 3]));
+    final push = await client.frames.next();
+    expect(push[0], pushCodeLogRxData);
+    expect(server.metrics.pushesSent, 1);
+
+    client.send([0xFE]);
+    final err = await client.frames.next();
+    expect(err[0], respCodeErr);
+    expect(server.metrics.unsupportedCommands, 1);
+    expect(server.metrics.errorReplies, 1);
+
+    await server.disconnectClient(reason: 'test close');
+    expect(server.metrics.clientConnected, isFalse);
+    expect(server.metrics.clientDisconnects, 1);
+    expect(server.metrics.lastDisconnectReason, 'test close');
+  });
+
+  test('metrics count a client eviction', () async {
+    final replacement =
+        FramedClient(await Socket.connect('127.0.0.1', server.port!));
+    addTearDown(replacement.close);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+
+    expect(server.metrics.clientConnections, 2);
+    expect(server.metrics.clientDisconnects, 1);
+    expect(server.metrics.evictions, 1);
+  });
+
   test('server_rejects_outbound_prefix_as_command', () async {
     // An outbound-prefixed frame is not an app command; the next valid inbound
     // command must be the first one handled.

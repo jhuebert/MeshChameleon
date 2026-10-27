@@ -2494,6 +2494,21 @@ class MeshNode extends CompanionBridge {
     }
   }
 
+  /// Cheap, I/O-free counters for app diagnostics.
+  ///
+  /// Unlike [getStats] with [statsTypeRadio], this never asks the physical
+  /// device for a fresh noise floor. Per-identity RX counters describe the same
+  /// received frame once per live identity; callers must label them accordingly.
+  Map<String, Object?> get sessionStats => Map.unmodifiable({
+        ..._packetStats,
+        'tx_air_secs': _txAirMicros ~/ 1000000,
+        'rx_air_secs': _rxAirMicros ~/ 1000000,
+        'queue_len': _messageQueue.length,
+        'last_rssi': _lastRxRssi,
+        'last_snr_scaled': _lastRxSnrScaled,
+        'noise_floor': _lastNoiseFloorDbm,
+      });
+
   // -------------------------------------------------------------------------
   // RX path
   // -------------------------------------------------------------------------

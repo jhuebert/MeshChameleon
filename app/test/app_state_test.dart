@@ -188,6 +188,32 @@ void main() {
         reason: 'stopping the proxy must not stop live identities');
   });
 
+  test('diagnostics snapshot reflects proxy and physical traffic', () async {
+    final link = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    await app.connectSimulated(simulatedLink: link);
+    addTearDown(app.disconnectDevice);
+    await app.startProxy(serverPort: 0);
+
+    final client = _FramedClient(await Socket.connect('127.0.0.1', app.port));
+    addTearDown(client.close);
+    await handshake(client);
+
+    await app.node!.advertise();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    final snapshot = app.diagnosticsSnapshot();
+    expect(snapshot.proxyRunning, isTrue);
+    expect(snapshot.deviceConnected, isTrue);
+    expect(snapshot.deviceInfo?.firmwareVerCode, 14);
+    expect(snapshot.companion.clientConnections, 1);
+    expect(snapshot.companion.commandsReceived, greaterThanOrEqualTo(1));
+    expect(snapshot.link.rawTxPackets, greaterThanOrEqualTo(1));
+    expect(snapshot.link.rawTxBytes, greaterThan(0));
+    expect(snapshot.identities.single.packets?.sent, greaterThanOrEqualTo(1));
+  });
+
   test('activation switches the client to the new SELF_INFO', () async {
     final second = await app.createIdentity(name: 'Second');
     final link = FakeDeviceLink(

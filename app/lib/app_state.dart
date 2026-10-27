@@ -11,7 +11,9 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'services/ble_device_link.dart';
+import 'services/build_info.dart';
 import 'services/device_capabilities.dart';
+import 'services/diagnostics_snapshot.dart';
 import 'services/foreground_service.dart';
 import 'services/identity_index.dart';
 import 'services/identity_manager.dart';
@@ -22,6 +24,52 @@ import 'services/network_connection_store.dart';
 import 'services/session_store.dart';
 
 enum ProxyStatus { stopped, running }
+
+/// Persistent-notification title and text.
+///
+/// The title deliberately describes the state instead of repeating the product
+/// name: Android already renders the app label above the notification, and the
+/// first identity is also named [defaultIdentityName]. Keeping the name out of
+/// both fields means it appears only once.
+class NotificationContent {
+  const NotificationContent({required this.title, required this.text});
+
+  final String title;
+  final String text;
+
+  String get key => '$title\n$text';
+}
+
+/// Build the foreground-service notification copy.
+@visibleForTesting
+NotificationContent buildNotificationContent({
+  required int identityCount,
+  String? activeName,
+  required bool deviceConnected,
+  required ProxyStatus proxyStatus,
+  required int port,
+}) {
+  final showActiveName = activeName != null &&
+      activeName.isNotEmpty &&
+      activeName != defaultIdentityName;
+  final identityPart = identityCount == 0
+      ? 'no identity'
+      : '$identityCount '
+          '${identityCount == 1 ? 'identity' : 'identities'}'
+          '${showActiveName ? ' · $activeName' : ''}';
+  final linkPart = deviceConnected ? 'device linked' : 'no device';
+  final serverPart =
+      proxyStatus == ProxyStatus.running ? 'serving :$port' : 'server stopped';
+  final title = proxyStatus == ProxyStatus.running
+      ? 'Proxy running'
+      : deviceConnected
+          ? 'Device linked'
+          : 'MeshChameleon idle';
+  return NotificationContent(
+    title: title,
+    text: '$identityPart · $linkPart · $serverPart',
+  );
+}
 
 /// Creates the TCP link used to reach a network companion.
 ///
@@ -42,6 +90,10 @@ class AppState extends ChangeNotifier {
     NetworkConnectionStore? networkConnectionStore,
     TcpDeviceLinkFactory? tcpLinkFactory,
     DeviceCapabilities? capabilities,
+    BuildInfo? buildInfo,
+    CompanionMetrics? companionMetrics,
+    LinkMetrics? linkMetrics,
+    DateTime? startedAt,
     this.reconnectDelay = const Duration(seconds: 3),
   })  : _repository = repository,
         identityStore = identityStore ?? IdentityStore(),
@@ -49,12 +101,90 @@ class AppState extends ChangeNotifier {
         networkConnectionStore =
             networkConnectionStore ?? NetworkConnectionStore(),
         _tcpLinkFactory = tcpLinkFactory ?? _defaultTcpLinkFactory,
-        capabilities = capabilities ?? DeviceCapabilities.current();
+        capabilities = capabilities ?? DeviceCapabilities.current(),
+        buildInfo = buildInfo ?? BuildInfo.fallback(),
+        companionMetrics = companionMetrics ?? CompanionMetrics(),
+        linkMetrics = linkMetrics ?? LinkMetrics(),
+        startedAt = startedAt ?? DateTime.now();
 
   final IdentityStore identityStore;
   final SessionStore sessionStore;
   final NetworkConnectionStore networkConnectionStore;
   final TcpDeviceLinkFactory _tcpLinkFactory;
+
+  /// Installed build identity shown in the footer and diagnostics.
+  final BuildInfo buildInfo;
+
+  /// Wall-clock start used for the session uptime shown in diagnostics.
+  final DateTime startedAt;
+
+  /// Client-side proxy counters, retained across proxy stop/start.
+  final CompanionMetrics companionMetrics;
+
+  /// Physical device-link counters, retained across reconnects.
+  final LinkMetrics linkMetrics;
+
+  Duration get appUptime => DateTime.now().difference(startedAt);
+
+  /// Physical device information for the current session, when attached.
+  DeviceInfo? deviceInfo;
+
+  DateTime? deviceConnectedAt;
+  int reconnectAttempts = 0;
+  int reconnectSuccesses = 0;
+
+  Duration? get deviceSessionDuration => deviceConnectedAt == null
+      ? null
+      : DateTime.now().difference(deviceConnectedAt!);
+
+  /// Build the presentation-safe diagnostics view. Cheap and synchronous:
+  /// packet counters are already cached inside each live [MeshNode].
+  DiagnosticsSnapshot diagnosticsSnapshot() {
+    final nodes = <String, MeshNode?>{
+      for (final runtime in _manager?.runtimes ?? const <IdentityRuntime>[])
+        runtime.record.id: runtime.node,
+    };
+    return DiagnosticsSnapshot(
+      buildInfo: buildInfo,
+      generatedAt: DateTime.now().toUtc(),
+      appUptime: appUptime,
+      proxyRunning: proxyStatus == ProxyStatus.running,
+      proxyPort: port,
+      deviceConnected: deviceConnected,
+      deviceLabel: deviceLabel,
+      deviceInfo: deviceInfo,
+      deviceSessionDuration: deviceSessionDuration,
+      reconnectAttempts: reconnectAttempts,
+      reconnectSuccesses: reconnectSuccesses,
+      foregroundServiceRunning: foregroundServiceRunning,
+      batteryOptimizationsIgnored: batteryOptimizationsIgnored,
+      autoResume: autoResume,
+      identityDatabaseError: identityDatabaseError,
+      companion: companionMetrics,
+      link: linkMetrics,
+      identities: [
+        for (final summary in identities)
+          IdentityDiagnostics(
+            id: summary.id,
+            name: summary.name,
+            prefixHex: summary.prefixHex,
+            active: summary.active,
+            live: summary.live,
+            contactCount: summary.contactCount,
+            channelCount: summary.channelCount,
+            queuedDirect: summary.queuedDirect,
+            queuedChannel: summary.queuedChannel,
+            unavailableReason: summary.unavailableReason,
+            packets: nodes[summary.id] == null
+                ? null
+                : MeshPacketStats.fromMap(nodes[summary.id]!.sessionStats),
+          ),
+      ],
+      recentLogs: logs.length <= 100
+          ? List<String>.of(logs)
+          : logs.sublist(logs.length - 100),
+    );
+  }
 
   static RadioLink _defaultTcpLinkFactory(
     String host,
@@ -154,13 +284,17 @@ class AppState extends ChangeNotifier {
   }
 
   bool _foregroundStarted = false;
-  String? _lastNotificationText;
+  String? _lastNotification;
+
+  /// Whether the Android foreground service is currently holding the process
+  /// alive (always false on desktop).
+  bool get foregroundServiceRunning => _foregroundStarted;
 
   void _onManagerChanged() {
     if (_disposed) return;
     notifyListeners();
-    final text = _notificationText();
-    if (_foregroundStarted && text != _lastNotificationText) {
+    final content = _notificationContent();
+    if (_foregroundStarted && content.key != _lastNotification) {
       unawaited(_updateNotification());
     }
   }
@@ -319,7 +453,10 @@ class AppState extends ChangeNotifier {
       log('Enter a host and a port between 1 and 65535');
       return false;
     }
-    final link = _tcpLinkFactory(normalizedHost, devicePort, log);
+    final link = MeteredRadioLink(
+      _tcpLinkFactory(normalizedHost, devicePort, log),
+      metrics: linkMetrics,
+    );
     final ok = await _attachLink(
       link,
       'TCP ${formatNetworkAddress(normalizedHost, devicePort)}',
@@ -341,7 +478,10 @@ class AppState extends ChangeNotifier {
       log('BLE is not available in this build');
       return false;
     }
-    final link = BleDeviceLink(device: device, onLog: log);
+    final link = MeteredRadioLink(
+      BleDeviceLink(device: device, onLog: log),
+      metrics: linkMetrics,
+    );
     final preferred = displayName?.trim();
     final advertisedName = device.advName.trim();
     final platformName = device.platformName.trim();
@@ -374,8 +514,10 @@ class AppState extends ChangeNotifier {
       log('The simulated companion is only available in development builds');
       return false;
     }
-    final link =
-        simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion');
+    final link = MeteredRadioLink(
+      simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion'),
+      metrics: linkMetrics,
+    );
     final ok = await _attachLink(link, 'Simulated companion');
     if (!ok) return false;
     await _recordSession(SessionConfig(
@@ -501,6 +643,8 @@ class AppState extends ChangeNotifier {
         radioParams: selfInfo.radioParams,
         devicePublicKey: selfInfo.publicKey,
       );
+      this.deviceInfo = deviceInfo;
+      deviceConnectedAt = DateTime.now();
       final liveCount =
           manager.runtimes.where((runtime) => runtime.live).length;
       if (manager.activeNode == null) {
@@ -664,6 +808,8 @@ class AppState extends ChangeNotifier {
           !_disconnecting &&
           !_intentionalOff &&
           deviceConnected) {
+        linkMetrics.disconnected(unexpected: true);
+        deviceConnectedAt = null;
         log('Device link dropped; scheduling reconnect');
         _scheduleReconnect();
       }
@@ -689,6 +835,7 @@ class AppState extends ChangeNotifier {
         _intentionalOff) {
       return;
     }
+    reconnectAttempts++;
     try {
       log('Reconnecting device ...');
       await connectWithBackoff(curLink, onLog: log);
@@ -702,6 +849,9 @@ class AppState extends ChangeNotifier {
         physical: physical,
         radioParams: selfInfo.radioParams,
       );
+      this.deviceInfo = deviceInfo;
+      deviceConnectedAt = DateTime.now();
+      reconnectSuccesses++;
       log('Device link reconnected');
       notifyListeners();
     } catch (e) {
@@ -716,7 +866,10 @@ class AppState extends ChangeNotifier {
     _reconnectTimer = null;
     final manager = _manager;
     await manager?.stopLive();
+    linkMetrics.disconnected();
     deviceConnected = false;
+    deviceConnectedAt = null;
+    deviceInfo = null;
     log('Device powered off; automatic reconnect suppressed');
     final current = lastSession;
     if (current != null) {
@@ -739,7 +892,7 @@ class AppState extends ChangeNotifier {
       // The service may already be gone after the device powered off.
     }
     _foregroundStarted = false;
-    _lastNotificationText = null;
+    _lastNotification = null;
     notifyListeners();
   }
 
@@ -758,6 +911,8 @@ class AppState extends ChangeNotifier {
     } finally {
       link = null;
       deviceConnected = false;
+      deviceConnectedAt = null;
+      deviceInfo = null;
       deviceLabel = null;
       try {
         await _foreground.stop();
@@ -765,35 +920,27 @@ class AppState extends ChangeNotifier {
         // The service may already be stopped.
       }
       _foregroundStarted = false;
-      _lastNotificationText = null;
+      _lastNotification = null;
       _disconnecting = false;
       notifyListeners();
     }
   }
 
-  /// Persistent-notification text reflecting the live identity count and state.
-  String _notificationText() {
-    final count = identities.length;
-    final active = activeIdentity?.name;
-    final identityPart = count == 0
-        ? 'no identity'
-        : '$count ${count == 1 ? 'identity' : 'identities'}'
-            '${active == null ? '' : ' · $active'}';
-    final linkPart = deviceConnected ? 'device linked' : 'no device';
-    final serverPart = proxyStatus == ProxyStatus.running
-        ? 'serving :$port'
-        : 'server stopped';
-    return '$identityPart · $linkPart · $serverPart';
-  }
+  /// Persistent-notification copy reflecting the live identity count and state.
+  NotificationContent _notificationContent() => buildNotificationContent(
+        identityCount: identities.length,
+        activeName: activeIdentity?.name,
+        deviceConnected: deviceConnected,
+        proxyStatus: proxyStatus,
+        port: port,
+      );
 
   Future<void> _startForegroundService() async {
     try {
-      await _foreground.start(
-        title: 'MeshChameleon',
-        text: _notificationText(),
-      );
+      final content = _notificationContent();
+      await _foreground.start(title: content.title, text: content.text);
       _foregroundStarted = true;
-      _lastNotificationText = _notificationText();
+      _lastNotification = content.key;
     } catch (e) {
       log('Foreground service unavailable: $e');
     }
@@ -801,9 +948,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> _updateNotification() async {
     try {
-      final text = _notificationText();
-      await _foreground.update(title: 'MeshChameleon', text: text);
-      _lastNotificationText = text;
+      final content = _notificationContent();
+      await _foreground.update(title: content.title, text: content.text);
+      _lastNotification = content.key;
     } catch (e) {
       log('Foreground service update failed: $e');
     }
@@ -826,6 +973,7 @@ class AppState extends ChangeNotifier {
     server ??= CompanionServer(
       bridge: active,
       config: CompanionServerConfig(port: serverPort ?? port),
+      metrics: companionMetrics,
       onLog: log,
     );
     try {

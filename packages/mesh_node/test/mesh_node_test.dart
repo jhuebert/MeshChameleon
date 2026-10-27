@@ -1987,6 +1987,29 @@ void main() {
     expect(radio['rx_air_secs'], isA<int>());
   });
 
+  test('sessionStats exposes cached counters without device I/O', () async {
+    final callsBefore = (bob.link as FakeDeviceLink).calls.length;
+
+    await alice.advertise();
+    await pump();
+
+    final sent = alice.sessionStats;
+    expect(sent['sent'], 1);
+    expect(sent['direct_tx'], 1);
+    expect(sent['queue_len'], 0);
+    expect(sent['tx_air_secs'], isA<int>());
+
+    final received = bob.sessionStats;
+    expect(received['recv'], greaterThan(0));
+    expect(received['last_rssi'], -70);
+    expect(received['last_snr_scaled'], 24);
+    expect(
+      (bob.link as FakeDeviceLink).calls.length,
+      callsBefore,
+      reason: 'sessionStats must not query the device',
+    );
+  });
+
   test('sendTracePathRaw transmits a trace packet', () async {
     final ok = await alice.sendTracePathRaw(0x1234, 0, 0, Uint8List.fromList([1, 2]));
     expect(ok, isTrue);

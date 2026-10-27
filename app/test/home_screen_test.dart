@@ -7,6 +7,11 @@ import 'package:provider/provider.dart';
 void main() {
   testWidgets('home screen renders identity, device, and proxy state',
       (tester) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => AppState(),
@@ -26,5 +31,31 @@ void main() {
     expect(find.text('Recent log'), findsNothing);
     expect(find.byType(Image), findsOneWidget);
     expect(find.textContaining('Ed25519'), findsNothing);
+    expect(find.byTooltip('About & diagnostics'), findsOneWidget);
+    expect(find.textContaining('MeshChameleon 0.1.0'), findsOneWidget);
+  });
+
+  testWidgets('build footer opens the diagnostics page', (tester) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => AppState(),
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    await tester.tap(find.textContaining('MeshChameleon 0.1.0'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(find.text('About & diagnostics'), findsOneWidget);
+    expect(find.text('Version'), findsOneWidget);
+    expect(find.text('Uptime'), findsOneWidget);
+
+    // Dispose the periodic diagnostics refresh before the test ends.
+    await tester.pumpWidget(const SizedBox());
   });
 }

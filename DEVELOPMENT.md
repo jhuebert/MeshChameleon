@@ -438,18 +438,58 @@ The Android `applicationId` is `org.huebert.meshchameleon` (matching the
 Install [Flutter](https://docs.flutter.dev/get-started/install) and the Android
 toolchain, then check the setup with `flutter doctor`.
 
+Build through the wrapper so the installed app can show its Git commit and
+compile time:
+
 ```sh
-cd app
-flutter build apk --debug
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
+scripts/build.sh apk --debug
+adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
 ```
 
 Desktop:
 
 ```sh
-cd app
-flutter build linux --debug
+scripts/build.sh linux --debug
 ```
+
+`scripts/run.sh -d <device>` is the equivalent for `flutter run`. The wrappers
+pass `MESHCHAMELEON_GIT_COMMIT`, `MESHCHAMELEON_GIT_DIRTY`, and
+`MESHCHAMELEON_BUILD_TIME` as `--dart-define` values. Direct `flutter build` /
+`flutter run` commands still work, but the About page reports the commit and
+build time as unavailable instead of showing stale values. `MESHCHAMELEON_*`
+environment overrides and `SOURCE_DATE_EPOCH` are honoured for CI or
+reproducible builds.
+
+## Build metadata and session diagnostics
+
+The Home footer and **About & diagnostics** page share one `BuildInfo`
+(`app/lib/services/build_info.dart`): version/build number from
+`package_info_plus`, plus the wrapper-injected commit and UTC compile time.
+Android split APKs may report an ABI-adjusted version code (for example `1001`)
+rather than the pubspec `+1`; the page labels this as the installed build/version
+code.
+
+Diagnostics are deliberately **session-only** and never written to disk. They
+combine three sources:
+
+- `CompanionMetrics` — MeshCore client sessions, commands, replies/pushes,
+  payload bytes, disconnect reasons, and errors.
+- `LinkMetrics` via `MeteredRadioLink` — connect/reconnect outcomes, raw
+  device TX/RX packets and bytes, device requests/timeouts, and last RSSI/SNR.
+  The wrapper sits below `SharedRadioHub`, so raw frames are counted once, not
+  once per live identity.
+- `MeshNode.sessionStats` — cached per-identity semantic TX/RX, flood/direct
+  counters, receive errors, queue depth, and airtime. This getter performs no
+  device I/O; do not replace it with a periodic `STATS_TYPE_RADIO` request.
+
+Per-identity `sent` follows the existing `CMD_GET_STATS` semantics: it counts a
+packet queued for transmission before the raw send succeeds. Raw link TX counts
+successful `sendRawPacket` calls. Per-identity RX counts include the same
+received frame once per live identity, while physical RX counts are unique.
+Keep physical totals in **Mesh traffic** and per-identity totals under
+**Identities**; do not combine them. Copying diagnostics is a user-initiated
+local action and includes local addresses, device names, and recent log lines,
+but never private key material.
 
 ## Branding (icon + splash)
 

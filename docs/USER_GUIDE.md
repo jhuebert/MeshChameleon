@@ -22,6 +22,7 @@ identities, background operation, backups, and troubleshooting.
 - [Manage identities](#manage-identities)
 - [Everyday use](#everyday-use)
 - [Background operation and battery](#background-operation-and-battery)
+- [Version and diagnostics](#version-and-diagnostics)
 - [Logs and troubleshooting](#logs-and-troubleshooting)
 - [Privacy and security](#privacy-and-security)
 - [Backups, updates, and uninstalling](#backups-updates-and-uninstalling)
@@ -78,8 +79,13 @@ The home screen is the control panel for the whole app.
 | **Resume on launch** | Reconnects the last device and restarts the proxy when you open the app. |
 | **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Disable** to request an exemption. |
 
-The receipt icon in the top-right corner opens the **Log** screen. Check it when
-something does not work as expected.
+The receipt icon in the top-right corner opens the **Log** screen. The info icon
+opens **About & diagnostics**. The version footer at the bottom of the home
+screen opens the same page.
+
+> The footer shows the installed version and, for builds made with
+> `scripts/build.sh`, the short Git commit. A build made with a plain
+> `flutter build` shows **dev build** instead of an invented hash/date.
 
 ### Status card
 
@@ -369,6 +375,35 @@ the next time you open the app.
 
 This is not a boot service. After a phone reboot, open MeshChameleon once before
 relying on the proxy again.
+
+## Version and diagnostics
+
+Open **About & diagnostics** from the info icon or the version footer on the
+home screen.
+
+- **Build** shows the installed version, build/version code, Git commit (with a
+  dirty marker when the working tree had changes), UTC compile time, build
+  mode, platform, and package name.
+- **Status** shows app uptime, proxy and device state, connected-session time,
+  foreground-service state, and battery-optimization status.
+- **MeshCore app** shows client connections, commands, replies/pushes, bytes,
+  disconnects, evictions, idle timeouts, and errors for this app session.
+- **Device link** shows connect/reconnect outcomes, drops, device commands,
+  firmware details, and connected time.
+- **Mesh traffic** shows unique physical TX/RX totals, bytes, transmit errors,
+  and the last signal.
+- **Identities** shows each identity's semantic flood/direct counters, receive
+  errors, queue depth, airtime, contacts, channels, and queued messages.
+
+These statistics cover **this app session only**. Closing the app resets them;
+nothing is uploaded or written to a stats file. Per-identity received counts
+include the same frame once per live identity, while the physical radio totals
+are unique.
+
+Tap the copy icon in the top-right corner to put a plain-text report on the
+clipboard. The report includes local addresses, device names, identity prefixes,
+and the last 100 log lines. It never includes private identity keys. Review it
+before sharing.
 
 ## Logs and troubleshooting
 

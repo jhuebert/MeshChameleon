@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'bridge.dart';
+import 'metrics.dart';
 
 /// Configuration for [CompanionServer].
 class CompanionServerConfig {
@@ -36,7 +37,9 @@ class CompanionServer implements CompanionPushSink {
     required CompanionBridge bridge,
     this.config = const CompanionServerConfig(),
     this.onLog,
-  }) : _bridge = bridge;
+    CompanionMetrics? metrics,
+  })  : _bridge = bridge,
+        metrics = metrics ?? CompanionMetrics();
 
   CompanionBridge _bridge;
 
@@ -45,6 +48,10 @@ class CompanionServer implements CompanionPushSink {
 
   final CompanionServerConfig config;
   final void Function(String message)? onLog;
+
+  /// Session-only client traffic counters. The app may retain this object
+  /// across proxy restarts so its totals survive a stop/start.
+  final CompanionMetrics metrics;
 
   ServerSocket? _server;
   Socket? _client;
@@ -137,9 +144,11 @@ class CompanionServer implements CompanionPushSink {
       _log('evicting previous client');
       final old = _client;
       _client = null;
+      metrics.clientEvicted();
       old?.destroy();
     }
     _client = socket;
+    metrics.recordClientConnected(socket.remoteAddress.address);
     _connectionGeneration++;
     final generation = _connectionGeneration;
     _codec.reset();
@@ -156,13 +165,14 @@ class CompanionServer implements CompanionPushSink {
         _resetIdleTimer();
         final frames = _codec.ingest(data);
         for (final frame in frames) {
+          metrics.commandReceived(frame.length);
           _enqueueCommand(generation, frame);
         }
       },
       onError: (Object e) {
         if (!identical(socket, _client)) return;
         _log('client error: $e');
-        _disconnectClient(reason: 'error');
+        _disconnectClient(reason: 'error', error: true);
       },
       onDone: () {
         if (!identical(socket, _client)) return;
@@ -189,11 +199,19 @@ class CompanionServer implements CompanionPushSink {
     });
   }
 
-  void _disconnectClient({required String reason}) {
+  void _disconnectClient({
+    required String reason,
+    bool error = false,
+    bool idleTimeout = false,
+  }) {
     final client = _client;
     _client = null;
     _connectionGeneration++;
     _signBuffer.clear();
+    if (client != null) {
+      metrics.clientDisconnected(reason,
+          error: error, idleTimeout: idleTimeout);
+    }
     _log('client disconnected: $reason');
     _bridge.setPushSink(null);
     _heartbeatTimer?.cancel();
@@ -209,7 +227,7 @@ class CompanionServer implements CompanionPushSink {
     _idleTimer?.cancel();
     if (config.clientIdleTimeout <= Duration.zero) return;
     _idleTimer = Timer(config.clientIdleTimeout, () {
-      _disconnectClient(reason: 'idle timeout');
+      _disconnectClient(reason: 'idle timeout', idleTimeout: true);
     });
   }
 
@@ -226,34 +244,51 @@ class CompanionServer implements CompanionPushSink {
   // -------------------------------------------------------------------------
 
   /// Send a command reply. Replies from an older client generation are dropped.
-  void _sendFrame(List<int> payload) {
+  void _sendFrame(List<int> payload, {bool error = false}) {
     final generation = _commandGeneration;
     if (generation != null && generation != _connectionGeneration) {
       _log('dropping reply from evicted client generation $generation');
       return;
     }
-    _writeTo(_client, payload);
+    _writeTo(_client, payload, push: false, error: error);
   }
 
   /// Send an asynchronous push to the current client regardless of which
   /// command is awaiting a device reply.
-  void _sendPushFrame(List<int> payload) => _writeTo(_client, payload);
+  void _sendPushFrame(List<int> payload) =>
+      _writeTo(_client, payload, push: true);
 
-  void _writeTo(Socket? client, List<int> payload) {
+  void _writeTo(
+    Socket? client,
+    List<int> payload, {
+    required bool push,
+    bool error = false,
+  }) {
     if (client == null) return;
     try {
       client.add(_codec.encodeFrame(payload));
+      if (push) {
+        metrics.pushSent(payload.length);
+      } else {
+        metrics.replySent(payload.length);
+        if (error) metrics.errorReplySent();
+      }
     } catch (e) {
+      metrics.writeFailed();
       _log('write failed: $e');
       if (identical(client, _client)) {
-        _disconnectClient(reason: 'write failed');
+        _disconnectClient(reason: 'write failed', error: true);
       }
     }
   }
 
   void sendOk() => _sendFrame(Uint8List.fromList([respCodeOk]));
-  void sendErr(int code) => _sendFrame(Uint8List.fromList([respCodeErr, code]));
-  void sendDisabled() => _sendFrame(Uint8List.fromList([respCodeDisabled]));
+
+  void sendErr(int code) =>
+      _sendFrame(Uint8List.fromList([respCodeErr, code]), error: true);
+
+  void sendDisabled() =>
+      _sendFrame(Uint8List.fromList([respCodeDisabled]), error: true);
 
   void _sendOperationError(CompanionOperationError e) {
     if (e.message != null) {
@@ -597,6 +632,7 @@ class CompanionServer implements CompanionPushSink {
       case cmdReboot:
         await _cmdReboot(data);
       default:
+        metrics.unsupportedCommandReceived();
         _log('unsupported cmd 0x${cmd.toRadixString(16)}');
         sendErr(errCodeUnsupportedCmd);
     }
@@ -607,7 +643,10 @@ class CompanionServer implements CompanionPushSink {
   // -------------------------------------------------------------------------
 
   void _cmdDeviceQuery(Uint8List data) {
-    if (data.isNotEmpty) _appTargetVer = data[0];
+    if (data.isNotEmpty) {
+      _appTargetVer = data[0];
+      metrics.appTargetVersionReceived(data[0]);
+    }
     final info = bridge.getDeviceInfo();
     final w = BufferWriter()
       ..writeByte(respCodeDeviceInfo)
@@ -624,7 +663,10 @@ class CompanionServer implements CompanionPushSink {
   }
 
   void _cmdAppStart(Uint8List data) {
-    if (data.isNotEmpty) _appTargetVer = data[0];
+    if (data.isNotEmpty) {
+      _appTargetVer = data[0];
+      metrics.appTargetVersionReceived(data[0]);
+    }
     final prefs = bridge.getSelfInfo();
     final pubkey = bridge.getPublicKey();
     final w = BufferWriter()
