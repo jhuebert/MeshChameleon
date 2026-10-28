@@ -33,6 +33,16 @@ class IdentityDeleteException implements Exception {
   String toString() => 'IdentityDeleteException($message)';
 }
 
+/// Thrown when an enabled/active transition would violate a catalog invariant.
+class IdentityStateException implements Exception {
+  const IdentityStateException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => 'IdentityStateException($message)';
+}
+
 /// Owns the identity catalog, secure key slots, and per-identity state paths.
 ///
 /// All secrets stay behind [IdentityStore]. This class only ever exposes public
@@ -73,6 +83,12 @@ class IdentityRepository {
     if (index.identities.isEmpty) {
       return _createFirst(existing: index);
     }
+    if (index.needsMigration) {
+      final upgraded = index.upgraded();
+      await indexStore.save(upgraded);
+      index = upgraded;
+      onLog?.call('Upgraded identity catalog to version $identityIndexVersion');
+    }
     final repaired = await _repairActive(index);
     return repaired;
   }
@@ -88,18 +104,38 @@ class IdentityRepository {
 
   Future<IdentityIndex> _repairActive(IdentityIndex index) async {
     final active = index.activeRecord;
-    if (active != null) return index;
-    // Prefer the first record whose key is actually readable; if none is, keep
-    // the first record so the UI can show a recoverable "key unavailable"
-    // state instead of dropping the catalog.
+    if (active != null && active.enabled) return index;
+    // Prefer the first enabled record whose key is actually readable; if none
+    // is, keep the first enabled record so the UI can show a recoverable
+    // "key unavailable" state instead of dropping the catalog. A catalog with
+    // no enabled record is repaired by re-enabling the first one, because the
+    // active identity must remain servable.
     IdentityRecord? chosen;
     for (final record in index.identities) {
+      if (!record.enabled) continue;
       if (await _secureStore.loadById(record.id) != null) {
         chosen = record;
         break;
       }
     }
-    chosen ??= index.identities.first;
+    for (final record in index.identities) {
+      if (chosen != null) break;
+      if (record.enabled) chosen = record;
+    }
+    if (chosen == null) {
+      final first = index.identities.first.copyWith(enabled: true);
+      chosen = first;
+      final repaired = index.copyWith(
+        activeId: first.id,
+        identities: [
+          for (final record in index.identities)
+            if (record.id == first.id) first else record,
+        ],
+      );
+      await indexStore.save(repaired);
+      onLog?.call('Re-enabled the last identity to keep an active identity');
+      return repaired;
+    }
     final repaired = index.copyWith(activeId: chosen.id);
     await indexStore.save(repaired);
     onLog?.call('Repaired active identity selection');
@@ -250,7 +286,9 @@ class IdentityRepository {
         break;
       }
     }
-    if (record == null) throw const IdentityDeleteException('identity not found');
+    if (record == null) {
+      throw const IdentityDeleteException('identity not found');
+    }
     if (index.activeId == id) {
       throw const IdentityDeleteException(
         'activate another identity before deleting this one',
@@ -333,10 +371,50 @@ class IdentityRepository {
     return updated;
   }
 
+  /// Enable or disable one identity.
+  ///
+  /// The active identity must stay enabled because it is the one served over
+  /// the companion endpoint; activate another identity first.
+  Future<IdentityRecord> setEnabled(String id, bool enabled) async {
+    final index = await loadOrCreate();
+    IdentityRecord? record;
+    for (final item in index.identities) {
+      if (item.id == id) {
+        record = item;
+        break;
+      }
+    }
+    if (record == null) {
+      throw const IdentityStateException('identity not found');
+    }
+    if (!enabled && index.activeId == id) {
+      throw const IdentityStateException(
+        'activate another identity before disabling this one',
+      );
+    }
+    return _updateRecord(
+      id,
+      (item) => item.copyWith(enabled: enabled),
+      existing: index,
+    );
+  }
+
   Future<void> setActive(String id) async {
     final index = await loadOrCreate();
-    if (!index.identities.any((record) => record.id == id)) {
+    IdentityRecord? record;
+    for (final item in index.identities) {
+      if (item.id == id) {
+        record = item;
+        break;
+      }
+    }
+    if (record == null) {
       throw const IdentityDeleteException('identity not found');
+    }
+    if (!record.enabled) {
+      throw const IdentityStateException(
+        'enable the identity before activating it',
+      );
     }
     if (index.activeId == id) return;
     await indexStore.save(index.copyWith(activeId: id));

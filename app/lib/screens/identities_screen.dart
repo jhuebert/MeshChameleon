@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:provider/provider.dart';
 
@@ -16,12 +19,26 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
   Future<void> _activate(IdentitySummary summary) async {
     final app = context.read<AppState>();
     if (app.busy || summary.active || !summary.keyAvailable) return;
+    if (!summary.enabled) {
+      _snack('Enable ${summary.name} before activating it');
+      return;
+    }
     final ok = await app.activateIdentity(summary.id);
     if (!mounted) return;
     if (ok) {
       Navigator.of(context).pop();
     } else {
       _snack('Could not activate ${summary.name}');
+    }
+  }
+
+  Future<void> _setEnabled(IdentitySummary summary, bool enabled) async {
+    final app = context.read<AppState>();
+    if (app.busy || summary.enabled == enabled) return;
+    final ok = await app.setIdentityEnabled(summary.id, enabled);
+    if (!mounted) return;
+    if (!ok) {
+      _snack('Could not ${enabled ? 'enable' : 'disable'} ${summary.name}');
     }
   }
 
@@ -179,8 +196,10 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
                         summary: summary,
                         busy: app.busy,
                         canDelete: !summary.active && identities.length > 1,
+                        canDisable: !summary.active,
                         isLast: identities.length == 1,
                         onTap: () => _activate(summary),
+                        onToggle: () => _setEnabled(summary, !summary.enabled),
                         onClear: () => _clear(summary),
                         onDelete: () => _delete(summary),
                       );
@@ -213,11 +232,14 @@ class _NewIdentityDialogState extends State<_NewIdentityDialog> {
     super.dispose();
   }
 
+  String get _name => _controller.text.trim().isEmpty
+      ? widget.suggestion
+      : _controller.text.trim();
+
+  int get _byteLength => utf8.encode(_controller.text).length;
+
   void _submit() {
-    final candidate = _controller.text.trim().isEmpty
-        ? widget.suggestion
-        : _controller.text.trim();
-    final valid = validateAdvertName(candidate);
+    final valid = validateAdvertName(_name);
     if (valid == null) {
       setState(() => _error = 'Enter a valid name');
       return;
@@ -233,13 +255,17 @@ class _NewIdentityDialogState extends State<_NewIdentityDialog> {
         controller: _controller,
         autofocus: true,
         textInputAction: TextInputAction.done,
+        inputFormatters: [
+          _Utf8ByteLengthLimitingTextInputFormatter(maxAdvertNameBytes),
+        ],
         decoration: InputDecoration(
           labelText: 'Name',
-          helperText:
-              'Up to 31 UTF-8 bytes. You can change it later in the MeshCore app.',
+          helperText: 'Max $maxAdvertNameBytes bytes',
+          counterText: '$_byteLength/$maxAdvertNameBytes bytes',
           errorText: _error,
           border: const OutlineInputBorder(),
         ),
+        onChanged: (_) => setState(() => _error = null),
         onSubmitted: (_) => _submit(),
       ),
       actions: [
@@ -252,6 +278,35 @@ class _NewIdentityDialogState extends State<_NewIdentityDialog> {
           child: const Text('Create'),
         ),
       ],
+    );
+  }
+}
+
+/// Truncates edits at a UTF-8 byte limit rather than a character count.
+class _Utf8ByteLengthLimitingTextInputFormatter extends TextInputFormatter {
+  _Utf8ByteLengthLimitingTextInputFormatter(this.maxBytes);
+
+  final int maxBytes;
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    if (utf8.encode(newValue.text).length <= maxBytes) return newValue;
+    final buffer = StringBuffer();
+    var used = 0;
+    for (final rune in newValue.text.runes) {
+      final char = String.fromCharCode(rune);
+      final size = utf8.encode(char).length;
+      if (used + size > maxBytes) break;
+      buffer.write(char);
+      used += size;
+    }
+    final text = buffer.toString();
+    return TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
     );
   }
 }
@@ -285,8 +340,10 @@ class _IdentityCard extends StatelessWidget {
     required this.summary,
     required this.busy,
     required this.canDelete,
+    required this.canDisable,
     required this.isLast,
     required this.onTap,
+    required this.onToggle,
     required this.onClear,
     required this.onDelete,
   });
@@ -294,8 +351,10 @@ class _IdentityCard extends StatelessWidget {
   final IdentitySummary summary;
   final bool busy;
   final bool canDelete;
+  final bool canDisable;
   final bool isLast;
   final VoidCallback onTap;
+  final VoidCallback onToggle;
   final VoidCallback onClear;
   final VoidCallback onDelete;
 
@@ -308,14 +367,30 @@ class _IdentityCard extends StatelessWidget {
     return 'Delete identity';
   }
 
+  String get _toggleLabel {
+    if (!summary.enabled) return 'Enable identity';
+    if (!canDisable) {
+      return 'Activate another identity before disabling this one';
+    }
+    return 'Disable identity';
+  }
+
+  String get _status {
+    if (!summary.enabled) return 'Disabled';
+    if (summary.live) return 'Live';
+    return 'Inactive';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
       child: ListTile(
-        onTap: busy || !summary.keyAvailable ? null : onTap,
+        onTap: busy || !summary.keyAvailable || !summary.enabled ? null : onTap,
         leading: Icon(
-          summary.active ? Icons.key : Icons.key_outlined,
+          summary.enabled
+              ? (summary.active ? Icons.key : Icons.key_outlined)
+              : Icons.key_off,
           color: summary.active ? theme.colorScheme.primary : null,
         ),
         title: Row(
@@ -344,8 +419,7 @@ class _IdentityCard extends StatelessWidget {
           children: [
             const SizedBox(height: 4),
             Text(
-              '#${summary.prefixHex}'
-              '${summary.live ? ' · Live' : ''}',
+              '#${summary.prefixHex} · $_status',
             ),
             Text(
               '${summary.channelCount} channels · '
@@ -381,10 +455,16 @@ class _IdentityCard extends StatelessWidget {
             PopupMenuButton<String>(
               enabled: !busy,
               onSelected: (value) {
+                if (value == 'toggle') onToggle();
                 if (value == 'clear') onClear();
                 if (value == 'delete') onDelete();
               },
               itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'toggle',
+                  enabled: !summary.enabled || canDisable,
+                  child: Text(_toggleLabel),
+                ),
                 const PopupMenuItem(
                   value: 'clear',
                   child: Text('Clear local data'),

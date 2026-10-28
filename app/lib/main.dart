@@ -332,7 +332,7 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
           ignored == null
               ? 'Checking…'
               : ignored
-                  ? 'Exempt — the background link runs reliably'
+                  ? 'Exempt'
                   : 'Optimized — the OS may throttle the background link',
         ),
         trailing: ignored == false
@@ -344,13 +344,6 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
       ),
     );
   }
-}
-
-String _batteryDiagnosticText(AppState app) {
-  final age = app.batterySampleAgeSeconds;
-  if (age == null) return 'Radio battery: waiting for first sample';
-  final status = app.batteryStale ? 'stale' : 'fresh';
-  return 'Radio battery: $status sample (${age}s old)';
 }
 
 class _StatusCard extends StatelessWidget {
@@ -375,8 +368,6 @@ class _StatusCard extends StatelessWidget {
             Text('Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
             Text('Proxy: ${app.proxyStatus.name}'
                 '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),
-            if (app.deviceConnected)
-              Text(_batteryDiagnosticText(app)),
           ],
         ),
       ),

@@ -240,6 +240,33 @@ void main() {
     expect(secondKey, isNot(firstKey));
   });
 
+  test('disable stops a non-active runtime and enable restarts it', () async {
+    final first = app.identities.single.id;
+    final second = await app.createIdentity(name: 'Second');
+    final secondId = second!.id;
+    final link = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    await app.connectSimulated(simulatedLink: link);
+    addTearDown(app.disconnectDevice);
+
+    expect(app.manager!.runtimes, hasLength(2));
+    expect(await app.setIdentityEnabled(secondId, false), isTrue);
+    expect(app.manager!.runtimes, hasLength(1));
+    expect(
+      app.identities.firstWhere((summary) => summary.id == secondId).enabled,
+      isFalse,
+    );
+    expect(await app.setIdentityEnabled(first, false), isFalse,
+        reason: 'the active identity must stay enabled');
+    expect(await app.setIdentityEnabled(secondId, true), isTrue);
+    expect(app.manager!.runtimes, hasLength(2));
+    expect(
+      app.identities.firstWhere((summary) => summary.id == secondId).live,
+      isTrue,
+    );
+  });
+
   test('create leaves the active identity unchanged and delete is constrained',
       () async {
     final first = app.identities.single.id;

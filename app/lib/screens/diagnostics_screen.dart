@@ -70,7 +70,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('About & diagnostics'),
+        title: const Text('Information'),
         actions: [
           IconButton(
             icon: const Icon(Icons.copy_all),
@@ -112,7 +112,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         title: 'Build',
         icon: Icons.info_outline,
         children: [
-          for (final entry in snapshot.buildInfo.details)
+          for (final entry in snapshot.buildInfo.cardDetails)
             _InfoRow(label: entry.key, value: entry.value),
         ],
       );
@@ -127,11 +127,6 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           ),
           _InfoRow(label: 'Proxy', value: snapshot.proxyLabel),
           _InfoRow(label: 'Device', value: snapshot.deviceLabelText),
-          if (snapshot.deviceSessionDuration != null)
-            _InfoRow(
-              label: 'Connected for',
-              value: formatDuration(snapshot.deviceSessionDuration!),
-            ),
           _InfoRow(
             label: 'Identities',
             value: '${snapshot.identities.length} '
@@ -140,14 +135,6 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           _InfoRow(
             label: 'Service',
             value: snapshot.foregroundServiceRunning ? 'Running' : 'Stopped',
-          ),
-          _InfoRow(
-            label: 'Battery',
-            value: snapshot.batteryOptimizationLabel,
-          ),
-          _InfoRow(
-            label: 'Auto-resume',
-            value: snapshot.autoResume ? 'On' : 'Off',
           ),
           if (snapshot.identityDatabaseError != null)
             _InfoRow(
@@ -180,24 +167,6 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         _InfoRow(
           label: 'Protocol',
           value: metrics.appTargetVer?.toString() ?? 'unknown',
-        ),
-        _InfoRow(
-          label: 'Connections',
-          value: formatCount(metrics.clientConnections),
-        ),
-        _InfoRow(
-          label: 'Commands',
-          value: formatCount(metrics.commandsReceived),
-        ),
-        _InfoRow(
-          label: 'Replies / pushes',
-          value: '${formatCount(metrics.repliesSent)} / '
-              '${formatCount(metrics.pushesSent)}',
-        ),
-        _InfoRow(
-          label: 'Bytes in / out',
-          value: '${formatBytes(metrics.payloadBytesIn)} / '
-              '${formatBytes(metrics.payloadBytesOut)}',
         ),
         _InfoRow(
           label: 'Disconnects',
@@ -239,39 +208,19 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     '${snapshot.deviceInfo!.version}'
                 .trim(),
           ),
-          _InfoRow(
-            label: 'Capacity',
-            value: '${snapshot.deviceInfo!.maxContacts} contacts, '
-                '${snapshot.deviceInfo!.maxChannels} channels',
-          ),
         ],
         _InfoRow(
-          label: 'Connects',
+          label: 'Connection',
           value: '${formatCount(metrics.connectAttempts)} attempts, '
-              '${formatCount(metrics.connectSuccesses)} ok, '
-              '${formatCount(metrics.connectFailures)} failed',
+              '${formatCount(metrics.connectSuccesses)} connected, '
+              '${formatCount(metrics.unexpectedDrops)} dropped, '
+              '${formatCount(snapshot.reconnectAttempts)} reconnected',
         ),
-        _InfoRow(
-          label: 'Disconnects',
-          value: '${formatCount(metrics.disconnects)} total, '
-              '${formatCount(metrics.unexpectedDrops)} unexpected',
-        ),
-        _InfoRow(
-          label: 'Reconnects',
-          value: '${formatCount(snapshot.reconnectAttempts)} attempts, '
-              '${formatCount(snapshot.reconnectSuccesses)} ok',
-        ),
-        _InfoRow(
-          label: 'Commands',
-          value: '${formatCount(metrics.deviceRequests)} '
-              '(${formatCount(metrics.deviceRequestFailures)} errors, '
-              '${formatCount(metrics.deviceTimeouts)} timeouts)',
-        ),
-        _InfoRow(
-          label: 'Connected',
-          value: '${formatDuration(metrics.totalConnected)} total, '
-              '${formatDuration(metrics.currentSessionDuration)} current',
-        ),
+        if (snapshot.deviceConnected)
+          _InfoRow(
+            label: 'Connected',
+            value: formatDuration(metrics.currentSessionDuration),
+          ),
         if (metrics.lastError != null)
           _InfoRow(label: 'Last error', value: metrics.lastError!),
       ],
@@ -329,9 +278,14 @@ class _IdentityTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final packets = identity.packets;
+    final status = !identity.enabled
+        ? ' · disabled'
+        : identity.live
+            ? ' · live'
+            : '';
     final subtitle = '#${identity.prefixHex}'
         '${identity.active ? ' · active' : ''}'
-        '${identity.live ? ' · live' : ''}'
+        '$status'
         ' · ${identity.contactCount} contacts'
         ' · ${identity.channelCount} channels';
     return ExpansionTile(
@@ -345,7 +299,10 @@ class _IdentityTile extends StatelessWidget {
       subtitle: Text(subtitle),
       children: [
         if (packets == null) ...[
-          const _InfoRow(label: 'Status', value: 'Not live'),
+          _InfoRow(
+            label: 'Status',
+            value: identity.enabled ? 'Not live' : 'Disabled',
+          ),
           if (identity.unavailableReason != null)
             _InfoRow(label: 'Reason', value: identity.unavailableReason!),
         ] else ...[

@@ -47,20 +47,23 @@ does through a companion:
 - switch between identities without touching the radio
 - reconnect on launch, if **Resume on launch** is enabled
 - check the installed version and live link statistics in
-  **About & diagnostics**
+  **Information**
 
 ## Using more than one identity
 
 Each identity has its own name, key, contacts, channels, and message queue. While
-a device is connected, **all identities keep receiving**, so messages still
-arrive for the ones you are not currently using. The **active** identity is the
-one your MeshCore app sees; tap another identity to switch, and the MeshCore app
-reconnects to that identity.
+a device is connected, **all enabled identities keep receiving**, so messages
+still arrive for the ones you are not currently using. The **active** identity is
+the one your MeshCore app sees; tap another identity to switch, and the MeshCore
+app reconnects to that identity.
 
-You can create extra identities from the identity screen. **Clear local data**
-keeps the identity and its name but resets its contacts, channels, and messages.
-**Delete** removes an identity permanently and is only available for inactive
-identities, not the last remaining one.
+You can create extra identities from the identity screen. Disable an identity to
+stop it from running and receiving while keeping its key, contacts, channels, and
+queue for later; re-enable it whenever you want. **Clear local data** keeps the
+identity and its name but resets its contacts, channels, and messages. **Delete**
+removes an identity permanently and is only available for inactive identities,
+not the last remaining one. The active identity must stay enabled; activate
+another identity first if you want to disable it.
 
 ## How it works
 
@@ -87,7 +90,8 @@ The important part: **your phone owns the identity, not the radio.**
 
 ## What you need
 
-- An Android phone. iOS is not supported yet.
+- An Android phone running Android 7.0 (API 24) or newer. iOS is not supported
+  yet.
 - A MeshCore companion radio with its normal firmware, reachable over Bluetooth
   or Wi-Fi/Ethernet.
 - A MeshCore client app that can use a **network companion** (a companion

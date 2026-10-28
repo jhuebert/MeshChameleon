@@ -51,7 +51,7 @@ void main() {
     await tester.tap(find.textContaining('MeshChameleon 0.1.0'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
-    expect(find.text('About & diagnostics'), findsOneWidget);
+    expect(find.text('Information'), findsOneWidget);
     expect(find.text('Version'), findsOneWidget);
     expect(find.text('Uptime'), findsOneWidget);
 

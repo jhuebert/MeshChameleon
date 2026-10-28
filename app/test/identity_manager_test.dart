@@ -9,6 +9,7 @@ import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/services/identity_manager.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
+import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 
 void main() {
@@ -96,6 +97,48 @@ void main() {
     expect(summaries[first]!.contactCount, 0);
     expect(summaries[second.id]!.queuedDirect, 1);
     expect(summaries[second.id]!.contactCount, 1);
+  });
+
+  test('disabled identity does not run and can be re-enabled live', () async {
+    await manager.load();
+    final first = manager.summaries.single.id;
+    final second = await repository.create(name: 'Second');
+    await manager.load();
+    expect(await manager.setEnabled(second.id, false), isTrue);
+
+    IdentitySummary summaryFor(String id) =>
+        manager.summaries.firstWhere((summary) => summary.id == id);
+    expect(summaryFor(second.id).enabled, isFalse);
+    expect(summaryFor(second.id).live, isFalse);
+
+    await start();
+    expect(manager.runtimes, hasLength(1));
+    expect(manager.runtimes.single.record.id, first);
+    expect(summaryFor(second.id).live, isFalse);
+
+    expect(await manager.setEnabled(second.id, true), isTrue);
+    expect(manager.runtimes, hasLength(2));
+    expect(summaryFor(second.id).enabled, isTrue);
+    expect(summaryFor(second.id).live, isTrue);
+
+    expect(await manager.setEnabled(first, false), isFalse,
+        reason: 'the active identity must stay enabled');
+    expect(await manager.setEnabled(second.id, false), isTrue);
+    expect(manager.runtimes, hasLength(1));
+    expect(summaryFor(second.id).live, isFalse);
+
+    final restarted = IdentityManager(
+      repository: repository,
+      notifyDebounce: const Duration(milliseconds: 1),
+    );
+    addTearDown(restarted.dispose);
+    await restarted.load();
+    expect(
+      restarted.summaries
+          .firstWhere((summary) => summary.id == second.id)
+          .enabled,
+      isFalse,
+    );
   });
 
   test('active_is_first_then_case_insensitive_name_order', () async {

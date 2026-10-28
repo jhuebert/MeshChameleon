@@ -170,6 +170,7 @@ class AppState extends ChangeNotifier {
             prefixHex: summary.prefixHex,
             active: summary.active,
             live: summary.live,
+            enabled: summary.enabled,
             contactCount: summary.contactCount,
             channelCount: summary.channelCount,
             queuedDirect: summary.queuedDirect,
@@ -384,6 +385,30 @@ class AppState extends ChangeNotifier {
       return ok;
     } catch (e) {
       log('Identity activation failed: $e');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  /// Enable or disable an identity. The active identity cannot be disabled.
+  Future<bool> setIdentityEnabled(String id, bool enabled) async {
+    if (busy) return false;
+    final manager = _manager;
+    if (manager == null) return false;
+    busy = true;
+    notifyListeners();
+    try {
+      final ok = await manager.setEnabled(id, enabled);
+      if (ok) {
+        final summary = identities.firstWhere((identity) => identity.id == id);
+        log('${enabled ? 'Enabled' : 'Disabled'} identity ${summary.name}');
+        await _updateNotification();
+      }
+      return ok;
+    } catch (e) {
+      log('Could not ${enabled ? 'enable' : 'disable'} identity: $e');
       return false;
     } finally {
       busy = false;

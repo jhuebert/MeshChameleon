@@ -70,6 +70,7 @@ class IdentityDiagnostics {
     required this.channelCount,
     required this.queuedDirect,
     required this.queuedChannel,
+    this.enabled = true,
     this.unavailableReason,
     this.packets,
   });
@@ -79,6 +80,7 @@ class IdentityDiagnostics {
   final String prefixHex;
   final bool active;
   final bool live;
+  final bool enabled;
   final int contactCount;
   final int channelCount;
   final int queuedDirect;
@@ -247,6 +249,10 @@ class DiagnosticsSnapshot {
         'the same received frame once per live identity.');
     for (final identity in identities) {
       final packets = identity.packets;
+      if (!identity.enabled) {
+        line('- ${identity.name} [${identity.prefixHex}]: disabled');
+        continue;
+      }
       if (packets == null) {
         line('- ${identity.name} [${identity.prefixHex}]: not live');
         continue;

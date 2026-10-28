@@ -19,6 +19,7 @@ class IdentitySummary {
     required this.contactCount,
     required this.queuedDirect,
     required this.queuedChannel,
+    this.enabled = true,
     this.unavailableReason,
   });
 
@@ -28,6 +29,7 @@ class IdentitySummary {
   final int createdAt;
   final bool active;
   final bool live;
+  final bool enabled;
   final bool keyAvailable;
   final int channelCount;
   final int contactCount;

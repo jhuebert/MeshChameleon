@@ -80,7 +80,7 @@ The home screen is the control panel for the whole app.
 | **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Disable** to request an exemption. |
 
 The receipt icon in the top-right corner opens the **Log** screen. The info icon
-opens **About & diagnostics**. The version footer at the bottom of the home
+opens the **Information** page. The version footer at the bottom of the home
 screen opens the same page.
 
 > The footer shows the installed version and, for builds made with
@@ -97,8 +97,6 @@ The status card is a quick health check:
   is running and receiving; this requires a connected device.
 - **Device** — `connected` or `disconnected`.
 - **Proxy** — `stopped` or `running (port 5000)`.
-- **Radio battery** — on Android, a fresh/stale battery sample appears when a
-  device is connected.
 
 ## Connect a radio
 
@@ -118,7 +116,7 @@ operation.
 1. Power on the MeshCore companion and keep it nearby.
 2. Make sure no other phone or app is connected to the companion. A companion
    normally accepts one connection at a time.
-3. On the **Bluetooth** tab, tap **Scan for MeshCore devices**.
+3. On the **Bluetooth** tab, tap **Scan for devices**.
 4. Grant the **Nearby devices** permission if Android asks.
 5. Wait for the radio to appear. Its advertised MeshCore name and signal
    strength are shown.
@@ -167,8 +165,8 @@ If the connection fails:
 When a device link is active:
 
 - The home screen shows **Device: connected**.
-- Every identity in the catalog starts running; the status card shows how many
-  are live.
+- Every enabled identity in the catalog starts running; the status card shows how
+  many are live.
 - Android shows an ongoing **MeshChameleon** notification. Keep it visible;
   it is what keeps the link alive when you switch apps.
 - The radio's own MeshCore identity is not used or exposed by MeshChameleon.
@@ -245,7 +243,7 @@ Open the identities screen by tapping the identity card on the home screen.
 </p>
 
 1. Tap **Create identity**.
-2. Enter a name. The limit is 31 UTF-8 bytes.
+2. Enter a name. The counter shows UTF-8 bytes used out of the 31-byte limit.
 3. Tap **Create**.
 
 The new identity is created **inactive**. It starts running immediately, but it
@@ -266,12 +264,24 @@ nothing.
 ### Active vs. live
 
 - **Active** — the identity your MeshCore app is currently connected to.
-- **Live** — the identity is running and receiving while a device is connected.
+- **Live** — the identity is enabled and running while a device is connected.
+- **Disabled** — the identity is kept but not running; it receives nothing and
+  queues nothing until you enable it again.
 
-All identities are live while a device is connected. Inactive identities still
-receive, decrypt, acknowledge, and queue messages addressed to them. They just
-do not send adverts on their own, and your MeshCore app does not see them until
-you switch.
+All enabled identities are live while a device is connected. Inactive but
+enabled identities still receive, decrypt, acknowledge, and queue messages
+addressed to them. They just do not send adverts on their own, and your MeshCore
+app does not see them until you switch.
+
+### Disable or enable an identity
+
+Open the three-dot menu on an identity and choose **Disable identity** to stop it
+from running. Its key, contacts, channels, and queue are kept. Choose **Enable
+identity** to start it again.
+
+The active identity cannot be disabled. Activate another identity first. Messages
+already queued while the identity was disabled stay in its queue until they are
+synced or the identity is enabled again.
 
 ### Queued messages
 
@@ -378,18 +388,18 @@ relying on the proxy again.
 
 ## Version and diagnostics
 
-Open **About & diagnostics** from the info icon or the version footer on the
+Open the **Information** page from the info icon or the version footer on the
 home screen.
 
 - **Build** shows the installed version, build/version code, Git commit (with a
-  dirty marker when the working tree had changes), UTC compile time, build
-  mode, platform, and package name.
-- **Status** shows app uptime, proxy and device state, connected-session time,
-  foreground-service state, and battery-optimization status.
-- **MeshCore app** shows client connections, commands, replies/pushes, bytes,
-  disconnects, evictions, idle timeouts, and errors for this app session.
-- **Device link** shows connect/reconnect outcomes, drops, device commands,
-  firmware details, and connected time.
+  dirty marker when the working tree had changes), UTC compile time, and build
+  mode.
+- **Status** shows app uptime, proxy and device state, foreground-service state,
+  and identity counts.
+- **MeshCore app** shows client status, protocol version, disconnects, and
+  errors for this app session.
+- **Device link** shows firmware details, connection outcomes, connected time,
+  and the last error.
 - **Mesh traffic** shows unique physical TX/RX totals, bytes, transmit errors,
   and the last signal.
 - **Identities** shows each identity's semantic flood/direct counters, receive
@@ -414,6 +424,9 @@ before sharing.
 Tap the receipt icon in the top-right corner of the home screen. The newest
 entries are at the top. The log is the first place to check when a connection,
 the proxy, or an identity does not behave as expected.
+
+Tap the copy icon in the log's top-right corner to put all current log lines on
+the clipboard.
 
 Logs may contain network addresses and contact information. Review them before
 sharing them publicly.
@@ -592,8 +605,9 @@ Yes. Disconnect the current radio and connect another. The identities stay on
 the phone.
 
 **Can I use several identities at once?**  
-All identities stay live and receive while connected, but only the active
-identity is served to your MeshCore app. Tap another identity to switch.
+All enabled identities stay live and receive while connected, but only the
+active identity is served to your MeshCore app. Tap another identity to switch,
+or disable one to stop it running without deleting it.
 
 **Why does the client disconnect when I switch identities?**  
 Serving a different identity changes the companion's identity. The client is

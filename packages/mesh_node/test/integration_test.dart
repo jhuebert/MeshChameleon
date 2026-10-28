@@ -76,6 +76,87 @@ class _Queue<T> {
 Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 25));
 
 void main() {
+  test('path mode applies to floods but preserves saved direct routes',
+      () async {
+    final aliceId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 1);
+    final bobId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 2);
+    final link = FakeDeviceLink();
+    await link.connect();
+    final store = InMemoryNodeStore();
+    final alice = MeshNode(identity: aliceId, link: link, store: store)..start();
+    await alice.addUpdateContact(Contact(
+      publicKey: bobId.publicKey,
+      outPathLen: PathUtils.encodePathLen(2, 1),
+      outPath: [0xAA, 0xBB],
+    ));
+
+    final server = CompanionServer(
+      bridge: alice,
+      config: const CompanionServerConfig(port: 0),
+    );
+    await server.start();
+    final socket = await Socket.connect('127.0.0.1', server.port!);
+    socket.setOption(SocketOption.tcpNoDelay, true);
+    final client = FramedClient(socket);
+
+    Future<Uint8List> command(List<int> payload) async {
+      client.send(payload);
+      return client.next();
+    }
+
+    Uint8List directMessage(String text) => (BufferWriter()
+          ..writeByte(cmdSendTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(0)
+          ..writeUInt32Le(1700000000)
+          ..writeBytes(bobId.publicKey.sublist(0, 6))
+          ..writeString(text)
+          ..writeByte(0))
+        .toBytes();
+
+    try {
+      expect((await command([cmdSetPathHashMode, 0, 2]))[0], respCodeOk);
+      expect((await command([cmdDeviceQuery, appProtocolVersion]))[81], 2);
+
+      final direct = await command(directMessage('saved route'));
+      expect(direct[0], respCodeSent);
+      expect(direct[1], 0);
+      final routedPacket = Packet.readFrom(link.transmitted.last)!;
+      expect(routedPacket.pathHashSize, 2);
+      expect(routedPacket.path, [0xAA, 0xBB]);
+
+      expect((await command([cmdResetPath, ...bobId.publicKey]))[0], respCodeOk);
+      final flood = await command(directMessage('reset route'));
+      expect(flood[0], respCodeSent);
+      expect(flood[1], 1);
+      final floodedPacket = Packet.readFrom(link.transmitted.last)!;
+      expect(floodedPacket.pathLenByte, 0x80);
+      expect(floodedPacket.pathHashSize, 3);
+
+      final channel = BufferWriter()
+        ..writeByte(cmdSendChannelTxtMsg)
+        ..writeByte(txtTypePlain)
+        ..writeByte(0)
+        ..writeUInt32Le(0)
+        ..writeString('channel flood')
+        ..writeByte(0);
+      expect((await command(channel.toBytes()))[0], respCodeOk);
+      await pump(); // channel OK is sent before the radio transmission
+      final channelPacket = Packet.readFrom(link.transmitted.last)!;
+      expect(channelPacket.payloadType, payloadTypeGrpTxt);
+      expect(channelPacket.pathLenByte, 0x80);
+
+      final reloaded = MeshNode(identity: aliceId, link: link, store: store);
+      await reloaded.load();
+      expect(reloaded.getPathHashMode(), 2);
+      reloaded.stop();
+    } finally {
+      await client.close();
+      await server.stop();
+      alice.stop();
+    }
+  });
+
   test('full stack: CLI connects, sees identity, exchanges messages', () async {
     final bus = FakeRadioBus();
     final aliceId = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 1);

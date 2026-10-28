@@ -20,12 +20,14 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('About & diagnostics'), findsOneWidget);
+    expect(find.text('Information'), findsOneWidget);
     expect(find.text('Version'), findsOneWidget);
     expect(find.text('Uptime'), findsOneWidget);
     expect(find.text('MeshCore app'), findsOneWidget);
     expect(find.text('Device link'), findsOneWidget);
     expect(find.text('Mesh traffic'), findsOneWidget);
+    expect(find.text('Platform'), findsNothing);
+    expect(find.text('Package'), findsNothing);
     expect(find.byTooltip('Copy diagnostics'), findsOneWidget);
     expect(find.text('Copy diagnostics'), findsNothing);
     expect(

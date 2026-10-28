@@ -73,6 +73,86 @@ void main() {
     );
   });
 
+  test('version_1_catalog_migrates_with_identities_enabled', () async {
+    final identity = await LocalIdentity.generate();
+    final id = 'd' * 32;
+    final file = File('${dir.path}/identities/index.json');
+    await file.parent.create(recursive: true);
+    await file.writeAsString(jsonEncode({
+      'version': 1,
+      'active_id': id,
+      'identities': [
+        {
+          'id': id,
+          'public_key': bytesToHex(identity.publicKey),
+          'name': 'Old',
+          'created_at': 1,
+        },
+      ],
+    }));
+
+    final index = await repository().loadOrCreate();
+
+    expect(index.version, identityIndexVersion);
+    expect(index.identities.single.enabled, isTrue);
+    final raw = jsonDecode(await file.readAsString()) as Map<String, Object?>;
+    expect(raw['version'], identityIndexVersion);
+    final records = raw['identities'] as List<Object?>;
+    expect((records.single as Map<String, Object?>)['enabled'], isTrue);
+  });
+
+  test('enabled_flag_round_trips_and_active_must_stay_enabled', () async {
+    final repo = repository();
+    final first = await repo.loadOrCreate();
+    final firstId = first.activeId!;
+    final second = await repo.create(name: 'Second');
+    expect(second.enabled, isTrue);
+
+    final disabled = await repo.setEnabled(second.id, false);
+    expect(disabled.enabled, isFalse);
+    expect(
+      (await repo.loadOrCreate())
+          .identities
+          .firstWhere((record) => record.id == second.id)
+          .enabled,
+      isFalse,
+    );
+    expect(
+      () => repo.setEnabled(firstId, false),
+      throwsA(isA<IdentityStateException>()),
+    );
+    expect(
+      () => repo.setActive(second.id),
+      throwsA(isA<IdentityStateException>()),
+    );
+
+    final enabled = await repo.setEnabled(second.id, true);
+    expect(enabled.enabled, isTrue);
+    await repo.setActive(second.id);
+    expect((await repo.loadOrCreate()).activeId, second.id);
+  });
+
+  test('disabled_active_selection_is_repaired_to_an_enabled_identity',
+      () async {
+    final repo = repository();
+    final first = await repo.loadOrCreate();
+    final firstId = first.activeId!;
+    final second = await repo.create(name: 'Second');
+    await repo.setEnabled(second.id, false);
+    final current = await repo.loadOrCreate();
+    await IdentityIndexStore(
+      file: File('${dir.path}/identities/index.json'),
+    ).save(current.copyWith(activeId: second.id));
+
+    final repaired = await repo.loadOrCreate();
+
+    expect(repaired.activeId, firstId);
+    expect(
+      repaired.identities.firstWhere((record) => record.id == firstId).enabled,
+      isTrue,
+    );
+  });
+
   test('index_rejects_non_hex_identity_ids', () async {
     final key = (await LocalIdentity.generate()).publicKey;
     for (final id in ['../escape', '', 'A' * 32, 'a' * 31]) {
@@ -174,7 +254,8 @@ void main() {
     final secondState = await repo.loadState(second.id);
     expect(firstState!.queue.single.text, 'first');
     expect(secondState!.queue.single.text, 'second');
-    expect(repo.stateFile(first.id).path, isNot(repo.stateFile(second.id).path));
+    expect(
+        repo.stateFile(first.id).path, isNot(repo.stateFile(second.id).path));
   });
 
   test('additional_identities_are_inactive_with_unique_suggestions', () async {
@@ -229,7 +310,8 @@ void main() {
       () => repo.updatePublicKey(first.id, secondKey),
       throwsA(isA<IdentityNameException>()),
     );
-    final unchanged = (await repo.records()).firstWhere((r) => r.id == first.id);
+    final unchanged =
+        (await repo.records()).firstWhere((r) => r.id == first.id);
     expect(unchanged.publicKey, isNot(secondKey));
   });
 
@@ -364,8 +446,8 @@ void main() {
         .list()
         .where((e) => e.path.contains('node_state.json.corrupt-'));
     expect(await quarantined.length, 1);
-    final fresh = await repo.loadState(record.id) ??
-        defaultNodeState(record.name);
+    final fresh =
+        await repo.loadState(record.id) ?? defaultNodeState(record.name);
     expect(fresh.prefs.nodeName, record.name);
   });
 }

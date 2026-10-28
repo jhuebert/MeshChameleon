@@ -7,7 +7,10 @@ import 'dart:typed_data';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// Current on-disk identity index schema.
-const int identityIndexVersion = 1;
+///
+/// Version 2 adds the per-identity `enabled` flag. Version 1 catalogs are read
+/// as enabled and upgraded on the next load.
+const int identityIndexVersion = 2;
 
 /// Thrown when the identity catalog exists but cannot be read safely.
 ///
@@ -35,6 +38,7 @@ class IdentityRecord {
     required Uint8List publicKey,
     required this.name,
     required this.createdAt,
+    this.enabled = true,
   }) : publicKey = Uint8List.fromList(publicKey);
 
   final String id;
@@ -42,15 +46,23 @@ class IdentityRecord {
   final String name;
   final int createdAt;
 
+  /// Whether this identity runs while a device is connected.
+  ///
+  /// Disabled identities keep their key, state, and queue but do not start a
+  /// node, so they cannot receive, queue, or auto-add contacts.
+  final bool enabled;
+
   IdentityRecord copyWith({
     Uint8List? publicKey,
     String? name,
+    bool? enabled,
   }) =>
       IdentityRecord(
         id: id,
         publicKey: publicKey ?? this.publicKey,
         name: name ?? this.name,
         createdAt: createdAt,
+        enabled: enabled ?? this.enabled,
       );
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -58,6 +70,7 @@ class IdentityRecord {
         'public_key': bytesToHex(publicKey),
         'name': name,
         'created_at': createdAt,
+        'enabled': enabled,
       };
 
   static IdentityRecord? fromJson(Map<String, Object?> json) {
@@ -65,8 +78,10 @@ class IdentityRecord {
     final keyHex = json['public_key'];
     final name = json['name'];
     final createdAt = json['created_at'];
+    final enabled = json['enabled'];
     if (id is! String || !_idPattern.hasMatch(id)) return null;
     if (keyHex is! String || name is! String || createdAt is! num) return null;
+    if (enabled != null && enabled is! bool) return null;
     try {
       final key = hexToBytes(keyHex);
       if (key.length != pubKeySize) return null;
@@ -75,6 +90,7 @@ class IdentityRecord {
         publicKey: key,
         name: name,
         createdAt: createdAt.toInt(),
+        enabled: enabled as bool? ?? true,
       );
     } catch (_) {
       return null;
@@ -113,6 +129,15 @@ class IdentityIndex {
         identities: identities ?? this.identities,
       );
 
+  /// Whether this catalog was read from an older schema version.
+  bool get needsMigration => version != identityIndexVersion;
+
+  /// Rewrite a loaded catalog at the current schema version.
+  IdentityIndex upgraded() => IdentityIndex(
+        activeId: activeId,
+        identities: identities,
+      );
+
   Map<String, Object?> toJson() => <String, Object?>{
         'version': version,
         'active_id': activeId,
@@ -121,7 +146,9 @@ class IdentityIndex {
 
   static IdentityIndex fromJson(Map<String, Object?> json) {
     final version = json['version'];
-    if (version is! num || version.toInt() != identityIndexVersion) {
+    if (version is! num ||
+        version.toInt() < 1 ||
+        version.toInt() > identityIndexVersion) {
       throw const IdentityIndexException('unsupported identity index version');
     }
     final rawIdentities = json['identities'];
@@ -152,6 +179,7 @@ class IdentityIndex {
       throw const IdentityIndexException('invalid active identity id');
     }
     return IdentityIndex(
+      version: version.toInt(),
       activeId: activeId as String?,
       identities: records,
     );

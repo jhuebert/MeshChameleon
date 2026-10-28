@@ -114,11 +114,11 @@ outside the migration baseline; see
 
 ## Multi-identity runtime
 
-All catalog identities are started as live `MeshNode` runtimes while a device is
-connected. `SharedRadioHub` owns the single raw-RX registration and fans frames
-to every runtime; `LocalMeshRouter` mirrors every outbound packet to the other
-live identities after the RF dispatch succeeds. The active identity's node is
-the only one bound to `CompanionServer`; switching calls
+All enabled catalog identities are started as live `MeshNode` runtimes while a
+device is connected. `SharedRadioHub` owns the single raw-RX registration and
+fans frames to every runtime; `LocalMeshRouter` mirrors every outbound packet to
+the other live identities after the RF dispatch succeeds. The active identity's
+node is the only one bound to `CompanionServer`; switching calls
 `server.switchBridge()` to disconnect the old client and serve the new
 `SELF_INFO` without rebinding the TCP listener.
 
@@ -135,6 +135,10 @@ Rules worth preserving:
 - Inactive identities still receive, decrypt, ACK, and queue traffic, but never
   send unsolicited adverts. Each identity keeps up to 512 queued messages with
   drop-oldest behavior.
+- Disabled identities keep their key, state, and queue but have no live runtime,
+  so they cannot receive, ACK, or queue new traffic until re-enabled. The active
+  identity must stay enabled; a catalog whose active record is disabled is
+  repaired to an enabled identity at startup.
 - `active_id` must reference a record; a missing active selection is repaired to
   a readable identity at startup.
 - Public keys are unique across records. A protocol key import updates the
@@ -158,7 +162,7 @@ carries an explicit schema version:
 
 | Data | Location | Version | Constant |
 |---|---|---|---|
-| Identity catalog | `<app-support>/identities/index.json` | 1 | `identityIndexVersion` |
+| Identity catalog | `<app-support>/identities/index.json` | 2 | `identityIndexVersion` |
 | Per-identity node state | `<app-support>/identities/<id>/node_state.json` | 2 | `nodeStateSchemaVersion` |
 | Saved network targets | `<app-support>/network_connections.json` | 1 | `networkConnectionHistoryVersion` |
 | Last session | `<app-support>/session.json` | 1 | `sessionConfigVersion` |
@@ -168,6 +172,8 @@ Rules for any change after 0.1.0:
 
 - Bump the affected schema version and keep reading the previous released
   version through an explicit migration path.
+- Identity catalog v1 records have no `enabled` field; they are read as enabled
+  and written back as v2 on the first load.
 - Add fixtures for each released on-disk layout and test the migration, not only
   the new format.
 - Never discard a user's identity catalog or node state because the version is
@@ -462,7 +468,7 @@ reproducible builds.
 
 ## Build metadata and session diagnostics
 
-The Home footer and **About & diagnostics** page share one `BuildInfo`
+The Home footer and **Information** page share one `BuildInfo`
 (`app/lib/services/build_info.dart`): version/build number from
 `package_info_plus`, plus the wrapper-injected commit and UTC compile time.
 Android split APKs may report an ABI-adjusted version code (for example `1001`)

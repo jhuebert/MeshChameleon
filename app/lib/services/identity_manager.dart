@@ -44,6 +44,13 @@ class IdentityManager {
   List<IdentitySummary> _summaries = const [];
   Timer? _summaryTimer;
 
+  static const RadioParams _fallbackRadioParams = RadioParams(
+    frequencyHz: 915000000,
+    bandwidthHz: 250000,
+    spreadingFactor: 10,
+    codingRate: 5,
+  );
+
   bool get loaded => _loaded;
   String? get databaseError => _databaseError;
   String? get activeId => _activeId;
@@ -100,6 +107,7 @@ class IdentityManager {
           createdAt: runtime.record.createdAt,
           active: runtime.record.id == _activeId,
           live: true,
+          enabled: runtime.record.enabled,
           keyAvailable: true,
           channelCount: node.channelCount,
           contactCount: node.persistentContactCount,
@@ -118,6 +126,7 @@ class IdentityManager {
         createdAt: record.createdAt,
         active: record.id == _activeId,
         live: false,
+        enabled: record.enabled,
         keyAvailable: keyAvailable,
         channelCount: state?.channels.length ?? 1,
         contactCount: state?.contacts.length ?? 0,
@@ -172,6 +181,7 @@ class IdentityManager {
     _activeId = _index!.activeId;
     final seenKeys = <String, String>{};
     for (final record in _index!.identities) {
+      if (!record.enabled) continue;
       await _startRuntime(
         record,
         hub: _hub!,
@@ -193,6 +203,7 @@ class IdentityManager {
     required TuningParams? tuning,
     required Map<String, String> seenKeys,
   }) async {
+    if (!record.enabled) return;
     final runtime = IdentityRuntime(record);
     _runtimes.add(runtime);
     _runtimeById[record.id] = runtime;
@@ -464,13 +475,7 @@ class IdentityManager {
         record,
         hub: hub,
         physical: _physical ?? const PhysicalCapabilities(),
-        radioParams: _radioParams ??
-            const RadioParams(
-              frequencyHz: 915000000,
-              bandwidthHz: 250000,
-              spreadingFactor: 10,
-              codingRate: 5,
-            ),
+        radioParams: _radioParams ?? _fallbackRadioParams,
         tuning: _tuning,
         seenKeys: seenKeys,
       );
@@ -499,6 +504,69 @@ class IdentityManager {
     _index = await repository.loadOrCreate();
     await refreshSummaries();
     _notifyNow();
+  }
+
+  /// Enable or disable [id], starting or retiring its runtime when live.
+  ///
+  /// The active identity must stay enabled because it is the identity served
+  /// over the companion endpoint. Disabling also releases the identity's node
+  /// so it cannot receive, queue, or add contacts while disabled.
+  Future<bool> setEnabled(String id, bool enabled) async {
+    final index = _index;
+    if (index == null) return false;
+    IdentityRecord? record;
+    for (final item in index.identities) {
+      if (item.id == id) {
+        record = item;
+        break;
+      }
+    }
+    if (record == null) return false;
+    if (!enabled && id == _activeId) return false;
+    if (record.enabled == enabled) return true;
+    try {
+      final updated = await repository.setEnabled(id, enabled);
+      _replaceRecord(updated);
+      record = updated;
+    } catch (e) {
+      onLog?.call('Could not ${enabled ? 'enable' : 'disable'} identity: $e');
+      return false;
+    }
+    final hub = _hub;
+    if (hub != null) {
+      if (!enabled) {
+        final runtime = _runtimeById[id];
+        if (runtime != null) {
+          try {
+            await runtime.node?.retire();
+          } catch (e) {
+            onLog?.call('Could not retire one identity cleanly: $e');
+          }
+          _runtimes.remove(runtime);
+          _runtimeById.remove(id);
+          runtime.clear();
+        }
+      } else if (!_runtimeById.containsKey(id)) {
+        final seenKeys = <String, String>{};
+        for (final runtime in _runtimes) {
+          final identity = runtime.identity;
+          if (identity != null) {
+            seenKeys[bytesToHex(identity.publicKey)] = runtime.record.id;
+          }
+        }
+        await _startRuntime(
+          record,
+          hub: hub,
+          physical: _physical ?? const PhysicalCapabilities(),
+          radioParams: _radioParams ?? _fallbackRadioParams,
+          tuning: _tuning,
+          seenKeys: seenKeys,
+        );
+      }
+    }
+    await refreshSummaries();
+    _notifyNow();
+    return true;
   }
 
   Future<void> clearLocalData(String id) async {
@@ -530,9 +598,15 @@ class IdentityManager {
   }) async {
     if (_activeId == id) return true;
     final index = _index;
-    if (index == null || !index.identities.any((record) => record.id == id)) {
-      return false;
+    if (index == null) return false;
+    IdentityRecord? record;
+    for (final item in index.identities) {
+      if (item.id == id) {
+        record = item;
+        break;
+      }
     }
+    if (record == null || !record.enabled) return false;
     if (_hub != null) {
       final runtime = _runtimeById[id];
       if (runtime?.node == null || runtime?.identity == null) return false;

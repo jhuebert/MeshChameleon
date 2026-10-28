@@ -15,7 +15,7 @@ const String _gitDirtyDefine =
 const String _buildTimeDefine =
     String.fromEnvironment('MESHCHAMELEON_BUILD_TIME');
 
-/// Installed build identity shown in About & diagnostics and the Home footer.
+/// Installed build identity shown on the Information page and the Home footer.
 class BuildInfo {
   const BuildInfo({
     required this.version,
@@ -118,6 +118,12 @@ class BuildInfo {
         MapEntry('Mode', modeLabel),
         MapEntry('Platform', platformLabel),
         MapEntry('Package', packageName ?? 'unavailable'),
+      ];
+
+  /// The subset shown on the About page's Build card.
+  List<MapEntry<String, String>> get cardDetails => [
+        for (final entry in details)
+          if (entry.key != 'Platform' && entry.key != 'Package') entry,
       ];
 
   static String? _parseCommit(String raw) {

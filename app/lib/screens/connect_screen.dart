@@ -307,7 +307,7 @@ class _ConnectScreenState extends State<ConnectScreen>
         if (!_scanning)
           OutlinedButton.icon(
             icon: const Icon(Icons.search),
-            label: const Text('Scan for MeshCore devices'),
+            label: const Text('Scan for devices'),
             onPressed: app.busy ? null : _startScan,
           )
         else ...[

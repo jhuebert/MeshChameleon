@@ -167,13 +167,53 @@ void main() {
     ));
   });
 
-  testWidgets('create wizard rejects an invalid name', (tester) async {
+  testWidgets('create wizard limits names by UTF-8 bytes and shows a counter',
+      (tester) async {
     await tester.pumpWidget(wrap(const IdentitiesScreen()));
     await tester.pumpAndSettle();
     await tapAsync(tester, find.byType(FloatingActionButton));
     await tester.pumpAndSettle();
 
+    expect(find.text('15/31 bytes'), findsOneWidget);
     await tester.enterText(find.byType(TextField), 'x' * 32);
+    await tester.pumpAndSettle();
+    expect(find.text('31/31 bytes'), findsOneWidget);
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, hasLength(31));
+
+    await tapAsync(tester, find.text('Create'));
+    await tester.pumpAndSettle();
+
+    expect(app.identities, hasLength(2));
+    expect(
+      app.identities.any((summary) => summary.name == 'x' * 31),
+      isTrue,
+    );
+  });
+
+  testWidgets('create wizard counts multibyte characters in UTF-8 bytes',
+      (tester) async {
+    await tester.pumpWidget(wrap(const IdentitiesScreen()));
+    await tester.pumpAndSettle();
+    await tapAsync(tester, find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'é' * 20);
+    await tester.pumpAndSettle();
+
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, 'é' * 15);
+    expect(find.text('30/31 bytes'), findsOneWidget);
+  });
+
+  testWidgets('create wizard rejects control characters', (tester) async {
+    await tester.pumpWidget(wrap(const IdentitiesScreen()));
+    await tester.pumpAndSettle();
+    await tapAsync(tester, find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'bad\u0001name');
     await tester.tap(find.text('Create'));
     await tester.pumpAndSettle();
 
@@ -212,11 +252,67 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Clear local data'), findsOneWidget);
+    final disableItem = tester.widget<PopupMenuItem<String>>(
+      find.widgetWithText(PopupMenuItem<String>,
+          'Activate another identity before disabling this one'),
+    );
+    expect(disableItem.enabled, isFalse);
     final deleteItem = tester.widget<PopupMenuItem<String>>(
       find.widgetWithText(PopupMenuItem<String>,
           'Activate another identity before deleting this one'),
     );
     expect(deleteItem.enabled, isFalse);
+  });
+
+  testWidgets('a non-active identity can be disabled and re-enabled',
+      (tester) async {
+    late String secondId;
+    await tester.runAsync(() async {
+      secondId = (await repository.create(name: 'Second')).id;
+      await app.loadIdentities();
+    });
+    await tester.pumpWidget(wrap(const IdentitiesScreen()));
+    await tester.pumpAndSettle();
+
+    final secondCardMenu = find.descendant(
+      of: find.ancestor(of: find.text('Second'), matching: find.byType(Card)),
+      matching: find.byType(PopupMenuButton<String>),
+    );
+    await tester.tap(secondCardMenu);
+    await tester.pumpAndSettle();
+    expect(find.text('Disable identity'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    final disabled = await tester.runAsync(
+      () => app.setIdentityEnabled(secondId, false),
+    );
+    await tester.pump();
+
+    expect(disabled, isTrue);
+    expect(
+      app.identities.firstWhere((summary) => summary.id == secondId).enabled,
+      isFalse,
+    );
+    expect(find.textContaining('Disabled'), findsWidgets);
+
+    await tester.tap(secondCardMenu);
+    await tester.pumpAndSettle();
+    expect(find.text('Enable identity'), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    final enabled = await tester.runAsync(
+      () => app.setIdentityEnabled(secondId, true),
+    );
+    await tester.pump();
+
+    expect(enabled, isTrue);
+    expect(
+      app.identities.firstWhere((summary) => summary.id == secondId).enabled,
+      isTrue,
+    );
+    expect(find.textContaining('Disabled'), findsNothing);
   });
 
   testWidgets('an unavailable key cannot activate but may be deleted',

@@ -120,7 +120,7 @@ void main() {
     expect(find.text('Network'), findsOneWidget);
     expect(find.text('Simulated'), findsOneWidget);
     expect(find.text('Bluetooth companion'), findsOneWidget);
-    expect(find.text('Scan for MeshCore devices'), findsOneWidget);
+    expect(find.text('Scan for devices'), findsOneWidget);
     expect(find.text('Network companion'), findsNothing);
     expect(find.text('Connect over TCP'), findsNothing);
   });
@@ -135,7 +135,7 @@ void main() {
     expect(find.text('Network companion'), findsOneWidget);
     expect(find.text('Connect over TCP'), findsOneWidget);
     expect(find.text('Bluetooth companion'), findsNothing);
-    expect(find.text('Scan for MeshCore devices'), findsNothing);
+    expect(find.text('Scan for devices'), findsNothing);
   });
 
   testWidgets('a non-BLE build has no Bluetooth tab and defaults to Network',
@@ -146,7 +146,7 @@ void main() {
     expect(find.text('Network companion'), findsOneWidget);
     expect(find.text('Connect over TCP'), findsOneWidget);
     expect(find.text('Bluetooth companion'), findsNothing);
-    expect(find.text('Scan for MeshCore devices'), findsNothing);
+    expect(find.text('Scan for devices'), findsNothing);
     expect(find.text('Simulated'), findsNothing);
   });
 
