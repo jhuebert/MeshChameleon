@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/main.dart';
 import 'package:provider/provider.dart';
@@ -32,7 +33,8 @@ void main() {
     expect(find.byType(Image), findsOneWidget);
     expect(find.textContaining('Ed25519'), findsNothing);
     expect(find.byTooltip('About & diagnostics'), findsOneWidget);
-    expect(find.textContaining('MeshChameleon 0.1.0'), findsOneWidget);
+    expect(
+        find.textContaining('MeshChameleon $productVersion'), findsOneWidget);
   });
 
   testWidgets('build footer opens the diagnostics page', (tester) async {
@@ -48,7 +50,7 @@ void main() {
       ),
     );
 
-    await tester.tap(find.textContaining('MeshChameleon 0.1.0'));
+    await tester.tap(find.textContaining('MeshChameleon $productVersion'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
     expect(find.text('Information'), findsOneWidget);

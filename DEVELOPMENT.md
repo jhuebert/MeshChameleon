@@ -427,6 +427,38 @@ The file keeps the 20 most recent successful `host:port` targets, newest first;
 failed attempts are never written. History is best-effort: a read or write
 failure cannot block startup or fail an otherwise successful device connection.
 
+## Versioning, changelog, and CI
+
+The release version lives in `app/pubspec.yaml` (`X.Y.Z+N`) and must match
+`productVersion` (`mesh_protocol`), the default `DeviceInfo.version`, the user
+guide's version line, and `CHANGELOG.md`. The version tests fail when they
+drift.
+
+Bump them together and promote the changelog with:
+
+```sh
+scripts/bump_version.sh <major.minor.patch> <build-number> [notes-file]
+```
+
+The script rewrites `## [Unreleased]` to `## [X.Y.Z] - <UTC date>`, inserts the
+optional notes, and leaves a fresh `## [Unreleased]` section. It does not commit
+or tag.
+
+Rules:
+
+- The first Play upload is `1.0.0+1`.
+- Every later upload, including test-track fixes, must increase `+N`; Play
+  rejects a reused version code.
+- Flutter adds `ABI * 1000` to split-APK version codes (`1001` armeabi-v7a,
+  `2001` arm64-v8a, `4001` x86_64 for `+1`). The About page and the GitHub APKs
+  show these adjusted values; the AAB and universal APK keep `+N`.
+
+`.github/workflows/ci.yml` runs `scripts/check.sh`, the lockfile and store-asset
+checks, and a debug APK build on every pull request and push to `main`. It pins
+Flutter 3.47.7 and Temurin Java 17; keep the release workflow on the same
+versions. `.github/workflows/release.yml` is the manual signed release; see
+`docs/RELEASE_PLAN.md` for the keystore and secret prerequisites.
+
 ## Release signing
 
 Release builds are signed with your own keystore when a `key.properties`

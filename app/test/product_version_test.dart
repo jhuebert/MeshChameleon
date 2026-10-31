@@ -14,4 +14,13 @@ void main() {
     expect(match, isNotNull, reason: 'app/pubspec.yaml has a version');
     expect(match!.group(1), productVersion);
   });
+
+  test('DeviceInfo default version follows the product version', () {
+    expect(const DeviceInfo().version, 'meshchameleon $productVersion');
+  });
+
+  test('user guide version line follows the product version', () {
+    final guide = File('../docs/USER_GUIDE.md').readAsStringSync();
+    expect(guide, contains('Version $productVersion · Android'));
+  });
 }
