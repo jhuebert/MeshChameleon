@@ -1,5 +1,4 @@
-import 'dart:io' show Platform;
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -280,9 +279,9 @@ class _ProxyPortCardState extends State<_ProxyPortCard> {
   }
 }
 
-/// Prompts for a battery-optimization exemption, the main M0 reliability
-/// control: without it, Doze/OEM battery managers can suspend the background
-/// device link and proxy. Android-only.
+/// Opens the Android battery-optimization settings, the main M0 reliability
+/// control: without an unrestricted setting, Doze/OEM battery managers can
+/// suspend the background device link and proxy. Android-only.
 class _BatteryOptimizationCard extends StatefulWidget {
   const _BatteryOptimizationCard();
 
@@ -319,7 +318,9 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
 
   @override
   Widget build(BuildContext context) {
-    if (!Platform.isAndroid) return const SizedBox.shrink();
+    if (defaultTargetPlatform != TargetPlatform.android) {
+      return const SizedBox.shrink();
+    }
     final app = context.watch<AppState>();
     final ignored = app.batteryOptimizationsIgnored;
     return Card(
@@ -332,13 +333,14 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
           ignored == null
               ? 'Checking…'
               : ignored
-                  ? 'Exempt'
-                  : 'Optimized — the OS may throttle the background link',
+                  ? 'Unrestricted — the background link is not throttled'
+                  : 'Optimized — Android may throttle the background link. '
+                      'Set MeshChameleon to Unrestricted in battery settings.',
         ),
         trailing: ignored == false
             ? TextButton(
-                onPressed: app.requestBatteryOptimizationExemption,
-                child: const Text('Disable'),
+                onPressed: app.openBatteryOptimizationSettings,
+                child: const Text('Open settings'),
               )
             : null,
       ),

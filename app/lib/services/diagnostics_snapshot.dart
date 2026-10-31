@@ -147,7 +147,7 @@ class DiagnosticsSnapshot {
       deviceConnected ? (deviceLabel ?? 'Connected') : 'Not connected';
 
   String get batteryOptimizationLabel => switch (batteryOptimizationsIgnored) {
-        true => 'Exempt',
+        true => 'Unrestricted',
         false => 'Optimized',
         null => 'Checking…',
       };

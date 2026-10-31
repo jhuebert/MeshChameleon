@@ -41,8 +41,9 @@ identities, background operation, backups, and troubleshooting.
   app; the client always connects over the network.
 - The client app and the phone on the same trusted local network.
 - Bluetooth and notification permissions granted when Android asks.
-- For reliable background operation, permission for MeshChameleon to ignore
-  Android battery optimization.
+- For reliable background operation, set MeshChameleon to **Unrestricted** in
+  Android's battery settings. The home-screen **Battery optimization** card
+  opens the right screen.
 
 You do **not** need an internet connection. You do need the phone and the
 MeshCore app to be able to reach each other on your local network.
@@ -77,7 +78,7 @@ The home screen is the control panel for the whole app.
 | **Proxy server port** | Shows the local port your MeshCore app will connect to. It can only be edited while the proxy is stopped. |
 | **Proxy server** | Starts or stops the local companion server. The proxy needs a connected device and an available identity. |
 | **Resume on launch** | Reconnects the last device and restarts the proxy when you open the app. |
-| **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Disable** to request an exemption. |
+| **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Open settings** and set MeshChameleon to **Unrestricted**. |
 
 The receipt icon in the top-right corner opens the **Log** screen. The info icon
 opens the **Information** page. The version footer at the bottom of the home
@@ -370,9 +371,13 @@ tapping it returns to the app.
 
 On Android, the home screen has a **Battery optimization** card:
 
-- **Optimized** — Android may pause the app in the background. Tap **Disable**
-  and approve the system prompt.
-- **Exempt** — the app can keep the link running in the background.
+- **Optimized** — Android may pause the app in the background. Tap **Open
+  settings**, find MeshChameleon in the list, and choose **Unrestricted**
+  (older Android versions: **Don't optimize**).
+- **Unrestricted** — the app can keep the link running in the background.
+
+MeshChameleon opens the system battery-optimization settings; it does not show
+a one-tap exemption prompt.
 
 Some phone manufacturers add their own battery restrictions. If the link keeps
 dying when the screen is off, also check the phone manufacturer's battery
@@ -480,7 +485,7 @@ disconnected and the client reconnects to the newly active identity.
 
 ### The link keeps dropping
 
-- Grant the battery-optimization exemption.
+- Set MeshChameleon to **Unrestricted** in Android's battery settings.
 - Check the phone manufacturer's background-app restrictions.
 - Keep the ongoing notification enabled.
 - Check the radio's power and range.
@@ -625,8 +630,9 @@ The companion saves some settings and applies them when it restarts. Your
 MeshCore app can send a reboot command where supported.
 
 **Why is the app killed in the background?**  
-Android battery optimization is the usual cause. Grant the exemption and check
-the phone manufacturer's battery settings.
+Android battery optimization is the usual cause. Set MeshChameleon to
+**Unrestricted** in Android's battery settings and check the phone
+manufacturer's battery settings.
 
 **How do I find the phone's IP address?**  
 Open Android's Wi-Fi settings and look at the connected network's details. Use

@@ -809,15 +809,15 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Ask the OS for a battery-optimization exemption so the background device
-  /// link and proxy are not throttled. Re-checks the status after the prompt.
-  Future<void> requestBatteryOptimizationExemption() async {
+  /// Open the system battery-optimization settings so the user can set
+  /// MeshChameleon to unrestricted. The status is re-checked when the app
+  /// returns to the foreground.
+  Future<void> openBatteryOptimizationSettings() async {
     if (!Platform.isAndroid) return;
     try {
-      await _foreground.requestBatteryOptimizationExemption();
-      await refreshBatteryOptimizationStatus();
+      await _foreground.openBatteryOptimizationSettings();
     } catch (e) {
-      log('Battery optimization request failed: $e');
+      log('Battery optimization settings failed to open: $e');
     }
   }
 

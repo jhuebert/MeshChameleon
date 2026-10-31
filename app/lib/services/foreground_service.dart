@@ -74,8 +74,11 @@ class ForegroundService {
   Future<bool> isIgnoringBatteryOptimizations() =>
       FlutterForegroundTask.isIgnoringBatteryOptimizations;
 
-  Future<void> requestBatteryOptimizationExemption() =>
-      FlutterForegroundTask.requestIgnoreBatteryOptimization();
+  /// Opens the system battery-optimization settings, where the user can mark
+  /// MeshChameleon as unrestricted. Uses the policy-safe settings intent; the
+  /// app does not request a direct exemption.
+  Future<bool> openBatteryOptimizationSettings() =>
+      FlutterForegroundTask.openIgnoreBatteryOptimizationSettings();
 }
 
 @pragma('vm:entry-point')

@@ -58,4 +58,50 @@ void main() {
     // Dispose the periodic diagnostics refresh before the test ends.
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+      'battery card opens Android battery settings instead of prompting',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final app = AppState()..batteryOptimizationsIgnored = false;
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    expect(find.text('Battery optimization'), findsOneWidget);
+    expect(find.textContaining('Set MeshChameleon to Unrestricted'),
+        findsOneWidget);
+    expect(find.text('Open settings'), findsOneWidget);
+
+    // The action opens system settings; the app never shows an exemption
+    // prompt of its own.
+    await tester.tap(find.text('Open settings'));
+    await tester.pump();
+  });
+
+  testWidgets('battery card hides the settings action when unrestricted',
+      (tester) async {
+    tester.view.physicalSize = const Size(1200, 3000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final app = AppState()..batteryOptimizationsIgnored = true;
+    await tester.pumpWidget(
+      ChangeNotifierProvider.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    expect(find.textContaining('Unrestricted'), findsOneWidget);
+    expect(find.text('Open settings'), findsNothing);
+  });
 }

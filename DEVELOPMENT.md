@@ -403,9 +403,12 @@ The proxy keeps the device link and the app-facing `ServerSocket` alive under a
 `flutter_foreground_task` service (M0 shape A: the engine runs in the main
 isolate). Two home-screen controls make that reliable:
 
-- **Battery optimization** — prompts for an exemption and re-checks the status
-  whenever the app returns to the foreground. Without it, Doze and OEM battery
-  managers can suspend the background link.
+- **Battery optimization** — shows the current status and opens the system
+  battery-optimization settings; the status is re-checked whenever the app
+  returns to the foreground. MeshChameleon does not request the restricted
+  `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission or show a one-tap exemption
+  prompt. Without an unrestricted setting, Doze and OEM battery managers can
+  suspend the background link.
 - **Resume on launch** — when enabled, the app remembers the last device target
   (TCP host/port or BLE remote id) plus the proxy port in
   `<app-support>/session.json` (`SessionStore`), and reconnects the device and

@@ -92,6 +92,7 @@ void main() {
     expect(report, contains('Client address: 192.168.1.20'));
     expect(report, contains('Raw TX/RX packets: 1 / 1'));
     expect(report, contains('Physical radio totals are unique'));
+    expect(report, contains('Battery optimization: Unrestricted'));
     expect(report, contains('MeshChameleon [ABCD1234] (active)'));
     expect(report, contains('semantic TX/RX: 4 / 9'));
     expect(report, contains('client connected'));

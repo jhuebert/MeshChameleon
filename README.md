@@ -98,8 +98,9 @@ The important part: **your phone owns the identity, not the radio.**
   reached over Wi-Fi or Ethernet instead of Bluetooth). For example,
   [`meshcore-open`](https://github.com/zjs81/meshcore-open).
 - The MeshCore app must be able to reach the phone over a trusted local network.
-- Preferably, permission for MeshChameleon to run without Android battery
-  optimization.
+- For reliable background operation, set MeshChameleon to **Unrestricted** in
+  Android's battery settings. The home-screen **Battery optimization** card
+  opens the right screen.
 
 ## Getting started
 
@@ -119,8 +120,9 @@ Short version:
    change the port before starting it.
 4. In your MeshCore app, add a network companion using your phone's local IP
    address (shown in Android's Wi-Fi settings) and the same port.
-5. Optional: turn on **Resume on launch** and exempt MeshChameleon from battery
-   optimization so the connection survives normal use.
+5. Optional: turn on **Resume on launch**. For reliable background operation,
+   open the **Battery optimization** card and set MeshChameleon to
+   **Unrestricted** in Android's battery settings.
 6. Optional: open the identity card and tap **Create identity** to add another
    identity. Tap an identity to make it active.
 
