@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.7
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/gradle/wrapper/gradle-wrapper.properties', 'app/android/**/*.gradle.kts', 'app/android/gradle.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Show toolchain versions
+        run: |
+          flutter --version
+          java -version
+
+      - name: Analyze and test
+        run: ./scripts/check.sh
+
+      # When app/pubspec.lock is tracked (see docs/RELEASE_PLAN.md 1.4), this
+      # fails if dependency resolution rewrote it. It is a no-op while the
+      # lockfile is still git-ignored.
+      - name: Check the app lockfile is unchanged
+        run: git diff --exit-code -- app/pubspec.lock
+
+      - name: Check store assets
+        if: hashFiles('scripts/check_store_assets.sh') != ''
+        run: ./scripts/check_store_assets.sh
+
+      - name: Build debug APK
+        run: ./scripts/build.sh apk --debug
