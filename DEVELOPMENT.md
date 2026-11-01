@@ -185,6 +185,17 @@ Rules for any change after 0.1.0:
   exception is a versionless `session.json`: its fields are unchanged, so it is
   read as version 1.
 
+## Backup files
+
+The app can export the catalog, every identity key, per-identity node state,
+the saved session, and saved network connections as a passphrase-encrypted
+`.mcbackup` file (`app/lib/services/backup_codec.dart`,
+`app/lib/services/backup_service.dart`). The envelope is versioned; bump
+`backupFormatVersion` only for incompatible layout changes, and keep refusing
+unknown future versions. Restores stage the new catalog, rename the current
+identity directory to `identities.recovery-<stamp>`, and roll back on failure.
+Do not log passphrases, keys, or decrypted payloads.
+
 ## Co-client and raw-modem limitations
 
 The proxy requires the physical companion to behave as an exclusive raw-radio

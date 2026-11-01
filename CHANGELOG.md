@@ -6,6 +6,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- Backup & restore: save or restore every identity, contact, channel, message,
+  saved connection, and setting in one passphrase-encrypted file.
+
 ## [0.1.0] - 2026-10-28
 
 ### Added

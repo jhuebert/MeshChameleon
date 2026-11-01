@@ -69,11 +69,6 @@ Verified against the repository on 2026-10-28:
   “not affiliated with MeshCore” disclaimer.
 - The release build hides the simulated companion (`!kReleaseMode`), so Play
   reviewers cannot exercise the proxy without hardware.
-- There is no in-app backup/restore. The user guide tells users to export only
-  the active identity through a MeshCore client, so contacts, channels, and
-  messages cannot be moved between installs.
-- The battery card requests a direct exemption and the manifest declares the
-  restricted `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission.
 - `app/pubspec.lock` is git-ignored, so app dependency resolution is not locked.
 - Release builds fall back to the debug signing key when `key.properties` is
   missing.

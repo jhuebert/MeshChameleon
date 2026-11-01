@@ -54,6 +54,11 @@ the external hardware matrix remains pending. The Android background-execution
 shape is still the main-isolate foreground-service design, and background/Doze
 survival has not been hardware-validated.
 
+In-app backup/restore writes one passphrase-encrypted `.mcbackup` containing the
+identity catalog, every identity key, per-identity node state, the saved session,
+and network connection history. It is the user-facing backup path; see
+`SECURITY.md` for the format and restore/rollback behavior.
+
 Multi-identity management is implemented: all catalog identities run live on
 one shared radio, the active identity is served over the companion endpoint,
 and outbound packets are mirrored in-process to the other live identities after

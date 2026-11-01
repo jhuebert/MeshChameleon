@@ -45,6 +45,8 @@ does through a companion:
 - request status and sensor telemetry where the mesh supports it
 - see radio battery and storage information
 - switch between identities without touching the radio
+- back up and restore identities, contacts, channels, messages, and settings in
+  one encrypted file
 - reconnect on launch, if **Resume on launch** is enabled
 - check the installed version and live link statistics in
   **Information**
@@ -167,6 +169,8 @@ implemented and pass automated tests, but this is still an early project:
   at rest.
 - The local connection is not encrypted and has no password. Keep it on a
   trusted network.
+- Backup files you create contain identity private keys. They are encrypted
+  with your passphrase; keep the file and passphrase as safe as the keys.
 
 See [`SECURITY.md`](SECURITY.md) for the full security model and its caveats.
 

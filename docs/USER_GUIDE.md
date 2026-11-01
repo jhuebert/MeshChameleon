@@ -409,6 +409,8 @@ home screen.
   and the last signal.
 - **Identities** shows each identity's semantic flood/direct counters, receive
   errors, queue depth, airtime, contacts, channels, and queued messages.
+- **Backup & restore** saves or restores every identity, contact, channel,
+  message, saved connection, and setting in one encrypted file.
 
 These statistics cover **this app session only**. Closing the app resets them;
 nothing is uploaded or written to a stats file. Per-identity received counts
@@ -525,6 +527,8 @@ reconnection. Open **Device link** and connect again when the radio is back.
 - Contacts, channels, and messages live in app-private files. They are protected
   by Android's app sandbox but are not separately encrypted at rest.
 - Use one MeshCore app at a time. The proxy expects exclusive use of the radio.
+- Backup files contain private identity keys. They are encrypted with the
+  passphrase you choose; keep the file and passphrase safe.
 - Exported private keys are extremely sensitive. Never paste them into a chat,
   issue tracker, or cloud note.
 
@@ -538,34 +542,42 @@ Install a newer build over the existing app. Android keeps app data when the
 application ID and signing key match. The 0.1.0 storage baseline is designed to
 migrate forward in later releases.
 
-### Backing up an identity
+### Backing up and restoring
 
-MeshChameleon's UI does not have a backup or key-export button. A connected
-MeshCore client that supports the normal companion private-key export command
-can export the **active** identity's key. That export contains the key only, not
-the identity's contacts, channels, or message history.
+Open the **Information** page and tap **Backup & restore**.
+
+- **Back up now** asks for a passphrase and saves one encrypted `.mcbackup`
+  file. It contains all identities and their keys, contacts, channels,
+  messages, saved connections, and settings.
+- **Restore from backup** opens that file, asks for the passphrase, shows what
+  will be restored, and replaces the local data after you confirm.
+
+The file contains private identity keys and cannot be opened without the
+passphrase. MeshChameleon cannot recover a lost passphrase. Restoring replaces
+all current local data and stops the device link and proxy; a recovery copy of
+the replaced identity files stays on the phone.
 
 Android backup is disabled for MeshChameleon by design. If you uninstall the app
-or clear its storage, the identity keys and local state are removed.
+or clear its storage without a backup, the identity keys and local state are
+removed.
 
 ### Moving to a new phone
 
-1. Export the active identity's private key with a compatible MeshCore client.
-2. Store the key somewhere safe and offline.
-3. Install MeshChameleon on the new phone.
-4. Import the key into the active identity with the client.
-5. Recreate contacts, channels, and other state as needed.
+1. On the old phone, open **Information → Backup & restore → Back up now**.
+2. Move the file to the new phone and install MeshChameleon.
+3. Open **Information → Backup & restore → Restore from backup**.
+4. Enter the passphrase and confirm.
 
-Recreating state is necessary because only the key is exported through the
-companion protocol.
+A MeshCore client can also export the active identity's key, but that carries
+only the key, not contacts, channels, messages, or settings.
 
 ### Uninstalling or resetting
 
 - To remove one identity's local data, use **Clear local data** in its menu.
 - To remove everything, uninstall MeshChameleon or use Android's **Clear
   storage** for the app.
-- Clearing app storage or uninstalling is irreversible unless you exported the
-  key first.
+- Clearing app storage or uninstalling is irreversible unless you made a
+  backup first.
 
 ## Limits and compatibility
 

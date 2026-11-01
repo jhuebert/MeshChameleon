@@ -11,6 +11,7 @@ personal project and has not been independently audited.
 |---|---|---|
 | MeshCore identity private keys (64-byte expanded key: 32-byte scalar + 32-byte nonce, one per virtual identity) | **Secret.** Whoever holds one can sign adverts/messages and decrypt direct traffic as that identity. | Per-identity Android Keystore-backed secure storage (`meshcore_identity_v2/<id>`); headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can export/import only the active identity over the local companion endpoint. |
 | Contacts, channels, message queue, adverts, prefs | Private-ish. Reveals who/how you communicate. | `<app-support>/identities/<id>/node_state.json` (not encrypted at rest). |
+| User backup file (`.mcbackup`) | **Secret.** Contains every identity key plus contacts, channels, messages, and settings, encrypted with a user passphrase. | Wherever the user saves it through the Android file picker. |
 | The device's own identity | Not ours. The proxy never reads or adopts it. | Stays on the companion device; it is never reported in SELF_INFO or exposed in the UI. |
 
 ## Identity storage review
@@ -32,10 +33,11 @@ AndroidOptions(encryptedSharedPreferences: true)
 - `EncryptedSharedPreferences` requires API 23+; the app's `minSdk` is 24.
 - Keys are **never** logged. Diagnostics identify identities by stable record id
   or public-key prefix only.
-- The MeshChameleon UI has no reveal/import/export/regenerate controls.
-  `CMD_EXPORT_PRIVATE_KEY` / `CMD_IMPORT_PRIVATE_KEY` operate only on the active
-  virtual identity over the local companion endpoint (the protocol's approved
-  local key operation; no app confirmation).
+- The MeshChameleon UI has no per-identity reveal/import/export/regenerate
+  controls. `CMD_EXPORT_PRIVATE_KEY` / `CMD_IMPORT_PRIVATE_KEY` operate only on
+  the active virtual identity over the local companion endpoint (the protocol's
+  approved local key operation; no app confirmation). The whole-catalog backup
+  is a separate, passphrase-encrypted file (see [Backups](#backups)).
 - Public keys are unique across identity records. A protocol import that would
   duplicate another identity's key, or clone the attached radio's own key, is
   rejected before storage changes.
@@ -50,6 +52,23 @@ single-identity `meshcore_identity_v1` secure key and root `node_state.json`)
 are ignored and a fresh identity is created. From 0.1.0 onward, any storage or
 configuration schema change must migrate released data; see
 `DEVELOPMENT.md#persistence-versions-and-migrations`.
+
+## Backups
+
+`BackupService` (`app/lib/services/backup_service.dart`) captures the identity
+catalog, every 64-byte identity key, each identity's node state, the saved
+session, and the network connection history. It encrypts that JSON with
+AES-256-GCM using a key derived from the user passphrase with
+PBKDF2-HMAC-SHA256 (210,000 iterations, random 16-byte salt, random 12-byte
+nonce). The version, timestamp, KDF parameters, and nonce are authenticated as
+additional data.
+
+The passphrase is never stored or logged. Import validates the envelope version,
+every identity key against its catalog public key, all state and settings, and
+refuses unknown future versions before touching local data. A restore renames
+the current identity directory to a recovery folder, writes through the normal
+stores, and rolls back on failure. The newest recovery folder is kept;
+older ones are pruned.
 
 ## What this does *not* address
 
