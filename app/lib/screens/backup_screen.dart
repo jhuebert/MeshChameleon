@@ -1,7 +1,8 @@
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
@@ -41,19 +42,11 @@ class _BackupScreenState extends State<BackupScreen> {
     try {
       final bytes = await context.read<AppState>().createBackup(passphrase);
       final name = 'meshchameleon-${_dateStamp()}.mcbackup';
-      final path = await FilePicker.saveFile(
-        dialogTitle: 'Save MeshChameleon backup',
-        fileName: name,
-        type: FileType.any,
-        bytes: bytes,
+      final path = await FlutterFileDialog.saveFile(
+        params: SaveFileDialogParams(data: bytes, fileName: name),
       );
       if (!mounted) return;
       if (path != null) {
-        // Android writes `bytes` itself. Desktop pickers return a plain path.
-        if (!Platform.isAndroid) {
-          await File(path).writeAsBytes(bytes, flush: true);
-        }
-        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Backup saved')),
         );
@@ -68,23 +61,21 @@ class _BackupScreenState extends State<BackupScreen> {
   }
 
   Future<void> _restore() async {
-    FilePickerResult? picked;
+    String? path;
     try {
-      picked = await FilePicker.pickFiles(
-        dialogTitle: 'Open MeshChameleon backup',
-        type: FileType.any,
-        withData: true,
+      path = await FlutterFileDialog.pickFile(
+        params: const OpenFileDialogParams(copyFileToCacheDir: true),
       );
     } catch (_) {
       _showError('Could not open the file picker.');
       return;
     }
-    if (picked == null || picked.files.isEmpty || !mounted) return;
+    if (path == null || !mounted) return;
 
-    final file = picked.files.single;
-    final bytes = file.bytes ??
-        (file.path == null ? null : await File(file.path!).readAsBytes());
-    if (bytes == null) {
+    Uint8List bytes;
+    try {
+      bytes = await File(path).readAsBytes();
+    } catch (_) {
       _showError('Could not read that file.');
       return;
     }
