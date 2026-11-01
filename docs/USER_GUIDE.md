@@ -53,8 +53,14 @@ MeshCore app to be able to reach each other on your local network.
 
 ## Install MeshChameleon
 
-MeshChameleon is an early project and is not in an app store yet. Install it by
-building the Android app from source:
+MeshChameleon is not in an app store yet. Signed test builds are published on
+[GitHub Releases](https://github.com/jhuebert/MeshChameleon/releases). Download
+the `MeshChameleon-<version>-universal.apk`, allow installs from that source,
+and open it. Install newer builds over the existing app; Android keeps your data
+when the signing key matches. Do not use a debug build if you plan to move to
+the Play build later: debug builds have a different signing key.
+
+To build from source instead:
 
 - [Building the app](../DEVELOPMENT.md#building-the-app)
 - [Development setup and prerequisites](../DEVELOPMENT.md)
@@ -539,8 +545,10 @@ See [`SECURITY.md`](../SECURITY.md) for the full security model.
 ### Updating
 
 Install a newer build over the existing app. Android keeps app data when the
-application ID and signing key match. The 0.1.0 storage baseline is designed to
-migrate forward in later releases.
+application ID and signing key match. Use the signed release APK for updates;
+debug builds have a different signing key and cannot update to release or Play
+builds. The 0.1.0 storage baseline is designed to migrate forward in later
+releases.
 
 ### Backing up and restoring
 
@@ -582,7 +590,8 @@ only the key, not contacts, channels, messages, or settings.
 ## Limits and compatibility
 
 - Android only; iOS is not supported yet.
-- No app-store release yet; builds come from source.
+- No Play Store release yet; signed test builds are on GitHub Releases. Debug
+  builds cannot update to release or Play builds.
 - One radio link and one MeshCore client at a time.
 - The MeshCore client must support a network/Wi-Fi/TCP companion.
 - The radio must be a normal MeshCore companion; MeshChameleon does not replace

@@ -106,11 +106,15 @@ The important part: **your phone owns the identity, not the radio.**
 
 ## Getting started
 
-MeshChameleon is an early 0.1.0 project and is not in an app store yet. For now,
-install it by building the Android app from source; the linked instructions
-cover the required tools. See
-[Building the app](DEVELOPMENT.md#building-the-app). For step-by-step help with
-screenshots, use the [User Guide](docs/USER_GUIDE.md).
+MeshChameleon is an early prerelease and is not in an app store yet. Signed
+test builds are published on
+[GitHub Releases](https://github.com/jhuebert/MeshChameleon/releases): download
+the `MeshChameleon-<version>-universal.apk` and install it. Release APKs are
+signed with the app signing key; the fingerprints are listed in
+[DEVELOPMENT.md](DEVELOPMENT.md#release-signing). To build it
+yourself, see [Building the app](DEVELOPMENT.md#building-the-app). For
+step-by-step help with screenshots, use the
+[User Guide](docs/USER_GUIDE.md).
 
 Short version:
 
@@ -148,11 +152,15 @@ Short version:
 
 ## Project status
 
-Version **0.1.0** is the initial release baseline. The main features are
-implemented and pass automated tests, but this is still an early project:
+The storage baseline is **0.1.0**; the first signed public build is the
+**0.2.0** pre-release. The main features are implemented and pass automated
+tests, but this is still an early project:
 
 - Android only; iOS is deferred.
-- There is no app-store release yet.
+- There is no Play Store release yet; signed pre-release APKs are on GitHub
+  Releases.
+- Testers should install the release APKs, not debug builds. Debug builds use a
+  machine-local certificate and cannot update to release or Play builds.
 - Real-hardware testing is still in progress for Bluetooth, network links, radio
   behavior, and Android background survival.
 - Hardware compatibility should be verified on your own radio and phone before

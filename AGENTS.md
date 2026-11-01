@@ -59,6 +59,11 @@ identity catalog, every identity key, per-identity node state, the saved session
 and network connection history. It is the user-facing backup path; see
 `SECURITY.md` for the format and restore/rollback behavior.
 
+Signed pre-Play builds are published as GitHub Releases: the release APKs use the
+app signing key (the key Play will use) and the AAB uses the upload key. Testers
+must use release APKs, not debug builds, so their data can survive the move to
+Play.
+
 Multi-identity management is implemented: all catalog identities run live on
 one shared radio, the active identity is served over the companion endpoint,
 and outbound packets are mirrored in-process to the other live identities after

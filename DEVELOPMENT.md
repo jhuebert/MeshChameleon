@@ -485,6 +485,21 @@ signing key after Gradle builds them. Local `flutter build` commands only use
 the upload key in `app/android/key.properties`; without that file, release
 builds fall back to the debug key.
 
+GitHub Releases are the pre-Play tester channel. Publish the signed release
+APKs, never debug APKs: debug builds use a machine-local certificate and cannot
+update to release or Play builds. Testers can verify a download with:
+
+```sh
+apksigner verify --print-certs MeshChameleon-<version>-universal.apk
+```
+
+Expected certificates:
+
+- app signing (release APKs):
+  `47:F3:00:E4:82:06:EA:4B:B8:E3:85:76:70:C0:6F:E1:7B:4D:1A:96:2C:74:79:40:00:09:48:84:67:67:D5:5E`
+- upload (AAB for Play):
+  `D9:57:D9:67:A3:14:0C:8D:3D:59:9C:CB:2B:C4:D2:F5:8B:59:A8:AD:6B:A4:B2:CC:72:05:25:36:CB:F0:FE:B2`
+
 To configure the upload key locally:
 
 ```sh
