@@ -10,7 +10,7 @@ logic). See `ATTRIBUTION.md`.
 
 ```mermaid
 flowchart LR
-    client["MeshCore client app<br/>(e.g. meshcore-open)"]
+    client["MeshCore client app<br/>(same phone, or LAN)"]
     proxy["MeshChameleon<br/>virtual companion<br/>identity, contacts, queue"]
     radio["MeshCore companion<br/>stock firmware<br/>used as a raw radio"]
 
@@ -19,12 +19,15 @@ flowchart LR
 ```
 
 MeshChameleon exposes a **TCP server** that speaks the MeshCore companion
-protocol (the same wire format a client uses for a Wi-Fi companion). It
-generates, stores, and uses its own Ed25519 MeshCore identity on the phone and
-reports that identity in `SELF_INFO`/adverts. Behind the scenes it connects to a
-real companion over **BLE (NUS)** or **TCP**, treating that device as a **raw
-radio**: it transmits arbitrary MeshCore packets with `CMD_SEND_RAW_PACKET` and
-receives every over-air frame via `PUSH_CODE_LOG_RX_DATA`.
+protocol (the same wire format a client uses for a TCP/network companion). The
+primary deployment runs the client on the same phone over `127.0.0.1`; the
+listener binds all interfaces so a client on the local network can use the
+phone's IP instead. It generates, stores, and uses its own Ed25519 MeshCore
+identity on the phone and reports that identity in `SELF_INFO`/adverts. Behind
+the scenes it connects to a real companion over **BLE (NUS)** or **TCP**,
+treating that device as a **raw radio**: it transmits arbitrary MeshCore packets
+with `CMD_SEND_RAW_PACKET` and receives every over-air frame via
+`PUSH_CODE_LOG_RX_DATA`.
 
 Repository layout:
 
@@ -222,8 +225,8 @@ Two hardware-free targets share the pure-Dart core:
 
 - **Linux desktop** (`app/linux/`) — the real UI. BLE is hidden off mobile
   because there is no desktop `flutter_blue_plus` implementation; the
-  debug/profile-only **Simulated** tab drives the real `MeshNode` and
-  `CompanionServer` from an in-memory `FakeDeviceLink`.
+  **Simulated** tab drives the real `MeshNode` and `CompanionServer` from an
+  in-memory `FakeDeviceLink`.
 - **Headless CLI** (`packages/mesh_node/tool/proxy_cli.dart`) — no Flutter, no
   GUI, TCP device link only.
 
@@ -374,7 +377,7 @@ app confirmation, so treat the TCP/BLE endpoint as trusted.
 
 A fresh identity is generated from a 32-byte seed. The 64-byte MeshCore form
 (`[scalar(32)][prefix(32)]`) is the expanded Ed25519 key: it is what the app
-persists and what the local companion endpoint exports. **Both forms can sign**
+persists and what the app-facing TCP companion endpoint exports. **Both forms can sign**
 — `LocalIdentity` signs seed identities via `cryptography` and 64-byte identities
 directly from the expanded key (`CryptoUtils.ed25519SignFromExpanded`, RFC 8032),
 so no seed recovery is needed.
@@ -382,14 +385,16 @@ so no seed recovery is needed.
 ## Local endpoint and credential exposure
 
 The app-facing companion endpoint has **no authentication or transport
-encryption** beyond the local TCP/BLE link. Anything that can reach it can read
-the virtual identity, import a replacement, add/remove contacts, send mesh
-traffic, run virtual CLI commands, and—on physical firmware v14+—run the
-allowlisted physical CLI subset. That subset includes WiFi SSID/password reads
-and radio preference changes. WiFi passwords are forwarded as CLI text and are
-never logged, cached, or truncated by the proxy, but they are still exposed to a
-trusted-network client and to the radio firmware. Do not expose the listener on
-an untrusted network.
+encryption**. It listens on all interfaces, so any app on the phone can reach
+`127.0.0.1:<port>` and devices on the local network can reach the phone's IP.
+Anything that can reach it can read the virtual identity, import a replacement,
+add/remove contacts, send mesh traffic, run virtual CLI commands, and—on
+physical firmware v14+—run the allowlisted physical CLI subset. That subset
+includes WiFi SSID/password reads and radio preference changes. WiFi passwords
+are forwarded as CLI text and are never logged, cached, or truncated by the
+proxy, but they are still exposed to a trusted client and to the radio firmware.
+Use the endpoint only on a trusted phone and network; do not expose it to the
+internet.
 
 ## Hardware validation
 

@@ -9,7 +9,7 @@ personal project and has not been independently audited.
 
 | Asset | Sensitivity | Where it lives |
 |---|---|---|
-| MeshCore identity private keys (64-byte expanded key: 32-byte scalar + 32-byte nonce, one per virtual identity) | **Secret.** Whoever holds one can sign adverts/messages and decrypt direct traffic as that identity. | Per-identity Android Keystore-backed secure storage (`meshcore_identity_v2/<id>`); headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can export/import only the active identity over the local companion endpoint. |
+| MeshCore identity private keys (64-byte expanded key: 32-byte scalar + 32-byte nonce, one per virtual identity) | **Secret.** Whoever holds one can sign adverts/messages and decrypt direct traffic as that identity. | Per-identity Android Keystore-backed secure storage (`meshcore_identity_v2/<id>`); headless `--identity-file` is plaintext hex with mode 0600. An app-facing client can export/import only the active identity over the TCP companion endpoint. |
 | Contacts, channels, message queue, adverts, prefs | Private-ish. Reveals who/how you communicate. | `<app-support>/identities/<id>/node_state.json` (not encrypted at rest). |
 | User backup file (`.mcbackup`) | **Secret.** Contains every identity key plus contacts, channels, messages, and settings, encrypted with a user passphrase. | Wherever the user saves it through the Android file picker. |
 | The device's own identity | Not ours. The proxy never reads or adopts it. | Stays on the companion device; it is never reported in SELF_INFO or exposed in the UI. |
@@ -35,9 +35,10 @@ AndroidOptions(encryptedSharedPreferences: true)
   or public-key prefix only.
 - The MeshChameleon UI has no per-identity reveal/import/export/regenerate
   controls. `CMD_EXPORT_PRIVATE_KEY` / `CMD_IMPORT_PRIVATE_KEY` operate only on
-  the active virtual identity over the local companion endpoint (the protocol's
-  approved local key operation; no app confirmation). The whole-catalog backup
-  is a separate, passphrase-encrypted file (see [Backups](#backups)).
+  the active virtual identity over the app-facing TCP companion endpoint (the
+  protocol's approved local key operation; no app confirmation). The
+  whole-catalog backup is a separate, passphrase-encrypted file (see
+  [Backups](#backups)).
 - Public keys are unique across identity records. A protocol import that would
   duplicate another identity's key, or clone the attached radio's own key, is
   rejected before storage changes.
@@ -80,9 +81,10 @@ older ones are pruned.
 - **Rooted/compromised device or a malicious local app with the same UID** can
   read anything the app can.
 - **No key material is sent off-device.** There is no analytics, telemetry
-  upload, or cloud component. The local app-facing companion endpoint can
-  export/import the *virtual* key; it has no additional authentication beyond the
-  TCP/BLE transport, so do not expose it beyond trusted networks.
+  upload, or cloud component. The app-facing companion endpoint can export/import
+  the *virtual* key; it has no additional authentication. The primary deployment
+  reaches it over loopback on the same phone, but it listens on all interfaces,
+  so do not expose it beyond a trusted phone and network.
 - **Headless identity file is plaintext.** `--identity-file` stores the expanded
   key as hex in a mode-0600 file, replaced atomically through a private empty
   temp file. Without that flag the identity is memory-only and network imports
@@ -90,14 +92,17 @@ older ones are pruned.
 - **The local CLI endpoint has no extra authentication.** An app-facing client
   on the TCP/BLE transport can run allowlisted virtual commands and, on physical
   firmware v14+, explicitly allowed physical commands (including WiFi credential
-  reads and radio preference changes). Keep the endpoint on trusted networks.
-  WiFi passwords are forwarded as CLI text but are never logged or cached by the
-  proxy.
+  reads and radio preference changes). Keep the endpoint on trusted phones and
+  networks. WiFi passwords are forwarded as CLI text but are never logged or
+  cached by the proxy.
 - **The companion endpoint is plaintext and unauthenticated.** The TCP listener
   has no TLS, password, or pairing layer, and BLE NUS is likewise local-only
-  transport security. A client that can reach it can export/import the virtual
+  transport security. The TCP listener binds all interfaces, so any app on the
+  phone can reach `127.0.0.1:<port>` and devices on the local network can reach
+  the phone's IP. A client that can reach it can export/import the virtual
   identity, mutate virtual state, run virtual CLI, and use the allowlisted
-  physical CLI subset. Bind/expose it only on trusted networks.
+  physical CLI subset. Keep it on a trusted phone and network; do not expose it
+  to the internet.
 - **Co-client ambiguity is not fixable in the proxy.** A second app talking
   directly to the physical companion can race replies on the shared radio link;
   the proxy cannot serialize external clients. Use one configuration client at a

@@ -4,7 +4,9 @@ Version 0.2.0 · Android
 
 MeshChameleon makes an Android phone act as a MeshCore companion while using an
 ordinary MeshCore radio for the actual sending and receiving. You keep using
-your normal MeshCore app; MeshChameleon is the companion behind it.
+your normal MeshCore app, normally on the same phone; MeshChameleon is the
+companion behind it. Because the identity lives on the phone, you can move
+between companion radios without exporting or re-importing keys.
 
 This guide covers installation, connecting a radio, starting the proxy, managing
 identities, background operation, backups, and troubleshooting.
@@ -36,17 +38,22 @@ identities, background operation, backups, and troubleshooting.
 - An Android phone running Android 7.0 or newer. iOS is not supported yet.
 - A normal MeshCore companion radio, reachable over Bluetooth or Wi-Fi/Ethernet.
   For a network-connected radio, the phone and radio must be on the same network.
-- A MeshCore client app that can connect to a **network** or **Wi-Fi/TCP**
-  companion. MeshChameleon does not expose a Bluetooth companion to the client
-  app; the client always connects over the network.
-- The client app and the phone on the same trusted local network.
+  You can switch between radios at any time.
+- A MeshCore client app that can connect to a **TCP/network** companion — for
+  example the official MeshCore app, MeshCore Open, or another TCP-capable
+  client. MeshChameleon does not expose a Bluetooth companion to the client app;
+  the client always connects over TCP. It normally runs on the same phone as
+  MeshChameleon.
+- No local network is needed when the client runs on the same phone. If it runs
+  on another device, both must be on the same trusted local network.
 - Bluetooth and notification permissions granted when Android asks.
 - For reliable background operation, set MeshChameleon to **Unrestricted** in
   Android's battery settings. The home-screen **Battery optimization** card
   opens the right screen.
 
-You do **not** need an internet connection. You do need the phone and the
-MeshCore app to be able to reach each other on your local network.
+You do **not** need an internet connection. The MeshCore app normally connects
+to MeshChameleon over `127.0.0.1` on the same phone; a local network is only
+needed when the client runs on another device.
 
 > MeshChameleon is not a messaging app and not a radio. It replaces neither your
 > MeshCore app nor your MeshCore companion.
@@ -83,8 +90,9 @@ The home screen is the control panel for the whole app.
 | **Identity card** | Opens the identities screen. The title is the active identity's name. |
 | **Proxy server port** | Shows the local port your MeshCore app will connect to. It can only be edited while the proxy is stopped. |
 | **Proxy server** | Starts or stops the local companion server. The proxy needs a connected device and an available identity. |
-| **Resume on launch** | Reconnects the last device and restarts the proxy when you open the app. |
+| **Resume on launch** | Reconnects the last device and restarts the proxy on open. |
 | **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Open settings** and set MeshChameleon to **Unrestricted**. |
+| **Backup & restore** | Saves or restores all identities, contacts, channels, messages, and settings in one encrypted file. |
 
 The receipt icon in the top-right corner opens the **Log** screen. The info icon
 opens the **Information** page. The version footer at the bottom of the home
@@ -110,9 +118,8 @@ The status card is a quick health check:
 Tap **Device link** on the home screen. Choose **Bluetooth** for a nearby radio
 or **Network** for a radio on Wi-Fi or Ethernet.
 
-Development builds may also show a **Simulated** tab. It runs entirely in memory
-and is only for testing without radio hardware. Do not use it for normal
-operation.
+The app also has a **Simulated** tab. It runs entirely in memory and is only for
+testing without radio hardware. Do not use it for normal operation.
 
 ### Bluetooth
 
@@ -194,21 +201,24 @@ connect again yourself.
 - **Network** is useful when the radio is farther away or already on Wi-Fi or
   Ethernet.
 
-Either way, the MeshCore app still connects to the phone over the local network.
+Either way, the MeshCore app normally connects to MeshChameleon on the same
+phone at `127.0.0.1`; from another device, use the phone's local network IP.
 
 ## Start the proxy and connect your MeshCore app
 
-The proxy is the local connection your MeshCore app uses. It only runs after a
-radio is connected.
+The proxy is the TCP endpoint your MeshCore app uses. It only runs after a radio
+is connected.
 
 1. Connect the radio first.
 2. On the home screen, set **Proxy server port** if you do not want the default
    `5000`. The port can only be changed while the proxy is stopped.
 3. Turn on **Proxy server**. The card should say **Listening on port 5000** (or
    the port you chose).
-4. Find the phone's local Wi-Fi IP address in Android's Wi-Fi settings.
-5. In your MeshCore app, add or connect to a **network**, **Wi-Fi**, or **TCP**
-   companion using that phone IP and the proxy port.
+4. In your MeshCore app on the same phone, add or connect to a **network**,
+   **TCP**, or **Wi-Fi/TCP** companion at `127.0.0.1` (or `localhost`) using the
+   proxy port.
+5. If the client is on another device, use the phone's local Wi-Fi/LAN IP
+   instead, and make sure both are on the same network.
 6. The MeshCore app should connect and show the active MeshChameleon identity.
 
 If the proxy will not stay on:
@@ -222,12 +232,14 @@ If the proxy will not stay on:
 If the MeshCore app cannot connect:
 
 - Confirm the proxy says **Listening**.
-- Confirm the client is using the phone's local network IP, not a cellular IP.
-- Confirm both devices are on the same network and that client isolation, a VPN,
-  or a firewall is not blocking the port.
+- If the client is on the same phone, confirm it is using `127.0.0.1` (or
+  `localhost`). From another device, use the phone's local network IP, not a
+  cellular IP.
+- If the client is on another device, confirm both are on the same network and
+  that client isolation, a VPN, or a firewall is not blocking the port.
 - Confirm the port in the client matches the port in MeshChameleon.
-- Remember that the connection has no password or encryption. Use it only on a
-  trusted network.
+- Remember that the connection has no password or encryption. Keep it on a
+  trusted phone and network.
 
 To stop serving clients, turn off **Proxy server** or disconnect the device.
 
@@ -415,8 +427,6 @@ home screen.
   and the last signal.
 - **Identities** shows each identity's semantic flood/direct counters, receive
   errors, queue depth, airtime, contacts, channels, and queued messages.
-- **Backup & restore** saves or restores every identity, contact, channel,
-  message, saved connection, and setting in one encrypted file.
 
 These statistics cover **this app session only**. Closing the app resets them;
 nothing is uploaded or written to a stats file. Per-identity received counts
@@ -467,13 +477,13 @@ sharing them publicly.
 - Choose an unused port while the proxy is stopped.
 - Check the log; a port-in-use error means another app owns that port.
 
-### The MeshCore app cannot reach the phone
+### The MeshCore app cannot connect
 
 - Confirm the proxy says **Listening**.
-- Use the phone's Wi-Fi/LAN address, not a cellular address.
-- Confirm both devices are on the same network.
-- Confirm the client is configured as a network/Wi-Fi/TCP companion, not
-  Bluetooth.
+- If the client is on the same phone, use `127.0.0.1` (or `localhost`).
+- If the client is on another device, use the phone's Wi-Fi/LAN address, not a
+  cellular address, and confirm both devices are on the same network.
+- Confirm the client is configured as a network/TCP companion, not Bluetooth.
 - Confirm the port matches.
 
 ### The client connects but shows the wrong identity
@@ -523,9 +533,10 @@ reconnection. Open **Device link** and connect again when the radio is back.
 
 ## Privacy and security
 
-- Use MeshChameleon only on a trusted local network. The client-facing server
-  has no password and no encryption. Anyone who can reach it can use the
-  session and the radio controls it exposes.
+- Use MeshChameleon only on a phone you trust. The client-facing server has no
+  password and no encryption. Any app on the phone can reach it, and devices on
+  your local network can too. Anyone who can reach it can use the session and
+  the radio controls it exposes.
 - Do not expose the proxy port to the internet or forward it through your
   router.
 - Identity private keys are stored in Android's secure storage.
@@ -552,7 +563,7 @@ releases.
 
 ### Backing up and restoring
 
-Open the **Information** page and tap **Backup & restore**.
+Tap **Backup & restore** on the home screen.
 
 - **Back up now** asks for a passphrase and saves one encrypted `.mcbackup`
   file. It contains all identities and their keys, contacts, channels,
@@ -571,9 +582,9 @@ removed.
 
 ### Moving to a new phone
 
-1. On the old phone, open **Information → Backup & restore → Back up now**.
+1. On the old phone, tap **Backup & restore → Back up now** on the home screen.
 2. Move the file to the new phone and install MeshChameleon.
-3. Open **Information → Backup & restore → Restore from backup**.
+3. Open **Backup & restore → Restore from backup** from the home screen.
 4. Enter the passphrase and confirm.
 
 A MeshCore client can also export the active identity's key, but that carries
@@ -593,12 +604,14 @@ only the key, not contacts, channels, messages, or settings.
 - No Play Store release yet; signed test builds are on GitHub Releases. Debug
   builds cannot update to release or Play builds.
 - One radio link and one MeshCore client at a time.
-- The MeshCore client must support a network/Wi-Fi/TCP companion.
+- The MeshCore client must support a network/TCP companion and normally runs on
+  the same phone.
 - The radio must be a normal MeshCore companion; MeshChameleon does not replace
   its firmware. USB radio links are not supported.
 - MeshChameleon is not a repeater and does not relay other people's traffic.
 - The companion radio's own identity is not used or exposed.
-- All identities on the phone share one radio's frequency, power, and tuning.
+- All identities on the phone share the connected radio's frequency, power, and
+  tuning.
 - The virtual companion presents 350 contacts, 40 channels, and 4 MiB of virtual
   storage per identity.
 - Hardware validation is still in progress. Test your phone and radio
@@ -612,23 +625,28 @@ For protocol and compatibility details, see
 ## FAQ
 
 **Do I need internet access?**  
-No. MeshCore uses radio, and the MeshCore app connects to the phone over your
-local network.
+No. MeshCore uses radio. The MeshCore app normally connects to MeshChameleon over
+`127.0.0.1` on the same phone; a local network is only needed for a client on
+another device.
 
 **Can I use MeshChameleon from another network?**  
-Not safely. The proxy has no password or encryption. Keep it on a trusted local
-network.
+Not safely. The proxy has no password or encryption. Keep it on the phone or a
+trusted local network, and do not expose it to the internet.
 
 **Can I use any MeshCore app?**  
-Only one that can connect to a network/Wi-Fi/TCP companion. Bluetooth-only
-clients cannot connect to MeshChameleon's client endpoint.
+Only one that can connect to a network/TCP companion. It normally runs on the
+same phone. Bluetooth-only clients cannot connect to MeshChameleon's client
+endpoint.
 
 **Can two MeshCore apps connect at once?**  
 No. Use one client per session; the proxy expects exclusive use of the radio.
 
-**Can I change radios?**  
-Yes. Disconnect the current radio and connect another. The identities stay on
-the phone.
+**Can I use the same identity with different radios?**
+
+Yes. Disconnect the current radio and connect another. The identity, contacts,
+channels, and messages stay on the phone; nothing needs to be exported or
+imported. That is how you can use a home radio with a roof antenna and a
+portable node with the same identity.
 
 **Can I use several identities at once?**  
 All enabled identities stay live and receive while connected, but only the
@@ -640,8 +658,7 @@ Serving a different identity changes the companion's identity. The client is
 disconnected and reconnects to the new one.
 
 **Can I run MeshChameleon without a radio?**  
-Only the development-only **Simulated** companion does that. It is for testing,
-not real mesh traffic.
+The **Simulated** companion does that. It is for testing, not real mesh traffic.
 
 **Can I use the radio's built-in identity through MeshChameleon?**  
 No. The radio is used as a radio, and its own identity is kept separate.
@@ -656,8 +673,9 @@ Android battery optimization is the usual cause. Set MeshChameleon to
 manufacturer's battery settings.
 
 **How do I find the phone's IP address?**  
-Open Android's Wi-Fi settings and look at the connected network's details. Use
-that address in your MeshCore app.
+You only need it when the MeshCore app runs on another device. Open Android's
+Wi-Fi settings and look at the connected network's details, then use that
+address in the client. On the same phone, use `127.0.0.1` instead.
 
 **What port should I use?**  
 The default is `5000`. Use the same port in MeshChameleon and the MeshCore app.
@@ -677,8 +695,9 @@ Yes. It is MIT-licensed; see [`LICENSE`](../LICENSE).
 - **Live identity** — an identity that is running and receiving while a device is
   connected.
 - **Proxy** — MeshChameleon's local server that the MeshCore app connects to.
-- **Network companion** — a companion reached over Wi-Fi or Ethernet instead of
-  Bluetooth.
+- **Network companion** — a companion reached over TCP/IP instead of Bluetooth.
+  MeshChameleon serves one at `127.0.0.1` on the same phone; from another
+  device, use the phone's local network address.
 - **BLE** — Bluetooth Low Energy, used for nearby companion radios.
 - **Queue** — messages waiting for the MeshCore app to sync them.
 - **Advert** — a MeshCore announcement that lets other nodes discover you.

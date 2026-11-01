@@ -76,8 +76,9 @@ Verified against the repository on 2026-11-01:
   can later update in place from Play.
 - No in-app privacy policy, open-source license page, source link, or
   “not affiliated with MeshCore” disclaimer.
-- The release build hides the simulated companion (`!kReleaseMode`), so Play
-  reviewers cannot exercise the proxy without hardware.
+- The simulated companion is available in release builds. It is still labeled
+  **Simulated** and has no echo peer or demo banner, so Play reviewers can start
+  the proxy but cannot exercise a full message exchange without hardware.
 - `app/pubspec.lock` is git-ignored, so app dependency resolution is not locked.
 - Release builds fall back to the debug signing key when `key.properties` is
   missing.
@@ -160,8 +161,8 @@ prospects, package name, and listing defaults.
 Goal: a Play reviewer, a new user, or a tester without a radio can connect a real
 MeshCore client to MeshChameleon and exercise the companion flow, with no RF.
 
-- Expose the simulated companion in release builds; rename the tab to **Demo**
-  or **Demo radio** and make the simulated nature unmistakable.
+- The simulated companion is exposed in release builds. Still to do: rename the
+  tab to **Demo** or **Demo radio** and make the simulated nature unmistakable.
 - Add a persistent visible label/banner: “Demo mode — no radio traffic.”
 - Reuse the in-process `FakeRadioBus` and `MeshNode` simulator to run a second
   virtual node as an **echo peer**:
@@ -173,16 +174,18 @@ MeshCore client to MeshChameleon and exercise the companion flow, with no RF.
   - it never touches BLE, TCP, or real RF.
 - Keep demo state in memory only; do not write demo contacts/messages into the
   user’s identity state.
-- Make the demo work with the normal proxy: the MeshCore client connects to the
-  phone’s local TCP port and sees the virtual companion.
+- Make the demo work with the normal proxy: the MeshCore client, normally on the
+  same phone at `127.0.0.1`, connects to the proxy port and sees the virtual
+  companion.
 - Add tests:
   - widget test for the Demo tab and warning label;
   - full-stack TCP test: MeshCore client → proxy → simulated radio → echo peer →
     reply;
   - test that demo mode works with no Bluetooth permissions and no network.
 - Play review instructions will say: “Open Device link → Demo → Connect demo
-  radio → start the proxy; connect your MeshCore client to the phone’s local IP
-  and port. Messages stay on the phone.”
+  radio → start the proxy; connect your MeshCore client on the same phone to
+  `127.0.0.1` and the proxy port (or use the phone’s local IP from another
+  device). Messages stay on the phone.”
 
 **Fallback:** if the echo peer cannot be made reliable quickly, ship the
 simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
@@ -193,7 +196,7 @@ simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
 Goal: a user can tap **Back up**, save one file, and later restore everything
 without reading a guide. This is a normal app action, not a developer tool.
 
-- Put **Backup & restore** on the Information screen as a plain list item.
+- Put **Backup & restore** on the home screen as a plain list item.
 - Export flow:
   1. tap **Back up**;
   2. choose a passphrase (show/hide, confirmation, minimum length);
@@ -519,8 +522,8 @@ Important wording:
 - “MeshChameleon is not a messaging app. It is a local companion-protocol bridge
   for your existing MeshCore client.”
 - “Requires a MeshCore companion radio for real mesh use.”
-- “The local companion endpoint is unencrypted and has no password. Use it only
-  on a trusted network.”
+- “The TCP companion endpoint is unencrypted and has no password. Keep it on the
+  phone or a trusted network, and do not expose it to the internet.”
 - “No analytics, no cloud service, no telemetry.”
 - “Open source (MIT). Not affiliated with the MeshCore project.”
 

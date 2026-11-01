@@ -13,6 +13,17 @@ over the companion role and uses an ordinary MeshCore radio as a simple radio
 link. Like its namesake, it blends in: to your MeshCore app, it looks and
 behaves like a normal companion.
 
+Because your identity lives on the phone, it moves with you. Keep a high-gain
+companion with a roof antenna at home and a portable node for when you are out:
+connect whichever radio is nearby and MeshChameleon serves the same identity,
+contacts, channels, and message history from the phone. Switching radios
+requires no key export, import, or identity change.
+
+MeshChameleon and your MeshCore app normally run on the same phone. The app
+connects to MeshChameleon at `127.0.0.1`, port `5000` by default, so no local
+network is involved. You can also let a MeshCore app on another device connect
+over your local network.
+
 It is not a messaging app: you still use your MeshCore app to read and send
 messages.
 
@@ -22,15 +33,16 @@ screens, identities, and troubleshooting with dark-mode screenshots.
 ## Why use it?
 
 - **Your identity stays with you.** Your MeshCore name, key, contacts, channels,
-  and message queue live on the phone. You can replace or reconnect the radio
-  without losing them.
-- **Use the radio you already have.** Keep your existing MeshCore companion;
-  MeshChameleon uses it as the radio.
+  and message queue live on the phone. Use the same identity with a home radio,
+  a portable node, or any other companion you connect.
+- **Use the radios you already have.** Keep your existing MeshCore companions;
+  MeshChameleon uses whichever one is connected as the radio.
 - **Keep more than one identity.** Run several MeshCore identities at once and
   switch which one your app sees, without needing a separate radio for each.
   They all keep receiving while connected.
-- **Keep using your MeshCore app.** Point your existing client at MeshChameleon
-  over the local network and carry on as usual.
+- **Keep using your MeshCore app.** Run it on the same phone and point it at
+  MeshChameleon on `127.0.0.1`; a client on another device can use your local
+  network instead.
 - **Leave it running.** MeshChameleon is designed to keep the link alive while
   you use other apps, and can reconnect on launch.
 
@@ -45,6 +57,7 @@ does through a companion:
 - request status and sensor telemetry where the mesh supports it
 - see radio battery and storage information
 - switch between identities without touching the radio
+- use the same identity with a home radio or a portable node
 - back up and restore identities, contacts, channels, messages, and settings in
   one encrypted file
 - reconnect on launch, if **Resume on launch** is enabled
@@ -69,21 +82,25 @@ another identity first if you want to disable it.
 
 ## How it works
 
-1. MeshChameleon connects to a normal MeshCore companion over Bluetooth or your
-   local network.
+1. MeshChameleon connects to a normal MeshCore companion over Bluetooth or
+   Wi-Fi/Ethernet.
 2. It keeps your identity, contacts, channels, and queued messages on the phone.
-3. It offers a local connection that your MeshCore app can use.
-4. Your app talks to MeshChameleon exactly as it would talk to a companion.
+3. It serves a TCP companion endpoint on the phone, port `5000` by default.
+4. Your MeshCore app, normally on the same phone, connects to `127.0.0.1` and
+   talks to MeshChameleon exactly as it would talk to a companion.
 5. MeshChameleon uses the connected radio to send and receive over the mesh.
+6. Connect a different radio whenever you want; the identity stays on the phone.
 
 ```mermaid
 flowchart LR
-    app["MeshCore app<br/>(the app you already use)"]
+    app["MeshCore app<br/>(same phone)"]
     phone["MeshChameleon<br/>(Android phone)<br/>identity, contacts, messages"]
     radio["MeshCore companion<br/>(used as the radio)"]
     mesh["Other MeshCore<br/>radios"]
+    remote["MeshCore app<br/>(another device, optional)"]
 
-    app <-->|"local network"| phone
+    app <-->|"127.0.0.1 TCP"| phone
+    remote -.->|"local network (optional)"| phone
     phone <-->|"Bluetooth or network"| radio
     radio <-->|"radio"| mesh
 ```
@@ -95,11 +112,13 @@ The important part: **your phone owns the identity, not the radio.**
 - An Android phone running Android 7.0 (API 24) or newer. iOS is not supported
   yet.
 - A MeshCore companion radio with its normal firmware, reachable over Bluetooth
-  or Wi-Fi/Ethernet.
-- A MeshCore client app that can use a **network companion** (a companion
-  reached over Wi-Fi or Ethernet instead of Bluetooth). For example,
-  [`meshcore-open`](https://github.com/zjs81/meshcore-open).
-- The MeshCore app must be able to reach the phone over a trusted local network.
+  or Wi-Fi/Ethernet. You can switch between radios at any time.
+- A MeshCore client app that can use a **TCP/network companion** — for example
+  the official MeshCore app,
+  [`MeshCore Open`](https://github.com/zjs81/meshcore-open), or another
+  TCP-capable client. It normally runs on the same phone as MeshChameleon.
+- No local network is needed when the client runs on the same phone. If it runs
+  on another device, both must be on the same trusted local network.
 - For reliable background operation, set MeshChameleon to **Unrestricted** in
   Android's battery settings. The home-screen **Battery optimization** card
   opens the right screen.
@@ -124,29 +143,37 @@ Short version:
    nearby radio, or **Network** for a radio on Wi-Fi or Ethernet.
 3. Turn on **Proxy server**. It listens on port `5000` by default; you can
    change the port before starting it.
-4. In your MeshCore app, add a network companion using your phone's local IP
-   address (shown in Android's Wi-Fi settings) and the same port.
+4. In your MeshCore app on the same phone, add a **TCP** or **network**
+   companion at `127.0.0.1` (or `localhost`) and the same port. If the client is
+   on another device, use the phone's local IP address instead.
 5. Optional: turn on **Resume on launch**. For reliable background operation,
    open the **Battery optimization** card and set MeshChameleon to
    **Unrestricted** in Android's battery settings.
 6. Optional: open the identity card and tap **Create identity** to add another
    identity. Tap an identity to make it active.
+7. To use a different radio, disconnect the current one and connect the other.
+   Your identity and data stay on the phone.
 
 ## Good to know
 
-- **Use a trusted network.** The local connection has no password or encryption.
-  Anyone who can reach it can use your MeshChameleon session and the radio
-  settings it exposes.
+- **Use a trusted phone and network.** The TCP endpoint has no password or
+  encryption. Any app on the phone can reach it, and devices on your local
+  network can too. Do not expose it to the internet.
+- **Switch radios freely.** Disconnect one companion and connect another. The
+  identity, contacts, channels, and messages stay on the phone; only the radio
+  link changes.
 - **Use one MeshCore app at a time.** MeshChameleon needs exclusive use of the
   radio. Do not run another configuration client against the same companion
   during a session.
 - **The phone must stay running.** The service is designed to survive
   backgrounding, but battery optimizations and Doze can still interrupt it.
-- **All identities share one radio.** Frequency, transmit power, and other radio
-  settings are shared; names, contacts, channels, and messages are separate.
+- **All identities share the connected radio.** Frequency, transmit power, and
+  other radio settings are shared; names, contacts, channels, and messages are
+  separate.
 - **The radio's own identity is separate.** MeshChameleon does not use or expose
   the companion's built-in MeshCore identity, and messages sent to that identity
-  do not reach the virtual identities.
+  do not reach the virtual identities. The identity your MeshCore app sees is the
+  one on the phone, so it stays the same when you switch radios.
 - **It is not a repeater.** MeshChameleon is a companion; it does not relay other
   people's traffic or extend the mesh's range by itself.
 
@@ -175,8 +202,9 @@ tests, but this is still an early project:
 - Contacts, channels, and message history live in the app's private storage.
   They are protected by Android's app sandbox but are not separately encrypted
   at rest.
-- The local connection is not encrypted and has no password. Keep it on a
-  trusted network.
+- The TCP endpoint is not encrypted and has no password. Any app on the phone
+  can reach it, and devices on your local network can too. Keep it on a trusted
+  phone and network, and do not expose it to the internet.
 - Backup files you create contain identity private keys. They are encrypted
   with your passphrase; keep the file and passphrase as safe as the keys.
 
