@@ -251,4 +251,11 @@ class NetworkConnectionStore {
     await temp.writeAsString(encoded, flush: true);
     await temp.rename(file.path);
   }
+
+  /// Remove the saved connection history, used when restoring a backup
+  /// without one.
+  Future<void> delete() async {
+    final file = await _resolve();
+    if (await file.exists()) await file.delete();
+  }
 }

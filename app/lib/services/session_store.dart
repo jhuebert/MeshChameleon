@@ -143,4 +143,10 @@ class SessionStore {
     await file.parent.create(recursive: true);
     await file.writeAsString(jsonEncode(config.toJson()));
   }
+
+  /// Remove the saved session, used when restoring a backup without one.
+  Future<void> delete() async {
+    final file = await _resolve();
+    if (await file.exists()) await file.delete();
+  }
 }

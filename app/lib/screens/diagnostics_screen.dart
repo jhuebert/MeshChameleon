@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../services/diagnostics_snapshot.dart';
+import 'backup_screen.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key});
@@ -94,6 +95,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             _liveSection(_deviceCard),
             _liveSection(_meshCard),
             _liveSection(_identitiesCard),
+            const _BackupCard(),
           ],
         ),
       ),
@@ -268,6 +270,28 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               _IdentityTile(identity: identity),
         ],
       );
+}
+
+class _BackupCard extends StatelessWidget {
+  const _BackupCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: ListTile(
+        leading: const Icon(Icons.settings_backup_restore),
+        title: const Text('Backup & restore'),
+        subtitle: const Text(
+          'Save or restore identities, contacts, channels, messages, and settings',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BackupScreen()),
+        ),
+      ),
+    );
+  }
 }
 
 class _IdentityTile extends StatelessWidget {

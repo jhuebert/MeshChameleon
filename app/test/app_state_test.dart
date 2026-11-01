@@ -591,4 +591,20 @@ void main() {
     expect(app.identities.single.name, 'Offline Name');
     expect(app.identities.single.contactCount, 0);
   });
+
+  test('backup and restore round-trip through app state', () async {
+    final id = app.activeIdentityId!;
+    final bytes = await app.createBackup('backup passphrase');
+    final preview = await app.inspectBackup(bytes, 'backup passphrase');
+    expect(preview.identityCount, 1);
+
+    final state = (await repository.loadState(id))!;
+    state.prefs.nodeName = 'Changed';
+    await repository.saveState(id, state);
+
+    expect(await app.restoreBackup(preview), isTrue);
+    final restored = (await repository.loadState(id))!;
+    expect(restored.prefs.nodeName, 'MeshChameleon');
+    expect(app.activeIdentityId, id);
+  });
 }

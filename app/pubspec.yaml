@@ -26,6 +26,8 @@ dependencies:
   device_link:
     path: ../packages/device_link
   package_info_plus: ^9.0.1
+  file_picker: ^11.0.3
+  cryptography: ^2.7.0
 
 dev_dependencies:
   flutter_test:

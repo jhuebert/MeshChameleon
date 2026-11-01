@@ -10,6 +10,8 @@ import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'services/backup_codec.dart';
+import 'services/backup_service.dart';
 import 'services/ble_device_link.dart';
 import 'services/build_info.dart';
 import 'services/device_capabilities.dart';
@@ -205,6 +207,7 @@ class AppState extends ChangeNotifier {
 
   IdentityRepository? _repository;
   IdentityManager? _manager;
+  BackupService? _backupService;
 
   IdentityManager? get manager => _manager;
 
@@ -317,7 +320,7 @@ class AppState extends ChangeNotifier {
   ///
   /// A fresh install auto-creates and activates one identity. A corrupt
   /// catalog is surfaced through [identityDatabaseError] rather than replaced.
-  Future<void> loadIdentities() async {
+  Future<void> loadIdentities({bool resume = true}) async {
     final manager = await _ensureManager();
     await manager.load();
     final session = await sessionStore.load();
@@ -327,12 +330,15 @@ class AppState extends ChangeNotifier {
       port = session.proxyPort;
       autoResume = session.autoResume;
       _intentionalOff = session.intentionallyOff;
+    } else {
+      autoResume = false;
+      _intentionalOff = false;
     }
     // Load the history before auto-resume so a resumed TCP session refreshes
     // its target instead of replacing the saved list.
     _savedNetworkConnections = savedConnections;
     notifyListeners();
-    await _maybeResumeSession();
+    if (resume) await _maybeResumeSession();
   }
 
   Future<String> suggestIdentityName() async {
@@ -456,6 +462,75 @@ class AppState extends ChangeNotifier {
       return true;
     } catch (e) {
       log('Could not clear local identity data: $e');
+      return false;
+    } finally {
+      busy = false;
+      notifyListeners();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Backup and restore
+  // -------------------------------------------------------------------------
+
+  Future<BackupService> _ensureBackupService() async {
+    final existing = _backupService;
+    if (existing != null) return existing;
+    final repository = await _ensureRepository();
+    final created = BackupService(
+      repository: repository,
+      identityStore: identityStore,
+      sessionStore: sessionStore,
+      networkConnectionStore: networkConnectionStore,
+      onLog: log,
+    );
+    _backupService = created;
+    return created;
+  }
+
+  /// Capture all local data into a passphrase-encrypted backup file.
+  Future<Uint8List> createBackup(String passphrase) async {
+    final service = await _ensureBackupService();
+    final payload = await service.capture();
+    return BackupCodec.seal(
+      payload: payload,
+      passphrase: passphrase,
+      appVersion: buildInfo.version,
+    );
+  }
+
+  /// Decrypt and validate a backup without changing local data.
+  Future<BackupPreview> inspectBackup(
+    Uint8List bytes,
+    String passphrase,
+  ) async {
+    final service = await _ensureBackupService();
+    return service.inspect(bytes: bytes, passphrase: passphrase);
+  }
+
+  /// Replace all local data with a validated backup.
+  Future<bool> restoreBackup(BackupPreview preview) async {
+    if (busy) return false;
+    busy = true;
+    notifyListeners();
+    try {
+      if (deviceConnected || proxyStatus == ProxyStatus.running) {
+        await disconnectDevice();
+      }
+      await _manager?.dispose();
+      _manager = null;
+      final service = await _ensureBackupService();
+      await service.restore(preview);
+      await loadIdentities(resume: false);
+      log('Restored backup');
+      return true;
+    } catch (e) {
+      log('Could not restore backup: $e');
+      try {
+        await loadIdentities(resume: false);
+      } catch (_) {
+        // Keep the error; the UI can still show the data problem.
+      }
       return false;
     } finally {
       busy = false;
