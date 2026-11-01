@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-01
+
+First signed pre-Play build.
+
+- In-app encrypted backup and restore.
+- Battery optimization now opens Android settings.
+- Release APKs use the future Play app signing key.
+
 ### Added
 
 - Backup & restore: save or restore every identity, contact, channel, message,

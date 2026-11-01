@@ -196,7 +196,7 @@ class DeviceInfo {
     this.blePin = 0,
     this.buildDate = '',
     this.manufacturer = 'MeshChameleon',
-    this.version = 'meshchameleon 0.1.0',
+    this.version = 'meshchameleon 0.2.0',
     this.clientRepeat = 0,
     this.pathHashMode = 0,
   });

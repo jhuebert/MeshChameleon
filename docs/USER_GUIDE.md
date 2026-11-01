@@ -1,6 +1,6 @@
 # MeshChameleon User Guide
 
-Version 0.1.0 · Android
+Version 0.2.0 · Android
 
 MeshChameleon makes an Android phone act as a MeshCore companion while using an
 ordinary MeshCore radio for the actual sending and receiving. You keep using

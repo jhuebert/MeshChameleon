@@ -4,7 +4,7 @@ description: >-
   phone and exposes a companion-protocol TCP server backed by a stock companion
   device used as a raw radio.
 publish_to: none
-version: 0.1.0+1
+version: 0.2.0+1
 
 environment:
   sdk: ^3.5.0
