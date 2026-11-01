@@ -1,14 +1,19 @@
-# Release signing for the companion proxy app.
+# Signing for release builds produced by Gradle.
 #
-# Copy this file to `key.properties` (git-ignored) and fill in the values for a
-# keystore you control. Without `key.properties`, release builds fall back to
-# the debug key so local `flutter build` still works.
+# This is the Play **upload** key: it signs the AAB. GitHub release APKs are
+# re-signed with the **app signing** key by .github/workflows/release.yml, so
+# sideloaded installs can later update in place from Play. That key is not
+# referenced here.
 #
-# Generate a keystore with:
-#   keytool -genkeypair -v -keystore upload-keystore.jks \
-#     -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+# Copy this file to `key.properties` (git-ignored) and fill in the values.
+# Without `key.properties`, release builds fall back to the debug key so local
+# `flutter build` still works.
+#
+# Generate the upload keystore with:
+#   keytool -genkeypair -v -keystore upload-keystore.p12 \
+#     -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 10000 -alias upload
 
 storePassword=changeme
 keyPassword=changeme
 keyAlias=upload
-storeFile=/absolute/path/to/upload-keystore.jks
+storeFile=/absolute/path/to/upload-keystore.p12

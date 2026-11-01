@@ -461,18 +461,31 @@ versions. `.github/workflows/release.yml` is the manual signed release; see
 
 ## Release signing
 
-Release builds are signed with your own keystore when a `key.properties`
-(git-ignored) is present, and fall back to the debug key otherwise. To configure:
+Two keys are used:
+
+- **Upload key** (`upload.p12`) — signs the AAB built by Gradle, which is what
+  you upload to Play.
+- **App signing key** (`app-signing.p12`) — signs the GitHub release APKs and is
+  uploaded to Play as the app signing key (choose “Use a different key” when
+  enrolling). GitHub installs can then update in place from Play.
+
+The release workflow re-signs the universal and per-ABI APKs with the app
+signing key after Gradle builds them. Local `flutter build` commands only use
+the upload key in `app/android/key.properties`; without that file, release
+builds fall back to the debug key.
+
+To configure the upload key locally:
 
 ```sh
 cd app/android
 cp key.properties.example key.properties   # then edit the paths/passwords
-keytool -genkeypair -v -keystore upload-keystore.jks \
-  -storetype JKS -keyalg RSA -keysize 2048 -validity 10000 -alias upload
+keytool -genkeypair -v -keystore upload-keystore.p12 \
+  -storetype PKCS12 -keyalg RSA -keysize 4096 -validity 10000 -alias upload
 ```
 
 The Android `applicationId` is `org.huebert.meshchameleon` (matching the
-`namespace` and `MainActivity` package).
+`namespace` and `MainActivity` package). Keep it fixed: changing it makes a new
+app with a new data store and breaks updates.
 
 ## Building the app
 

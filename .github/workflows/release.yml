@@ -1,9 +1,15 @@
 name: Release
 
 # Manual, signed release: bump, verify, fast-forward main, tag, publish.
-# Prerequisites (docs/RELEASE_PLAN.md 2.1-2.2): an upload keystore and the
-# `release` environment secrets ANDROID_KEYSTORE_BASE64,
-# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD.
+# Prerequisites (docs/RELEASE_PLAN.md 2.1-2.2): an upload key and an app signing
+# key, plus the `release` environment secrets:
+#   UPLOAD_KEYSTORE_BASE64, UPLOAD_KEYSTORE_PASSWORD,
+#   UPLOAD_KEY_ALIAS, UPLOAD_KEY_PASSWORD
+#   APP_SIGNING_KEYSTORE_BASE64, APP_SIGNING_KEYSTORE_PASSWORD,
+#   APP_SIGNING_KEY_ALIAS, APP_SIGNING_KEY_PASSWORD
+# The AAB is signed with the upload key (it is the Play upload artifact). The
+# APKs are re-signed with the app signing key so GitHub installs can later
+# update in place from Play, which uses the same app signing key.
 # Play upload stays manual for 1.0.
 #
 # If `main` is protected, allow this workflow (or its actor) to bypass the
@@ -108,27 +114,36 @@ jobs:
 
       - name: Configure release signing
         env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+          APP_SIGNING_KEYSTORE_BASE64: ${{ secrets.APP_SIGNING_KEYSTORE_BASE64 }}
+          APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
+          APP_SIGNING_KEY_ALIAS: ${{ secrets.APP_SIGNING_KEY_ALIAS }}
+          APP_SIGNING_KEY_PASSWORD: ${{ secrets.APP_SIGNING_KEY_PASSWORD }}
         run: |
           set -euo pipefail
-          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD \
-            ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+          for name in UPLOAD_KEYSTORE_BASE64 UPLOAD_KEYSTORE_PASSWORD \
+            UPLOAD_KEY_ALIAS UPLOAD_KEY_PASSWORD \
+            APP_SIGNING_KEYSTORE_BASE64 APP_SIGNING_KEYSTORE_PASSWORD \
+            APP_SIGNING_KEY_ALIAS APP_SIGNING_KEY_PASSWORD; do
             if [[ -z "${!name:-}" ]]; then
               echo "::error::missing secret $name; configure the release environment"
               exit 1
             fi
           done
-          keystore="$RUNNER_TEMP/upload-keystore.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
-          chmod 600 "$keystore"
+          upload_keystore="$RUNNER_TEMP/upload-keystore.p12"
+          app_keystore="$RUNNER_TEMP/app-signing-keystore.p12"
+          printf '%s' "$UPLOAD_KEYSTORE_BASE64" | base64 --decode > "$upload_keystore"
+          printf '%s' "$APP_SIGNING_KEYSTORE_BASE64" | base64 --decode \
+            > "$app_keystore"
+          chmod 600 "$upload_keystore" "$app_keystore"
           {
-            printf 'storePassword=%s\n' "$ANDROID_KEYSTORE_PASSWORD"
-            printf 'keyPassword=%s\n' "$ANDROID_KEY_PASSWORD"
-            printf 'keyAlias=%s\n' "$ANDROID_KEY_ALIAS"
-            printf 'storeFile=%s\n' "$keystore"
+            printf 'storePassword=%s\n' "$UPLOAD_KEYSTORE_PASSWORD"
+            printf 'keyPassword=%s\n' "$UPLOAD_KEY_PASSWORD"
+            printf 'keyAlias=%s\n' "$UPLOAD_KEY_ALIAS"
+            printf 'storeFile=%s\n' "$upload_keystore"
           } > app/android/key.properties
 
       - name: Bump version and changelog
@@ -160,6 +175,33 @@ jobs:
           ./scripts/build.sh apk --release
           ./scripts/build.sh apk --release --split-per-abi
 
+      # The AAB keeps the upload signature for Play. APKs are what GitHub users
+      # install, so they carry the app signing key that Play will also use.
+      - name: Re-sign APKs with the app signing key
+        env:
+          APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
+          APP_SIGNING_KEY_ALIAS: ${{ secrets.APP_SIGNING_KEY_ALIAS }}
+          APP_SIGNING_KEY_PASSWORD: ${{ secrets.APP_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          apksigner="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)/apksigner"
+          apkdir=app/build/app/outputs/flutter-apk
+          keystore="$RUNNER_TEMP/app-signing-keystore.p12"
+          for name in app-release.apk app-arm64-v8a-release.apk \
+            app-armeabi-v7a-release.apk app-x86_64-release.apk; do
+            input="$apkdir/$name"
+            output="$RUNNER_TEMP/$name"
+            "$apksigner" sign \
+              --ks "$keystore" \
+              --ks-key-alias "$APP_SIGNING_KEY_ALIAS" \
+              --ks-pass env:APP_SIGNING_KEYSTORE_PASSWORD \
+              --key-pass env:APP_SIGNING_KEY_PASSWORD \
+              --out "$output" "$input"
+            mv "$output" "$input"
+          done
+          echo "APKs re-signed with the app signing key"
+
       - name: Download bundletool
         run: |
           set -euo pipefail
@@ -172,15 +214,18 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           BUILD_NUMBER: ${{ inputs.build_number }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
+          APP_SIGNING_KEY_ALIAS: ${{ secrets.APP_SIGNING_KEY_ALIAS }}
         run: |
           set -euo pipefail
           sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           aapt="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)/aapt"
           apksigner="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)/apksigner"
           zipalign="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)/zipalign"
-          keystore="$RUNNER_TEMP/upload-keystore.jks"
+          upload_keystore="$RUNNER_TEMP/upload-keystore.p12"
+          app_keystore="$RUNNER_TEMP/app-signing-keystore.p12"
           bundletool="$RUNNER_TEMP/bundletool.jar"
           out=app/build/app/outputs
           aab="$out/bundle/release/app-release.aab"
@@ -191,13 +236,16 @@ jobs:
             "$out/flutter-apk/app-x86_64-release.apk"
           )
 
-          expected_sha="$(
-            keytool -list -v -keystore "$keystore" -alias "$ANDROID_KEY_ALIAS" \
-              -storepass:env ANDROID_KEYSTORE_PASSWORD \
+          keystore_sha() {
+            keytool -list -v -keystore "$1" -alias "$2" -storepass:env "$3" \
               | awk -F': ' '/SHA256:/ {gsub(/:/, "", $2); print tolower($2); exit}'
-          )"
-          if [[ -z "$expected_sha" ]]; then
-            echo "::error::could not read the upload certificate"
+          }
+          upload_sha="$(keystore_sha "$upload_keystore" "$UPLOAD_KEY_ALIAS" \
+            UPLOAD_KEYSTORE_PASSWORD)"
+          app_sha="$(keystore_sha "$app_keystore" "$APP_SIGNING_KEY_ALIAS" \
+            APP_SIGNING_KEYSTORE_PASSWORD)"
+          if [[ -z "$upload_sha" || -z "$app_sha" ]]; then
+            echo "::error::could not read the signing certificates"
             exit 1
           fi
 
@@ -211,13 +259,20 @@ jobs:
             fi
           }
 
-          for artifact in "$aab" "$apk" "${splits[@]}"; do
-            actual_sha="$(cert_sha "$artifact")"
-            if [[ "$actual_sha" != "$expected_sha" ]]; then
-              echo "::error::$artifact is not signed with the upload key"
+          check_signature() {
+            local artifact="$1" expected="$2" label="$3"
+            local actual
+            actual="$(cert_sha "$artifact")"
+            if [[ "$actual" != "$expected" ]]; then
+              echo "::error::$artifact is not signed with the $label key"
               exit 1
             fi
             "$zipalign" -c -P 16 4 "$artifact"
+          }
+
+          check_signature "$aab" "$upload_sha" "upload"
+          for artifact in "$apk" "${splits[@]}"; do
+            check_signature "$artifact" "$app_sha" "app signing"
           done
 
           aab_code="$(java -jar "$bundletool" dump manifest \
@@ -250,8 +305,10 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           BUILD_NUMBER: ${{ inputs.build_number }}
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
+          APP_SIGNING_KEY_ALIAS: ${{ secrets.APP_SIGNING_KEY_ALIAS }}
         run: |
           set -euo pipefail
           out=app/build/app/outputs
@@ -266,12 +323,14 @@ jobs:
           cp "$out/flutter-apk/app-x86_64-release.apk" \
             "dist/MeshChameleon-$VERSION-x86_64.apk"
           cp "$RUNNER_TEMP/release-notes.md" dist/release-notes.md
-          signer_sha="$(
-            keytool -list -v -keystore "$RUNNER_TEMP/upload-keystore.jks" \
-              -alias "$ANDROID_KEY_ALIAS" \
-              -storepass:env ANDROID_KEYSTORE_PASSWORD \
+          keystore_sha() {
+            keytool -list -v -keystore "$1" -alias "$2" -storepass:env "$3" \
               | awk -F': ' '/SHA256:/ {gsub(/:/, "", $2); print tolower($2); exit}'
-          )"
+          }
+          upload_sha="$(keystore_sha "$RUNNER_TEMP/upload-keystore.p12" \
+            "$UPLOAD_KEY_ALIAS" UPLOAD_KEYSTORE_PASSWORD)"
+          app_sha="$(keystore_sha "$RUNNER_TEMP/app-signing-keystore.p12" \
+            "$APP_SIGNING_KEY_ALIAS" APP_SIGNING_KEYSTORE_PASSWORD)"
           cat > dist/build-metadata.txt <<EOF
           version=$VERSION
           build_number=$BUILD_NUMBER
@@ -279,7 +338,8 @@ jobs:
           tag=v$VERSION
           built_at=$(date -u -d "@$(git show -s --format=%ct HEAD)" +%Y-%m-%dT%H:%M:%SZ)
           flutter=$(flutter --version | sed -n '1p')
-          signer_sha256=$signer_sha
+          upload_signer_sha256=$upload_sha
+          app_signing_sha256=$app_sha
           EOF
           (
             cd dist
@@ -343,4 +403,6 @@ jobs:
       - name: Remove signing material
         if: always()
         run: |
-          rm -f "$RUNNER_TEMP/upload-keystore.jks" app/android/key.properties
+          rm -f "$RUNNER_TEMP/upload-keystore.p12" \
+            "$RUNNER_TEMP/app-signing-keystore.p12" \
+            app/android/key.properties
