@@ -198,8 +198,7 @@ jobs:
               --ks-pass env:APP_SIGNING_KEYSTORE_PASSWORD \
               --key-pass env:APP_SIGNING_KEY_PASSWORD \
               --out "$output" "$input"
-            echo "re-signed $name:"
-            "$apksigner" verify --print-certs "$output" | sed -n '1,3p'
+            echo "re-signed $name"
             mv "$output" "$input"
           done
           echo "APKs re-signed with the app signing key"
@@ -252,11 +251,6 @@ jobs:
           fi
           echo "upload certificate: $upload_sha"
           echo "app signing certificate: $app_sha"
-          keytool -list -v -keystore "$app_keystore" \
-            -alias "$APP_SIGNING_KEY_ALIAS" \
-            -storepass:env APP_SIGNING_KEYSTORE_PASSWORD \
-            | sed -n '/Alias name:/,/Certificate chain length:/p' \
-            | grep -E 'Alias name|SHA256|Certificate chain length' || true
 
           cert_sha() {
             if [[ "$1" == *.aab ]]; then
@@ -264,7 +258,8 @@ jobs:
                 | awk -F': ' '/SHA256:/ {gsub(/:/, "", $2); print tolower($2); exit}'
             else
               "$apksigner" verify --print-certs "$1" \
-                | awk -F': ' '/certificate SHA-256 digest/ {print tolower($2); exit}'
+                | sed -n 's/.*certificate SHA-256 digest: \([0-9a-fA-F]*\).*/\1/p' \
+                | head -n1 | tr 'A-F' 'a-f'
             fi
           }
 
@@ -280,7 +275,6 @@ jobs:
             "$zipalign" -c -P 16 4 "$artifact"
           }
 
-          "$apksigner" verify --print-certs "$apk" | sed -n '1,6p' || true
           check_signature "$aab" "$upload_sha" "upload"
           for artifact in "$apk" "${splits[@]}"; do
             check_signature "$artifact" "$app_sha" "app signing"
