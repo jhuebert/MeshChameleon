@@ -1,7 +1,10 @@
 # MeshChameleon 1.0.0 release plan
 
-Status: **draft for review**. No code, workflow, signing, or Play Console work
-has been started yet.
+Status: **in progress**. Battery settings, version bumping and the changelog,
+CI, the manual release workflow, two-key signing, and in-app backup/restore are
+implemented. Demo mode, the privacy/licenses work, signing fail-fast and the
+committed app lockfile, store assets, and the Play Console work remain. No Play
+account, listing, or workflow secrets exist yet.
 
 This plan takes MeshChameleon from the current `0.1.0+1` development baseline to
 a signed, tested, store-listed **1.0.0** release on Google Play, with matching
