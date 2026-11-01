@@ -8,14 +8,15 @@ a signed, tested, store-listed **1.0.0** release on Google Play, with matching
 GitHub Releases. It assumes the app remains free, open source, Android-only, and
 without ads, in-app purchases, analytics, or telemetry.
 
-**Critical path:** harden the product (demo + echo peer, policy fixes) → set up
-signing, CI, and the release workflow → prepare store assets and listing copy →
-run hardware/manual validation → **create the replacement Play account and Play
-Console setup last** → complete the 12-tester/14-day closed test → production
-review and staged rollout. For a new personal account, expect roughly 6–10 weeks
-of calendar time, with the final 3–5 weeks dependent on Google’s verification
-and the closed test. An organization account could remove the 14-day gate but
-requires a D-U-N-S number. The plan is quality-gated, not date-gated.
+**Critical path:** harden the product (backup/restore, demo + echo peer, policy
+fixes) → set up signing, CI, and the release workflow → prepare store assets and
+listing copy → run hardware/manual validation → **create the replacement Play
+account and Play Console setup last** → complete the 12-tester/14-day closed test
+→ production review and staged rollout. For a new personal account, expect
+roughly 6–10 weeks of calendar time, with the final 3–5 weeks dependent on
+Google’s verification and the closed test. An organization account could remove
+the 14-day gate but requires a D-U-N-S number. The plan is quality-gated, not
+date-gated.
 
 All engineering, signing, asset, and validation work is intentionally
 front-loaded. The Play account is only needed for the final package-name check,
@@ -31,16 +32,17 @@ production rollout.
 | Validation device | Pixel 7 on the latest Android release (Android 16 at the time of writing); older Android versions and the 16 KB page-size check in emulators |
 | Primary release channel | Google Play production, free app |
 | Distribution | Google Play + GitHub Releases (APK/AAB) |
-| Play App Signing | Yes; Google holds the app signing key, we hold the upload key |
+| Play App Signing | Yes; we provide the app signing key (also used for GitHub APKs) and keep a separate upload key. Google holds a copy of the app signing key. |
 | Play upload automation | First upload manual; optional CI upload later |
+| GitHub APK signing | Signed with the app signing key so sideloaded installs can update in place from Play |
 | Release workflow trigger | Manual `workflow_dispatch` |
 | Release versioning | Workflow bumps, commits, tags, and builds |
 | Battery optimization | Open Android settings; remove `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` |
 | Telemetry | None |
 | Privacy policy | A public file in this GitHub repo; linked from the listing and inside the app |
 | Demo mode | Production-visible simulated radio **plus an echo peer** |
-| Feature scope | Only features that cannot be achieved with the official MeshCore client |
-| Existing local data | No in-app backup/restore; identity keys move through the client’s companion export/import, contacts/channels/messages are recreated |
+| Feature scope | Prefer features the official MeshCore client cannot provide; add in-app parity where users reasonably expect it (for example backup/restore) |
+| Backups | In-app encrypted backup/restore from a single file; client identity export/import stays available |
 | Store graphics | Fresh screenshots + branded feature graphic from existing assets |
 | Assumed listing defaults | Tools, 13+, all countries, English (US), phone screenshots for 1.0; confirm in Phase 0 |
 | Target date | None; quality-gated |
@@ -67,6 +69,9 @@ Verified against the repository on 2026-10-28:
   “not affiliated with MeshCore” disclaimer.
 - The release build hides the simulated companion (`!kReleaseMode`), so Play
   reviewers cannot exercise the proxy without hardware.
+- There is no in-app backup/restore. The user guide tells users to export only
+  the active identity through a MeshCore client, so contacts, channels, and
+  messages cannot be moved between installs.
 - The battery card requests a direct exemption and the manifest declares the
   restricted `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` permission.
 - `app/pubspec.lock` is git-ignored, so app dependency resolution is not locked.
@@ -144,7 +149,7 @@ prospects, package name, and listing defaults.
 
 ## Phase 1 — Product hardening for 1.0
 
-**Effort: 1–2 weeks. Blocking: yes.**
+**Effort: 2–3 weeks. Blocking: yes.**
 
 ### 1.1 Production demo mode with echo peer
 
@@ -179,7 +184,42 @@ MeshCore client to MeshChameleon and exercise the companion flow, with no RF.
 simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
 1.0 on a complex demo feature.
 
-### 1.2 Battery optimization policy fix
+### 1.2 Backup and restore
+
+Goal: a user can tap **Back up**, save one file, and later restore everything
+without reading a guide. This is a normal app action, not a developer tool.
+
+- Put **Backup & restore** on the Information screen as a plain list item.
+- Export flow:
+  1. tap **Back up**;
+  2. choose a passphrase (show/hide, confirmation, minimum length);
+  3. pick a location with Android's file picker;
+  4. done: `meshchameleon-YYYY-MM-DD.mcbackup` saved.
+- Import flow:
+  1. tap **Restore**;
+  2. pick the file;
+  3. enter the passphrase;
+  4. show a plain summary (identities, contacts, channels, messages) and ask
+     **Replace local data** or Cancel;
+  5. confirm, restore, reload.
+- The file contains the identity catalog, each identity's key and node state,
+  network connection history, and session config. Exclude logs, diagnostics, and
+  the attached radio's identity (it is not stored).
+- Format: a small JSON envelope (format id, version, creation time, app and
+  schema versions) around AES-256-GCM ciphertext. Derive the key with
+  PBKDF2-HMAC-SHA256 (high iteration count, random salt); use a random nonce and
+  authenticate the header. No custom extensions or manual key handling.
+- Import validates the envelope, version, schema, and key/public-key match;
+  refuses unknown future versions; writes atomically with a recovery copy; and
+  reloads app state. Cap the file size.
+- Never log or store the passphrase. Warn once, in plain language, that the file
+  contains private identity keys and must be kept safe.
+- Tests: round-trip, wrong passphrase, tampered ciphertext, corrupt JSON, future
+  version, duplicate keys, missing secure-storage key, and a 0.1.0 fixture.
+- Acceptance: a new user can complete both flows from the labels and prompts
+  alone; no documentation is required.
+
+### 1.3 Battery optimization policy fix
 
 - Remove `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` from `AndroidManifest.xml`.
 - Change the home-screen action from a direct exemption request to
@@ -191,7 +231,7 @@ simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
 - Test on the Pixel 7’s latest Android release and on Android 7, 13, and 15
   emulators, including the settings round-trip and return-to-app refresh.
 
-### 1.3 In-app privacy, licenses, and trust disclosures
+### 1.4 In-app privacy, licenses, and trust disclosures
 
 - Add `PRIVACY.md` at the repository root as the canonical policy. Link it from
   Play as `https://github.com/jhuebert/MeshChameleon/blob/main/PRIVACY.md`.
@@ -215,7 +255,7 @@ simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
   - do not expose it beyond a trusted LAN.
 - Ensure no private key material appears in logs or copied diagnostics.
 
-### 1.4 Signing fail-fast and dependency locking
+### 1.5 Signing fail-fast and dependency locking
 
 - Change the Android release build so it **fails** when `key.properties` is
   missing instead of silently using the debug key. Keep debug builds working
@@ -229,7 +269,7 @@ simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
 - Add a release check that the built APK/AAB is not signed with the Android
   debug certificate.
 
-### 1.5 Versioning and changelog
+### 1.6 Versioning and changelog
 
 - Add `scripts/bump_version.sh` that updates:
   - `app/pubspec.yaml` (`X.Y.Z+N`);
@@ -253,20 +293,37 @@ simulated radio alone and keep the echo peer as a 1.0.x follow-up. Do not block
 
 **Effort: 3–5 days. Blocking: yes.**
 
-### 2.1 Upload keystore
+### 2.1 Signing keys
 
 No MeshChameleon app was ever uploaded under the closed account, so there is no
-old Play App Signing key to recover or migrate. Start with a fresh upload key.
-The upload key is ours; Google’s Play App Signing key signs the distributed APK.
-They should be different. Enrolling in Play App Signing is deferred to Phase 5.2.
+old Play App Signing key to recover. Create two fresh keys:
 
-Generate locally (do not commit, do not send the file or passwords to anyone):
+- **App signing key** (`meshchameleon-app-signing.p12`) — signs the GitHub
+  release APKs and is uploaded to Play at enrollment as the app signing key, so
+  sideloaded installs can update in place from Play.
+- **Upload key** (`meshchameleon-upload.p12`) — signs the AAB that is uploaded
+  to Play. If it is lost, request an upload-key reset; users are unaffected.
+
+Keep the keys different. The app signing key is the long-lived one: back it up
+carefully. Play keeps a copy after enrollment, but you still need it to sign
+future GitHub APKs.
+
+Generate locally (do not commit, do not send the files or passwords to anyone):
 
 ```sh
 mkdir -p ~/keystores
 keytool -genkeypair -v \
-  -keystore ~/keystores/meshchameleon-upload.jks \
-  -storetype JKS \
+  -keystore ~/keystores/meshchameleon-app-signing.p12 \
+  -storetype PKCS12 \
+  -keyalg RSA \
+  -keysize 4096 \
+  -validity 10000 \
+  -alias app-signing \
+  -dname "CN=MeshChameleon App Signing, OU=MeshChameleon, O=MeshChameleon"
+
+keytool -genkeypair -v \
+  -keystore ~/keystores/meshchameleon-upload.p12 \
+  -storetype PKCS12 \
   -keyalg RSA \
   -keysize 4096 \
   -validity 10000 \
@@ -276,38 +333,43 @@ keytool -genkeypair -v \
 
 Then:
 
-1. Store the `.jks` and passwords in a password manager and an offline encrypted
-   backup.
-2. Create `app/android/key.properties` locally:
+1. Record both SHA-256 fingerprints (they are public).
+2. Store both `.p12` files and passwords in a password manager and an offline
+   encrypted backup.
+3. Create `app/android/key.properties` locally for the **upload** key:
    ```properties
    storePassword=...
    keyPassword=...
    keyAlias=upload
-   storeFile=/absolute/path/to/meshchameleon-upload.jks
+   storeFile=/absolute/path/to/meshchameleon-upload.p12
    ```
-3. Build a signed APK/AAB and verify the signer:
+4. Build a signed APK/AAB and verify the signer locally:
    ```sh
    apksigner verify --print-certs app/build/app/outputs/flutter-apk/app-release.apk
    ```
-4. Keep the upload key backed up. If it is lost, request an upload-key reset in
-   Play Console later; users are unaffected because the app signing key stays
-   with Google.
+5. Do not enroll in Play App Signing yet; Phase 5.2 uploads the app signing key
+   through the Play PEPK flow.
 
 ### 2.2 GitHub environments and secrets
 
 Create a protected `release` environment with required reviewer approval
-(Jason). Add:
+(Jason) and deployments restricted to `main`. Add:
 
 | Secret | Purpose |
 |---|---|
-| `ANDROID_KEYSTORE_BASE64` | Base64 of `meshchameleon-upload.jks` |
-| `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
-| `ANDROID_KEY_ALIAS` | `upload` |
-| `ANDROID_KEY_PASSWORD` | Key password |
+| `UPLOAD_KEYSTORE_BASE64` | Base64 of `meshchameleon-upload.p12` |
+| `UPLOAD_KEYSTORE_PASSWORD` | Upload keystore password |
+| `UPLOAD_KEY_ALIAS` | `upload` |
+| `UPLOAD_KEY_PASSWORD` | Upload key password |
+| `APP_SIGNING_KEYSTORE_BASE64` | Base64 of `meshchameleon-app-signing.p12` |
+| `APP_SIGNING_KEYSTORE_PASSWORD` | App signing keystore password |
+| `APP_SIGNING_KEY_ALIAS` | `app-signing` |
+| `APP_SIGNING_KEY_PASSWORD` | App signing key password |
 
-Use `gh secret set --env release` and paste values interactively; avoid shell
-history. The workflow decodes the keystore into `$RUNNER_TEMP`, writes
-`key.properties`, and deletes it in an `always()` step.
+Use `gh secret set --env release` from files so the base64 never enters shell
+history. The workflow decodes both keystores into `$RUNNER_TEMP`, writes
+`key.properties` for the upload key, re-signs the APKs with the app signing key,
+and deletes both in an `always()` step.
 
 ### 2.3 CI workflow
 
@@ -346,14 +408,15 @@ Recommended execution (avoids committing a broken build):
 1. Validate inputs; check out `main`; require a clean tree; ensure
    `v<version>` does not exist.
 2. Create a temporary `release/v<version>` branch.
-3. Run `scripts/bump_version.sh <version> <build_number>` and write the
-   changelog entry.
+3. Run `scripts/bump_version.sh <version> <build_number> <notes-file>` to
+   update every version and add the release notes to `CHANGELOG.md`.
 4. Run `scripts/check.sh`.
-5. Build the signed AAB, universal APK, and split APKs via `scripts/build.sh`;
-   set `SOURCE_DATE_EPOCH` from the release commit and
-   `MESHCHAMELEON_GIT_DIRTY=0`.
+5. Build the AAB, universal APK, and split APKs via `scripts/build.sh` (upload
+   key), then re-sign the APKs with the app signing key; set `SOURCE_DATE_EPOCH`
+   from the release commit and `MESHCHAMELEON_GIT_DIRTY=0`.
 6. Verify:
-   - AAB/APK signatures are the upload key, not the debug key;
+   - the AAB is signed with the upload key and the APKs with the app signing
+     key, not the debug key;
    - the AAB and universal APK `versionCode`/`versionName` match the inputs
      (split APKs may use Flutter’s ABI-adjusted version codes);
    - 16 KB page-size alignment on 64-bit native libraries;
@@ -374,6 +437,9 @@ Recommended execution (avoids committing a broken build):
 11. For 1.0, exercise the workflow with `dry_run=true`. Do not publish the
     final `v1.0.0` GitHub Release until Phase 5 confirms the package is
     available in Play Console.
+12. Do not attach debug-signed APKs to public releases. Testers use the release
+    APKs signed with the app signing key; debug builds use a machine-local
+    certificate and cannot migrate to Play.
 
 Branch protection note: the default `GITHUB_TOKEN` cannot push to a protected
 `main` without a bypass. Because `main` is currently unprotected, the workflow
@@ -470,11 +536,14 @@ and all assets now so Phase 5 is mostly data entry and verification.
 - `flutter analyze` and all tests pass on the release commit.
 - Store asset validation passes.
 - Lockfile is unchanged after `flutter pub get`.
-- AAB/APK signature verification passes and is not the debug key.
+- AAB is signed with the upload key and the GitHub APKs with the app signing
+  key; neither is the debug certificate.
 - `versionCode` is at least 1 and greater than any prior Play upload;
   `versionName` matches.
 - 16 KB page-size check passes for arm64-v8a and x86_64.
 - Install the release-signed APK on a clean device/emulator.
+- A GitHub-signed APK updates in place to a Play-equivalent build with a higher
+  versionCode, with app data intact.
 
 ### 4.2 Hardware validation
 
@@ -509,9 +578,13 @@ run. The demo echo peer is not a substitute for RF validation.
 - Proxy start/stop, port change, client connect, multiple identities.
 - Background: screen off, app backgrounded, Doze, battery settings round-trip,
   notification permission denied, OEM battery manager.
+- Backup/restore: export, restore on a clean install, wrong passphrase, corrupt
+  file, replace over existing data, and a 0.1.0 fixture.
 - Identity portability: export the active identity key with a MeshCore client,
-  uninstall, reinstall, and import it; verify the key matches and that the
-  documented state loss (contacts, channels, messages) is accurate.
+  uninstall, reinstall, and import it; verify the key matches.
+- Upgrade path: install the GitHub release APK, create data, then install a
+  build signed with the app signing key and a higher versionCode (simulating
+  Play); verify identities, contacts, channels, and messages survive.
 - Release-signed APK: clean install, then upgrade from an earlier release-signed
   build to a higher build number; verify data survives. Repeat from the Play
   internal track in Phase 5.4.
@@ -569,16 +642,17 @@ are ready.**
    **before any upload**:
    - update `applicationId`, `namespace`, and the `MainActivity` package/path;
    - rebuild and rerun the Phase 4 release checks;
-   - identity keys can still be exported and re-imported with a MeshCore client
-     before and after the rename; other local state is recreated.
+   - users can back up in the old build and restore in the renamed build; the
+     client’s identity export/import also still works.
 3. Confirm the **Android developer verification / package registration** status
    for the app is complete, or complete the manual registration flow.
-4. Enroll in **Play App Signing** when creating the app. Choose the
-   Google-generated app signing key (recommended) and upload the upload-key
-   certificate when prompted. Save the app-signing certificate details; the
-   Play-distributed APK signature will differ from the upload key.
+4. Enroll in **Play App Signing** when creating the app. Choose **Use a
+   different key** and upload `meshchameleon-app-signing.p12` with the PEPK
+   tool. Register the upload key when prompted. Save both certificate
+   fingerprints; Play now signs the distributed APKs with the same app signing
+   key that signs the GitHub APKs, so users can update in place.
 5. Upload the first signed AAB to **Internal testing** and verify the Play App
-   Signing certificate in Play Console.
+   Signing certificate matches the app signing key.
 
 ### 5.3 Complete the listing and declarations
 
@@ -600,12 +674,13 @@ Complete **Store listing** with the Phase 3 assets and copy.
 
 ### 5.4 Internal and closed testing
 
-1. Install from the internal-test link, verify Play App Signing, test identity
-   export/import with a MeshCore client, and test an upgrade to a higher build
-   number.
-2. Prepare `docs/TESTER_GUIDE.md` with the opt-in link, demo-mode instructions
-   for testers without radios, the 14-day expectation, and a short feedback
-   template.
+1. Install the GitHub release APK on a clean device, create data, then install
+   the internal-test build with a higher build number without uninstalling;
+   verify the data survives and Play App Signing uses the app signing key. Test
+   backup and restore.
+2. Prepare `docs/TESTER_GUIDE.md` with the opt-in link, the signed GitHub
+   release APK as the pre-Play build, demo-mode instructions for testers without
+   radios, the 14-day expectation, and a short feedback template.
 3. Add the tester list and run **Closed testing** with 12+ testers opted in
    continuously for 14 days. Keep at least 15 testers invited to cover dropouts.
 4. Collect feedback, fix issues, and upload fixes with higher version codes.
@@ -656,8 +731,10 @@ These are explicitly out of scope for 1.0 unless a release blocker forces them:
       confirmed; required testing path known.
 - [ ] Contact email and listing identity confirmed.
 - [ ] Demo mode + echo peer works with a real MeshCore client over TCP.
-- [ ] Client-mediated identity export/import verified on the release build; the
-      debug → Play key migration is documented and tested.
+- [ ] In-app backup/restore round-trips, and a GitHub-signed APK upgrades in
+      place to a Play-signed build with app data intact.
+- [ ] Play App Signing uses the app signing key, and the client’s identity
+      export/import still works.
 - [ ] Battery settings flow works; restricted permission removed.
 - [ ] In-app privacy policy, licenses, source link, and disclaimer present.
 - [ ] `app/pubspec.lock` committed; release signing fails without a keystore.
@@ -685,9 +762,11 @@ These are explicitly out of scope for 1.0 unless a release blocker forces them:
 | Restricted battery permission | Policy rejection | Remove permission; open settings instead |
 | Privacy policy missing in app | Policy rejection | Add `PRIVACY.md` + in-app Privacy screen before submission |
 | Screenshots over 2:1 or stale UI | Listing rejection/quality issues | Fresh 1080×2160 captures; asset validation in CI |
-| Upload key lost | Cannot upload updates | Password manager + offline backup; Play upload-key reset |
+| Upload key lost | Cannot upload updates | Password manager + offline backup; Play upload-key reset; users are unaffected |
 | Debug-signed release shipped | Cannot upload/upgrade | Fail release build without keystore; verify signer in CI |
-| Data lost when switching to Play signing | User data loss | Identity key re-import through a MeshCore client; document that contacts, channels, and messages are recreated |
+| Debug-signed pre-release builds cannot migrate | Tester data loss | Testers use release APKs signed with the app signing key; debug builds stay developer-only |
+| Play rejects or overrides the uploaded app signing key | No seamless GitHub → Play migration | Confirm the own-key option during enrollment; fall back to a Google-generated key and a documented one-time uninstall with backup/restore |
+| App signing key leaked | Malicious updates that Android accepts | Protected release environment (required reviewer, `main`-only), 2FA, offline backup; rotate or contact Play support if compromised |
 | 16 KB page-size violation | Upload blocked | Flutter 3.47 + verification + 16 KB emulator test |
 | Foreground-service declaration mismatch | Policy rejection | Declare `connectedDevice` accurately; match manifest |
 | Local endpoint is plaintext | Security/privacy review concern | Prominent trusted-network warning; policy disclosure; no internet exposure |
@@ -714,13 +793,14 @@ These are placeholders until confirmed:
 
 1. Confirm the non-Play inputs (account type, contact email, companion hardware,
    testers, listing defaults); the phone and package name are already confirmed.
-2. Build demo mode + echo peer — it gates review and tester participation.
-3. Remove the battery permission and add privacy/licenses/trust disclosures.
-4. Lock dependencies, fail-fast signing, version bump tooling, CI.
-5. Generate the upload keystore, add secrets, and exercise the release workflow
-   with `dry_run`.
-6. Build store assets and write the listing copy/declarations.
-7. Run hardware/manual validation; record results.
-8. **Create the new Play account and Play Console setup last**; upload to
+2. Build backup/restore — users expect it, and it protects data before Play.
+3. Build demo mode + echo peer — it gates review and tester participation.
+4. Remove the battery permission and add privacy/licenses/trust disclosures.
+5. Lock dependencies, fail-fast signing, version bump tooling, CI.
+6. Generate the app signing and upload keys, add secrets, and exercise the
+   release workflow with `dry_run`.
+7. Build store assets and write the listing copy/declarations.
+8. Run hardware/manual validation; record results.
+9. **Create the new Play account and Play Console setup last**; upload to
    internal testing, then run closed testing.
-9. Produce the final GitHub Release and start the production rollout.
+10. Produce the final GitHub Release and start the production rollout.
