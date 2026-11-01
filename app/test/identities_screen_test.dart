@@ -18,7 +18,6 @@ import 'package:provider/provider.dart';
 
 const _capabilities = DeviceCapabilities(
   supportsBle: false,
-  supportsSimulatedCompanion: true,
 );
 
 void main() {
@@ -253,13 +252,11 @@ void main() {
 
     expect(find.text('Clear local data'), findsOneWidget);
     final disableItem = tester.widget<PopupMenuItem<String>>(
-      find.widgetWithText(PopupMenuItem<String>,
-          'Activate another identity before disabling this one'),
+      find.widgetWithText(PopupMenuItem<String>, 'Disable identity'),
     );
     expect(disableItem.enabled, isFalse);
     final deleteItem = tester.widget<PopupMenuItem<String>>(
-      find.widgetWithText(PopupMenuItem<String>,
-          'Activate another identity before deleting this one'),
+      find.widgetWithText(PopupMenuItem<String>, 'Delete identity'),
     );
     expect(deleteItem.enabled, isFalse);
   });

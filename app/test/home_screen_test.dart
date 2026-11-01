@@ -26,6 +26,11 @@ void main() {
     expect(find.text('Proxy server'), findsOneWidget);
     expect(find.text('Proxy server port'), findsOneWidget);
     expect(
+      find.text('Reconnect the last device and restart the proxy on open'),
+      findsOneWidget,
+    );
+    expect(find.text('Backup & restore'), findsOneWidget);
+    expect(
       tester.getTopLeft(find.text('Proxy server port')).dy,
       lessThan(tester.getTopLeft(find.text('Proxy server')).dy),
     );

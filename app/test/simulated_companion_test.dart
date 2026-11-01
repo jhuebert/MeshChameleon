@@ -14,7 +14,6 @@ import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
   supportsBle: false,
-  supportsSimulatedCompanion: true,
 );
 
 void main() {
@@ -150,27 +149,5 @@ void main() {
     expect(app.node!.getDeviceInfo().maxContacts, virtualMaxContacts);
     expect(app.node!.getDeviceInfo().maxChannels, virtualMaxChannels);
     expect(app.node!.getDeviceInfo().clientRepeat, 1);
-  });
-
-  test('simulated companion is refused in release-shaped capabilities',
-      () async {
-    final app = AppState(
-      repository: repository,
-      sessionStore: SessionStore(file: File('${dir.path}/session.json')),
-      networkConnectionStore: NetworkConnectionStore(
-        file: File('${dir.path}/network_connections.json'),
-      ),
-      capabilities: const DeviceCapabilities(
-        supportsBle: false,
-        supportsSimulatedCompanion: false,
-      ),
-    );
-    await app.loadIdentities();
-
-    await app.connectSimulated();
-
-    expect(app.deviceConnected, isFalse);
-    expect(app.node, isNull);
-    expect(app.logs.last, contains('development builds'));
   });
 }

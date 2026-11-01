@@ -27,7 +27,6 @@ void main() {
           NetworkConnectionStore(file: File('${dir.path}/history.json')),
       capabilities: const DeviceCapabilities(
         supportsBle: false,
-        supportsSimulatedCompanion: true,
       ),
     );
     addTearDown(() async {

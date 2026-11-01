@@ -6,8 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 /// How the last-used companion device was reached.
 ///
-/// [simulated] is the in-memory fake device used for development; it is only
-/// restored by builds that offer it (see `DeviceCapabilities`).
+/// [simulated] is the in-memory fake device used for testing without a radio.
 enum DeviceTargetKind { tcp, ble, simulated }
 
 /// Current on-disk saved-session schema.

@@ -17,7 +17,6 @@ import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
   supportsBle: false,
-  supportsSimulatedCompanion: true,
 );
 
 class _FramedClient {
@@ -532,16 +531,6 @@ void main() {
     );
     expect(await app.connectSimulated(), isTrue, reason: app.logs.join('\n'));
     addTearDown(app.disconnectDevice);
-
-    final releaseShaped = buildApp(
-      capabilities: const DeviceCapabilities(
-        supportsBle: false,
-        supportsSimulatedCompanion: false,
-      ),
-    );
-    await releaseShaped.loadIdentities();
-    addTearDown(releaseShaped.disconnectDevice);
-    expect(await releaseShaped.connectSimulated(), isFalse);
   });
 
   test('physical shutdown stops runtimes and suppresses auto-resume', () async {

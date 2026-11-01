@@ -6,6 +6,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- The simulated companion is available in release builds.
+- **Backup & restore** now opens from the home screen instead of Information.
+- Identity menus use short action labels for unavailable choices.
+
 ## [0.2.0] - 2026-11-01
 
 First signed pre-Play build.

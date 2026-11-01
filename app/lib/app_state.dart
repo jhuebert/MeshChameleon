@@ -604,16 +604,12 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  /// Attach the in-memory simulated companion (development builds only).
+  /// Attach the in-memory simulated companion.
   ///
   /// Exercises every live identity, the companion server, and the UI without
   /// any radio: [FakeDeviceLink] answers device queries and radio-parameter
   /// requests, and its transmissions never leave the process.
   Future<bool> connectSimulated({RadioLink? simulatedLink}) async {
-    if (!capabilities.supportsSimulatedCompanion) {
-      log('The simulated companion is only available in development builds');
-      return false;
-    }
     final link = MeteredRadioLink(
       simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion'),
       metrics: linkMetrics,
@@ -853,10 +849,6 @@ class AppState extends ChangeNotifier {
             displayName: session.bleName,
           );
         case DeviceTargetKind.simulated:
-          if (!capabilities.supportsSimulatedCompanion) {
-            log('Saved session used the simulated companion, unavailable here');
-            return;
-          }
           await connectSimulated();
       }
       if (deviceConnected) {

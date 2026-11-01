@@ -16,17 +16,10 @@ import 'package:provider/provider.dart';
 
 const _bleCapabilities = DeviceCapabilities(
   supportsBle: true,
-  supportsSimulatedCompanion: true,
 );
 
 const _networkCapabilities = DeviceCapabilities(
   supportsBle: false,
-  supportsSimulatedCompanion: false,
-);
-
-const _simulatedCapabilities = DeviceCapabilities(
-  supportsBle: false,
-  supportsSimulatedCompanion: true,
 );
 
 NetworkConnectionStore _historyStore(Directory dir) => NetworkConnectionStore(
@@ -142,31 +135,22 @@ void main() {
       (tester) async {
     await pumpScreen(tester, _networkCapabilities);
 
-    expect(find.byType(TabBar), findsNothing);
+    expect(find.byType(TabBar), findsOneWidget);
     expect(find.text('Network companion'), findsOneWidget);
     expect(find.text('Connect over TCP'), findsOneWidget);
     expect(find.text('Bluetooth companion'), findsNothing);
     expect(find.text('Scan for devices'), findsNothing);
-    expect(find.text('Simulated'), findsNothing);
+    expect(find.text('Simulated'), findsOneWidget);
   });
 
-  testWidgets('the simulated tab is only present in development builds',
-      (tester) async {
-    await pumpScreen(tester, _simulatedCapabilities);
+  testWidgets('the simulated tab is present without Bluetooth', (tester) async {
+    await pumpScreen(tester, _networkCapabilities);
 
     expect(find.text('Simulated'), findsOneWidget);
     await tester.tap(find.text('Simulated'));
     await tester.pumpAndSettle();
     expect(find.text('Simulated companion'), findsOneWidget);
     expect(find.text('Connect simulated companion'), findsOneWidget);
-  });
-
-  testWidgets('a release-shaped non-BLE build never shows simulated controls',
-      (tester) async {
-    await pumpScreen(tester, _networkCapabilities);
-
-    expect(find.text('Simulated companion'), findsNothing);
-    expect(find.text('Connect simulated companion'), findsNothing);
   });
 
   testWidgets('the last TCP session selects the Network tab', (tester) async {
@@ -411,7 +395,7 @@ void main() {
 
   testWidgets('the connected banner stays above the tabs while switching',
       (tester) async {
-    final app = await pumpScreen(tester, _simulatedCapabilities);
+    final app = await pumpScreen(tester, _networkCapabilities);
 
     await tester.runAsync(() => app.connectSimulated());
     await tester.pumpAndSettle();
@@ -435,7 +419,7 @@ void main() {
         .runAsync(() => store.save([_recentConnection('192.168.1.55')]));
     final app = await pumpScreen(
       tester,
-      _simulatedCapabilities,
+      _networkCapabilities,
       networkStore: store,
     );
 
@@ -469,7 +453,7 @@ void main() {
 
   testWidgets('the simulated companion entry connects and returns',
       (tester) async {
-    final app = await pumpScreen(tester, _simulatedCapabilities, push: true);
+    final app = await pumpScreen(tester, _networkCapabilities, push: true);
 
     await tester.tap(find.text('Simulated'));
     await tester.pumpAndSettle();

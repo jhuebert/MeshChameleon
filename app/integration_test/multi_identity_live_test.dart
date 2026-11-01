@@ -144,7 +144,6 @@ void main() {
       ),
       capabilities: const DeviceCapabilities(
         supportsBle: false,
-        supportsSimulatedCompanion: false,
       ),
       reconnectDelay: const Duration(seconds: 1),
     );

@@ -128,7 +128,6 @@ void main() {
           NetworkConnectionStore(file: File('${dir.path}/history.json')),
       capabilities: const DeviceCapabilities(
         supportsBle: false,
-        supportsSimulatedCompanion: false,
       ),
       reconnectDelay: const Duration(milliseconds: 500),
     );

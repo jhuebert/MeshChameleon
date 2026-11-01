@@ -26,6 +26,7 @@ void main() {
     expect(find.text('MeshCore app'), findsOneWidget);
     expect(find.text('Device link'), findsOneWidget);
     expect(find.text('Mesh traffic'), findsOneWidget);
+    expect(find.text('Backup & restore'), findsNothing);
     expect(find.text('Platform'), findsNothing);
     expect(find.text('Package'), findsNothing);
     expect(find.byTooltip('Copy diagnostics'), findsOneWidget);

@@ -197,7 +197,6 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
                         busy: app.busy,
                         canDelete: !summary.active && identities.length > 1,
                         canDisable: !summary.active,
-                        isLast: identities.length == 1,
                         onTap: () => _activate(summary),
                         onToggle: () => _setEnabled(summary, !summary.enabled),
                         onClear: () => _clear(summary),
@@ -341,7 +340,6 @@ class _IdentityCard extends StatelessWidget {
     required this.busy,
     required this.canDelete,
     required this.canDisable,
-    required this.isLast,
     required this.onTap,
     required this.onToggle,
     required this.onClear,
@@ -352,28 +350,13 @@ class _IdentityCard extends StatelessWidget {
   final bool busy;
   final bool canDelete;
   final bool canDisable;
-  final bool isLast;
   final VoidCallback onTap;
   final VoidCallback onToggle;
   final VoidCallback onClear;
   final VoidCallback onDelete;
 
-  String get _deleteLabel {
-    if (canDelete) return 'Delete identity';
-    if (summary.active) {
-      return 'Activate another identity before deleting this one';
-    }
-    if (isLast) return 'At least one identity must remain';
-    return 'Delete identity';
-  }
-
-  String get _toggleLabel {
-    if (!summary.enabled) return 'Enable identity';
-    if (!canDisable) {
-      return 'Activate another identity before disabling this one';
-    }
-    return 'Disable identity';
-  }
+  String get _toggleLabel =>
+      summary.enabled ? 'Disable identity' : 'Enable identity';
 
   String get _status {
     if (!summary.enabled) return 'Disabled';
@@ -472,7 +455,7 @@ class _IdentityCard extends StatelessWidget {
                 PopupMenuItem(
                   value: 'delete',
                   enabled: canDelete,
-                  child: Text(_deleteLabel),
+                  child: const Text('Delete identity'),
                 ),
               ],
             ),

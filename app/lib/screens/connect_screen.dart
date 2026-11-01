@@ -52,7 +52,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     _tabs = [
       if (_capabilities.supportsBle) _ConnectTab.bluetooth,
       _ConnectTab.network,
-      if (_capabilities.supportsSimulatedCompanion) _ConnectTab.simulated,
+      _ConnectTab.simulated,
     ];
     _setInitialTarget(app);
     if (_tabs.length > 1) {
@@ -404,9 +404,6 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Widget _buildSimulatedTab(AppState app) {
-    if (!_capabilities.supportsSimulatedCompanion) {
-      return const SizedBox.shrink();
-    }
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [

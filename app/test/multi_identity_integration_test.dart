@@ -18,7 +18,6 @@ import 'package:meshchameleon/services/session_store.dart';
 
 const _capabilities = DeviceCapabilities(
   supportsBle: false,
-  supportsSimulatedCompanion: true,
 );
 
 class _Sink implements CompanionPushSink {

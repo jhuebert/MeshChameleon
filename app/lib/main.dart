@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app_state.dart';
+import 'screens/backup_screen.dart';
 import 'screens/connect_screen.dart';
 import 'screens/diagnostics_screen.dart';
 import 'screens/identities_screen.dart';
@@ -150,13 +151,14 @@ class HomeScreen extends StatelessWidget {
               secondary: const Icon(Icons.restart_alt),
               title: const Text('Resume on launch'),
               subtitle: const Text(
-                  'Reconnect the last device and restart the proxy when the app opens'),
+                  'Reconnect the last device and restart the proxy on open'),
               value: app.autoResume,
               onChanged:
                   app.busy ? null : (value) => app.setAutoResume(value),
             ),
           ),
           const _BatteryOptimizationCard(),
+          const _BackupCard(),
           if (app.busy) const LinearProgressIndicator(),
           const SizedBox(height: 8),
           _BuildFooter(buildInfo: app.buildInfo),
@@ -343,6 +345,27 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
                 child: const Text('Open settings'),
               )
             : null,
+      ),
+    );
+  }
+}
+
+class _BackupCard extends StatelessWidget {
+  const _BackupCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.settings_backup_restore),
+        title: const Text('Backup & restore'),
+        subtitle: const Text(
+          'Save or restore identities, contacts, channels, messages, and settings',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const BackupScreen()),
+        ),
       ),
     );
   }

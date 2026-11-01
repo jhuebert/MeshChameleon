@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshchameleon/app_state.dart';
+import 'package:meshchameleon/main.dart';
 import 'package:meshchameleon/screens/backup_screen.dart';
-import 'package:meshchameleon/screens/diagnostics_screen.dart';
 import 'package:provider/provider.dart';
 
 void main() {
-  testWidgets('information screen opens backup and restore', (tester) async {
+  testWidgets('home screen opens backup and restore', (tester) async {
     tester.view.physicalSize = const Size(1200, 3000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -15,7 +15,7 @@ void main() {
     await tester.pumpWidget(
       ChangeNotifierProvider(
         create: (_) => AppState(),
-        child: const MaterialApp(home: DiagnosticsScreen()),
+        child: const MaterialApp(home: HomeScreen()),
       ),
     );
 
@@ -27,9 +27,6 @@ void main() {
     expect(find.text('Back up now'), findsOneWidget);
     expect(find.text('Restore from backup'), findsOneWidget);
     expect(find.textContaining('private identity keys'), findsOneWidget);
-
-    // Dispose the diagnostics refresh timer.
-    await tester.pumpWidget(const SizedBox());
   });
 
   testWidgets('backup passphrase requires a usable length', (tester) async {
