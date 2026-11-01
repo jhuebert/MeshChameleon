@@ -2,14 +2,16 @@
 
 Status: **in progress**. Battery settings, version bumping and the changelog,
 CI, the manual release workflow, two-key signing, and in-app backup/restore are
-implemented. Demo mode, the privacy/licenses work, signing fail-fast and the
-committed app lockfile, store assets, and the Play Console work remain. No Play
-account, listing, or workflow secrets exist yet.
+implemented. A signed `0.2.0` pre-release is published on GitHub Releases as the
+tester channel; the `release` environment and signing secrets are configured.
+Demo mode, the privacy/licenses work, signing fail-fast and the committed app
+lockfile, store assets, and the Play Console account/listing/testing remain.
 
-This plan takes MeshChameleon from the current `0.1.0+1` development baseline to
-a signed, tested, store-listed **1.0.0** release on Google Play, with matching
-GitHub Releases. It assumes the app remains free, open source, Android-only, and
-without ads, in-app purchases, analytics, or telemetry.
+This plan takes MeshChameleon from the signed `0.2.0` pre-release and the
+`0.1.0` storage baseline to a signed, tested, store-listed **1.0.0** release on
+Google Play, with matching GitHub Releases. It assumes the app remains free,
+open source, Android-only, and without ads, in-app purchases, analytics, or
+telemetry.
 
 **Critical path:** harden the product (backup/restore, demo + echo peer, policy
 fixes) → set up signing, CI, and the release workflow → prepare store assets and
@@ -52,7 +54,7 @@ production rollout.
 
 ## Current baseline and gaps
 
-Verified against the repository on 2026-10-28:
+Verified against the repository on 2026-11-01:
 
 - The old Google Play developer account was permanently closed for inactivity
   on 2024-03-14. It cannot be reactivated. A new account, a new US$25
@@ -64,10 +66,14 @@ Verified against the repository on 2026-10-28:
   availability is checked in the new account before the first upload.
 - Flutter 3.47.7 / Dart 3.13.5; Android `compileSdk 36`, `targetSdk 36`,
   `minSdk 24`; Java 17 target; AGP 9.1.0; Gradle 9.3.1.
-- App version `0.1.0+1`; `productVersion` in `mesh_protocol` must stay in sync
+- App version `0.2.0+1`; `productVersion` in `mesh_protocol` must stay in sync
   with `app/pubspec.yaml` (there is a test for this).
-- Repository is public and MIT-licensed. There are no tags, workflows,
-  environments, or release secrets yet. `main` is not protected.
+- Repository is public and MIT-licensed. CI and the manual release workflow are
+  configured; the `release` environment holds the signing secrets. `main` is not
+  protected.
+- The signed `0.2.0` pre-release is published on GitHub Releases. Its APKs use
+  the app signing key and its AAB uses the upload key, so sideloaded installs
+  can later update in place from Play.
 - No in-app privacy policy, open-source license page, source link, or
   “not affiliated with MeshCore” disclaimer.
 - The release build hides the simulated companion (`!kReleaseMode`), so Play
