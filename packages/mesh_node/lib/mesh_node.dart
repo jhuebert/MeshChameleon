@@ -19,6 +19,7 @@ export 'src/packet_transport.dart';
 export 'src/physical_radio.dart';
 export 'src/request_tracker.dart';
 export 'src/reset.dart';
+export 'src/runtime_guard.dart';
 export 'src/scheduler.dart';
 export 'src/sensor_settings.dart';
 export 'src/serial_queue.dart';

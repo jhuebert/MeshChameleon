@@ -52,7 +52,9 @@ owning collaborator and add focused tests for that collaborator.
 Durable mutations queue a read-modify-write function against the last published
 `NodeState`, so concurrent commits cannot each start from the same stale
 snapshot. Publication applies only the preference fields a candidate changed,
-which keeps an unrelated radio readback from being reverted.
+which keeps an unrelated radio readback from being reverted. `runtime_guard.dart`
+owns the identity generation and the retired/powered-off/reset/swap/pause state
+that gates semantic work.
 
 Inside `companion_server/lib/src/`, `server.dart` owns the TCP listener, client
 lifecycle, framing, timers, reply generation checks, and the push sink.

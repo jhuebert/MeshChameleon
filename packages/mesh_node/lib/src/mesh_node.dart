@@ -25,6 +25,7 @@ import 'packet_transport.dart';
 import 'physical_radio.dart';
 import 'request_tracker.dart';
 import 'reset.dart';
+import 'runtime_guard.dart';
 import 'scheduler.dart';
 import 'sensor_settings.dart';
 import 'serial_queue.dart';
@@ -86,7 +87,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     _acks = AckTracker(
       scheduler: scheduler,
       clock: this.clock,
-      generation: () => _identityGeneration,
+      generation: () => _guard.generation,
       isCurrent: _identityCurrent,
       onConfirmed: (crc, tripTimeMs) =>
           pushSink?.pushSendConfirmed(crc, tripTimeMs: tripTimeMs),
@@ -109,7 +110,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       clock: this.clock,
       localRouter: localRouter,
       isBlocked: () => _semanticBlocked,
-      isRetired: () => _retired,
+      isRetired: () => _guard.retired,
       isCurrent: _identityCurrent,
       effectiveFloodScope: _effectiveFloodScope,
       publicKey: () => identity.publicKey,
@@ -132,7 +133,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       pushSink: () => pushSink,
       isCurrent: _identityCurrent,
       isBlocked: () => _semanticBlocked,
-      identityGeneration: () => _identityGeneration,
+      identityGeneration: () => _guard.generation,
       commit: _commit,
       transmit: (
         Packet packet, {
@@ -160,8 +161,8 @@ class MeshNode extends CompanionBridge implements CliHost {
       storageQuotaBytes: storageQuotaBytes,
       snapshot: _snapshot,
       publish: _publish,
-      isRetired: () => _retired,
-      isResetting: () => _resetInProgress,
+      isRetired: () => _guard.retired,
+      isResetting: () => _guard.resetting,
       isCurrent: _identityCurrent,
       onStateChanged: _notifyStateChanged,
     );
@@ -178,7 +179,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       ackTimeout: ackTimeout,
       isBlocked: () => _semanticBlocked,
       isCurrent: _identityCurrent,
-      identityGeneration: () => _identityGeneration,
+      identityGeneration: () => _guard.generation,
       ensureNotBlockedPeer: _ensureNotBlockedPeer,
       transmit: (
         Packet packet, {
@@ -335,32 +336,26 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// Serialises identity replacement requests.
   final _identityQueue = SerialQueue();
 
-  int _identityGeneration = 0;
-  bool _identitySwapping = false;
-  bool _identityPaused = false;
+  final RuntimeGuard _guard = RuntimeGuard();
   String? _identityDiagnostic;
-
-  bool _poweredOff = false;
-  bool _resetInProgress = false;
-  bool _retired = false;
   int _lifecycleGeneration = 0;
 
   /// True after a successful local shutdown until an explicit node start.
-  bool get poweredOff => _poweredOff;
+  bool get poweredOff => _guard.poweredOff;
 
   /// True once this runtime has been retired by its owner. A retired node never
   /// transmits, receives, or persists again.
-  bool get retired => _retired;
+  bool get retired => _guard.retired;
 
   @override
   int get lifecycleGeneration => _lifecycleGeneration;
 
   /// Bumped only after a verified successful identity switch.
-  int get identityGeneration => _identityGeneration;
+  int get identityGeneration => _guard.generation;
 
   /// True when identity storage is unreadable/uncertain and semantic work must
   /// pause until a successful reload/replacement.
-  bool get identityPaused => _identityPaused;
+  bool get identityPaused => _guard.paused;
 
   /// Last identity lifecycle diagnostic (never contains key material).
   String? get identityDiagnostic => _identityDiagnostic;
@@ -391,8 +386,8 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   /// Attach the raw RX listener. Call once the device link is connected.
   void start() {
-    if (_retired) throw StateError('cannot start a retired mesh node');
-    _poweredOff = false;
+    if (_guard.retired) throw StateError('cannot start a retired mesh node');
+    _guard.powerOn();
     _startedAtMonotonicMillis = clock.monotonicMilliseconds;
     link.setRawRxListener(_onRawFrame);
     battery.start();
@@ -414,8 +409,8 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// deleted. Files are left intact for the owner to remove, but a late packet
   /// can no longer save or recreate state after this completes.
   Future<void> retire() async {
-    if (_retired) return;
-    _retired = true;
+    if (_guard.retired) return;
+    _guard.retire();
     stop();
     await _waitForPhysicalTxIdle();
     try {
@@ -459,22 +454,22 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// stop semantic TX/RX until an explicit start/new connection.
   @override
   Future<void> shutdown() async {
-    if (_poweredOff) return;
+    if (_guard.poweredOff) return;
     if (physical.firmwareVerCode < 14) {
       throw const CompanionOperationError(
         errCodeUnsupportedCmd,
         message: 'physical firmware does not support shutdown',
       );
     }
-    _poweredOff = true;
+    _guard.powerOff();
     try {
       await link.shutdown();
     } on DeviceCommandError catch (e) {
-      _poweredOff = false;
+      _guard.powerOn();
       _radio.setDiagnostic(e.message ?? e.toString());
       throw _operationError(e);
     } catch (_) {
-      _poweredOff = false;
+      _guard.powerOn();
       throw const CompanionOperationError(
         errCodeBadState,
         message: 'shutdown dispatch failed',
@@ -505,7 +500,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     // A queued timer callback from the previous identity must not transmit or
     // recreate a session after an identity switch.
     if (_semanticBlocked || !_sessions.containsValue(conn)) return;
-    final generation = _identityGeneration;
+    final generation = _guard.generation;
     final now = clock.monotonicSeconds;
     final expire = conn.lastActivity + (conn.interval.inSeconds * 5 ~/ 2);
     if (now >= expire) {
@@ -558,13 +553,11 @@ class MeshNode extends CompanionBridge implements CliHost {
   bool _sameIdentity(LocalIdentity a, LocalIdentity b) =>
       bytesEqual(a.meshcore64, b.meshcore64);
 
-  bool get _identityBlocked => _identityPaused || _identitySwapping;
+  bool get _identityBlocked => _guard.identityBlocked;
 
-  bool get _semanticBlocked =>
-      _retired || _poweredOff || _resetInProgress || _identityBlocked;
+  bool get _semanticBlocked => _guard.blocked;
 
-  bool _identityCurrent(int generation) =>
-      !_semanticBlocked && generation == _identityGeneration;
+  bool _identityCurrent(int generation) => _guard.isCurrent(generation);
 
   void _requireIdentityReady() {
     if (_identityBlocked) {
@@ -592,7 +585,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       );
     }
 
-    _identitySwapping = true;
+    _guard.beginSwap();
     try {
       await _waitForPhysicalTxIdle();
 
@@ -616,7 +609,7 @@ class MeshNode extends CompanionBridge implements CliHost {
             saveDiagnostic =
                 'identity backend reported an error after committing';
           } else if (readBack != null && _sameIdentity(readBack, identity)) {
-            _identityPaused = false;
+            _guard.resume();
             _identityDiagnostic =
                 'identity save failed; previous key remains active';
             throw const CompanionOperationError(
@@ -624,7 +617,7 @@ class MeshNode extends CompanionBridge implements CliHost {
               message: 'identity persistence failed',
             );
           } else {
-            _identityPaused = true;
+            _guard.pause();
             _identityDiagnostic =
                 'identity persistence unreadable or unexpected; '
                 'identity-sensitive work paused';
@@ -638,14 +631,14 @@ class MeshNode extends CompanionBridge implements CliHost {
 
       await _state.run(() async {
         identity = candidate;
-        _identityGeneration++;
+        _guard.bumpGeneration();
         _clearIdentityRuntimeState();
-        _identityPaused = false;
+        _guard.resume();
         _identityDiagnostic = saveDiagnostic;
       });
       onIdentityChanged?.call(identity);
     } finally {
-      _identitySwapping = false;
+      _guard.endSwap();
     }
   }
 
@@ -668,8 +661,8 @@ class MeshNode extends CompanionBridge implements CliHost {
         }
       }
 
-      _resetInProgress = true;
-      _identityGeneration++;
+      _guard.beginReset();
+      _guard.bumpGeneration();
       try {
         final fresh = freshVirtualState(sensorSettings);
         if (preserveName) fresh.prefs.nodeName = prefs.nodeName;
@@ -694,7 +687,7 @@ class MeshNode extends CompanionBridge implements CliHost {
           identityRotated: candidate != null,
         );
       } finally {
-        _resetInProgress = false;
+        _guard.endReset();
       }
     });
   }
@@ -1025,7 +1018,7 @@ class MeshNode extends CompanionBridge implements CliHost {
   @override
   Future<bool> advertise({bool flood = false}) async {
     if (_semanticBlocked) return false;
-    final generation = _identityGeneration;
+    final generation = _guard.generation;
     final packet = await PacketBuilder.createAdvert(
       identity: identity,
       name: prefs.nodeName,
@@ -1116,7 +1109,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     // The loopback runs after the caller's binary OK so response/push ordering
     // stays unambiguous; import success never guarantees insertion.
     packet.header = (packet.header & ~phRouteMask) | routeTypeFlood;
-    final generation = _identityGeneration;
+    final generation = _guard.generation;
     Timer.run(() => unawaited(_rx.handleAdvert(packet, generation)));
     return true;
   }
@@ -1558,7 +1551,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       _state.commit(mutate, identityGeneration: identityGeneration);
 
   void _notifyStateChanged() {
-    if (_retired) return;
+    if (_guard.retired) return;
     try {
       onStateChanged?.call();
     } catch (_) {
@@ -1567,7 +1560,7 @@ class MeshNode extends CompanionBridge implements CliHost {
   }
 
   void _notifyPhysicalConfigChanged() {
-    if (_retired) return;
+    if (_guard.retired) return;
     try {
       onPhysicalConfigChanged?.call();
     } catch (_) {
@@ -1604,7 +1597,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     QueuedMessage message, {
     int? identityGeneration,
   }) async {
-    if (_retired) return;
+    if (_guard.retired) return;
     if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }

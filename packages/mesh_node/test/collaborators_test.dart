@@ -117,6 +117,50 @@ void main() {
     });
   });
 
+  group('RuntimeGuard', () {
+    test('tracks generation and blocking transitions', () {
+      final guard = RuntimeGuard();
+      expect(guard.generation, 0);
+      expect(guard.retired, isFalse);
+      expect(guard.poweredOff, isFalse);
+      expect(guard.resetting, isFalse);
+      expect(guard.swapping, isFalse);
+      expect(guard.paused, isFalse);
+      expect(guard.identityBlocked, isFalse);
+      expect(guard.blocked, isFalse);
+      expect(guard.isCurrent(0), isTrue);
+
+      guard.powerOff();
+      expect(guard.poweredOff, isTrue);
+      expect(guard.isCurrent(0), isFalse);
+      guard.powerOn();
+
+      guard.pause();
+      expect(guard.paused, isTrue);
+      expect(guard.identityBlocked, isTrue);
+      expect(guard.isCurrent(0), isFalse);
+      guard.resume();
+
+      guard.beginSwap();
+      expect(guard.swapping, isTrue);
+      expect(guard.blocked, isTrue);
+      guard.endSwap();
+
+      guard.beginReset();
+      expect(guard.resetting, isTrue);
+      expect(guard.isCurrent(0), isFalse);
+      guard.endReset();
+
+      expect(guard.bumpGeneration(), 1);
+      expect(guard.isCurrent(0), isFalse);
+      expect(guard.isCurrent(1), isTrue);
+
+      guard.retire();
+      expect(guard.retired, isTrue);
+      expect(guard.isCurrent(1), isFalse);
+    });
+  });
+
   group('FloodScope', () {
     test('override, default, unscoped, zero keys, and clear', () {
       final prefs = NodePrefs(defaultScopeKey: Uint8List(16)..[0] = 1);
