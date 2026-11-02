@@ -296,19 +296,34 @@ class AppState extends ChangeNotifier {
 
   String? get activeIdentityId => _manager?.activeId;
 
-  void log(String message) {
-    if (_disposed) return;
-    logs.add('${DateTime.now().toIso8601String()}  $message');
-    if (logs.length > 500) logs.removeAt(0);
-    notifyListeners();
-  }
-
   bool _foregroundStarted = false;
   String? _lastNotification;
+  bool _logNotificationScheduled = false;
 
   /// Whether the Android foreground service is currently holding the process
   /// alive (always false on desktop).
   bool get foregroundServiceRunning => _foregroundStarted;
+
+  /// Append a timestamped line and coalesce synchronous bursts into one
+  /// listener update.
+  ///
+  /// A chatty connection can emit several lines in one turn; notifying per
+  /// line rebuilds every screen unnecessarily. The microtask still runs before
+  /// the next frame, so the log page sees the entries on the same pump.
+  void log(String message) {
+    if (_disposed) return;
+    logs.add('${DateTime.now().toIso8601String()}  $message');
+    if (logs.length > 500) logs.removeAt(0);
+    if (_logNotificationScheduled) return;
+    // Notify once for the first line in a burst, then ignore the rest until
+    // the next turn. This preserves log-as-a-state-trigger for callers while
+    // avoiding a rebuild per line during chatty operations.
+    _logNotificationScheduled = true;
+    notifyListeners();
+    scheduleMicrotask(() {
+      _logNotificationScheduled = false;
+    });
+  }
 
   void _onManagerChanged() {
     if (_disposed) return;

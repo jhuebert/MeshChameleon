@@ -755,4 +755,22 @@ void main() {
     expect(restored.prefs.nodeName, 'MeshChameleon');
     expect(app.activeIdentityId, id);
   });
+
+  test('log bursts coalesce into one listener notification', () async {
+    var notifications = 0;
+    void listener() => notifications++;
+    app.addListener(listener);
+    addTearDown(() => app.removeListener(listener));
+
+    app.log('first line');
+    app.log('second line');
+    expect(notifications, 1);
+
+    await Future<void>.delayed(Duration.zero);
+    expect(notifications, 1);
+    expect(
+      app.logs.where((line) => line.contains('line')),
+      hasLength(2),
+    );
+  });
 }
