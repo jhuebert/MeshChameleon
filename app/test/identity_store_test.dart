@@ -3,6 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 
 void main() {
+  test('Android options keep the v9 EncryptedSharedPreferences migration on',
+      () {
+    final options = IdentityStore.androidOptions.toMap();
+    expect(options['resetOnError'], 'false');
+    expect(options['migrateOnAlgorithmChange'], 'true');
+    expect(options['migrateWithBackup'], 'false');
+  });
+
   test('an unreadable secure slot is reported as unavailable', () async {
     final store = IdentityStore(storage: const _ThrowingStorage());
     const id = '0123456789abcdef0123456789abcdef';

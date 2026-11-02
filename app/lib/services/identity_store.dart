@@ -16,14 +16,20 @@ class IdentityStore {
       : _storage = storage ?? _defaultStorage();
 
   /// v10 migrates v9 `EncryptedSharedPreferences` entries on first access.
-  /// Keep migration backups enabled and never auto-reset on a storage error:
-  /// an unreadable key must surface as unavailable, not erase the catalog.
-  static FlutterSecureStorage _defaultStorage() => const FlutterSecureStorage(
-        aOptions: AndroidOptions(
-          resetOnError: false,
-          migrateWithBackup: true,
-        ),
-      );
+  ///
+  /// `migrateWithBackup` must stay disabled here: v10 skips the
+  /// EncryptedSharedPreferences migration when it is enabled, which makes
+  /// existing v9 identity keys look missing. Never auto-reset on a storage
+  /// error either; an unreadable key must surface as unavailable, not erase the
+  /// catalog.
+  static const AndroidOptions androidOptions = AndroidOptions(
+    resetOnError: false,
+    migrateOnAlgorithmChange: true,
+    migrateWithBackup: false,
+  );
+
+  static FlutterSecureStorage _defaultStorage() =>
+      const FlutterSecureStorage(aOptions: androidOptions);
 
   static const _prefix = 'meshcore_identity_v2/';
   static const _restorePrefix = 'meshcore_identity_restore_v1/';
