@@ -3,6 +3,8 @@ import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
 
+import 'mesh_stats.dart';
+
 /// A failed bridge operation carrying a companion-protocol error response.
 ///
 /// [disabled] means the server must answer with the one-byte DISABLED response
@@ -112,12 +114,95 @@ abstract class CompanionPushSink {
   );
 }
 
+/// Convenience base for a host or test that does not observe every push.
+///
+/// New push methods only need a no-op here; implementations override the
+/// pushes they actually consume.
+class NoopCompanionPushSink implements CompanionPushSink {
+  const NoopCompanionPushSink();
+
+  @override
+  void pushMsgWaiting() {}
+
+  @override
+  void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) {}
+
+  @override
+  void pushAdvert(Uint8List pubkey) {}
+
+  @override
+  void pushNewAdvert(Uint8List contactFrame) {}
+
+  @override
+  void pushContactDeleted(Uint8List pubkey) {}
+
+  @override
+  void pushContactsFull() {}
+
+  @override
+  void pushPathUpdated(Uint8List pubkey) {}
+
+  @override
+  void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
+
+  @override
+  void pushBinaryResponse(int tag, Uint8List data) {}
+
+  @override
+  void pushRawRxData(double snr, int rssi, Uint8List raw) {}
+
+  @override
+  void pushRawData(double snr, int rssi, Uint8List payload) {}
+
+  @override
+  void pushControlData(double snr, int rssi, int pathLen, Uint8List data) {}
+
+  @override
+  void pushPathDiscoveryResponse(
+    Uint8List pubkeyPrefix6,
+    int outPathLen,
+    Uint8List outPath,
+    int inPathLen,
+    Uint8List inPath,
+  ) {}
+
+  @override
+  void pushLoginSuccess(
+    Uint8List pubkeyPrefix6, {
+    bool legacy = false,
+    int permissions = 0,
+    int serverTag = 0,
+    int acl = 0,
+    int firmwareVer = 0,
+  }) {}
+
+  @override
+  void pushLoginFail(Uint8List pubkeyPrefix6) {}
+
+  @override
+  void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
+
+  @override
+  void pushTraceData(
+    int pathLen,
+    int flags,
+    int tag,
+    int authCode,
+    Uint8List pathHashes,
+    Uint8List pathSnrs,
+    int finalSnrByte,
+  ) {}
+}
+
 /// Logic backing the companion server: contacts, channels, messaging, adverts,
 /// and radio configuration. The server dispatches commands here; the bridge
 /// emits client pushes through the [CompanionPushSink].
 ///
-/// Default implementations are conservative no-ops so partial implementations
-/// (and tests) only override what they need.
+/// Only pure local state (an empty contact list, wall-clock time, default
+/// preferences) has a working default. Every hardware, identity, persistence,
+/// or send operation throws [CompanionOperationError] with
+/// [errCodeUnsupportedCmd] unless a host overrides it, so a partial host fails
+/// loudly instead of answering `OK` for work it never did.
 class CompanionBridge {
   CompanionPushSink? pushSink;
 
@@ -128,26 +213,25 @@ class CompanionBridge {
 
   NodePrefs getSelfInfo() => NodePrefs();
 
-  Uint8List getPublicKey() =>
-      throw UnsupportedError('getPublicKey not implemented');
+  Uint8List getPublicKey() => _unsupported('getPublicKey');
 
   /// Export the active virtual 64-byte expanded identity.
   Future<Uint8List> exportPrivateKey() async =>
-      throw UnsupportedError('exportPrivateKey not implemented');
+      _unsupported('exportPrivateKey');
 
   /// Validate and replace the active virtual identity from a complete 64-byte
   /// expanded key. Implementations must store before switching.
   Future<void> importPrivateKey(Uint8List expandedKey) async =>
-      throw UnsupportedError('importPrivateKey not implemented');
+      _unsupported('importPrivateKey');
 
   DeviceInfo getDeviceInfo() => const DeviceInfo();
 
   Future<BatteryReading> getBatteryAndStorage() async =>
-      const BatteryReading(millivolts: 0, storageUsedKb: 0, storageTotalKb: 0);
+      _unsupported('getBatteryAndStorage');
 
   int getTime() => DateTime.now().millisecondsSinceEpoch ~/ 1000;
 
-  bool setTime(int seconds) => true;
+  bool setTime(int seconds) => _unsupported('setTime');
 
   List<Contact> getContacts({int since = 0}) => const [];
 
@@ -160,17 +244,20 @@ class CompanionBridge {
 
   Contact? getContactByKeyPrefix(Uint8List prefix) => null;
 
-  Future<void> addUpdateContact(Contact contact, {bool hasGps = true}) async {}
+  Future<void> addUpdateContact(Contact contact, {bool hasGps = true}) async =>
+      _unsupported('addUpdateContact');
 
-  Future<void> removeContact(Uint8List pubkey) async {}
+  Future<void> removeContact(Uint8List pubkey) async =>
+      _unsupported('removeContact');
 
-  Future<void> resetPath(Uint8List pubkey) async {}
+  Future<void> resetPath(Uint8List pubkey) async => _unsupported('resetPath');
 
   Channel? getChannel(int index) => null;
 
   int get maxChannels => 8;
 
-  Future<void> setChannel(int index, String name, Uint8List secret) async {}
+  Future<void> setChannel(int index, String name, Uint8List secret) async =>
+      _unsupported('setChannel');
 
   Future<SentResult> sendTextMessage(
     Uint8List pubkey,
@@ -179,9 +266,10 @@ class CompanionBridge {
     int attempt = 0,
     int? timestamp,
   }) async =>
-      const SentResult.failure();
+      _unsupported('sendTextMessage');
 
-  Future<bool> sendChannelMessage(int channelIndex, String text) async => false;
+  Future<bool> sendChannelMessage(int channelIndex, String text) async =>
+      _unsupported('sendChannelMessage');
 
   /// Send a binary group-data packet on [channelIndex]. When [path] is given the
   /// packet is routed directly instead of flooded.
@@ -192,13 +280,16 @@ class CompanionBridge {
     List<int>? path,
     int? pathLenEncoded,
   }) async =>
-      false;
+      _unsupported('sendChannelData');
 
-  Future<bool> advertise({bool flood = false}) async => false;
+  Future<bool> advertise({bool flood = false}) async =>
+      _unsupported('advertise');
 
-  Future<void> setAdvertName(String name) async {}
+  Future<void> setAdvertName(String name) async =>
+      _unsupported('setAdvertName');
 
-  Future<void> setAdvertLatLon(double lat, double lon) async {}
+  Future<void> setAdvertLatLon(double lat, double lon) async =>
+      _unsupported('setAdvertLatLon');
 
   Future<void> setRadioParams(
     int freqHz,
@@ -206,22 +297,25 @@ class CompanionBridge {
     int sf,
     int cr, {
     bool? clientRepeat,
-  }) async {}
+  }) async =>
+      _unsupported('setRadioParams');
 
-  Future<void> setTxPower(int dbm) async {}
+  Future<void> setTxPower(int dbm) async => _unsupported('setTxPower');
 
   /// Current path-hash mode reported to the client in `DEVICE_INFO`.
   int getPathHashMode() => getDeviceInfo().pathHashMode;
 
   /// Set the virtual path-hash mode (`CMD_SET_PATH_HASH_MODE`).
-  Future<void> setPathHashMode(int mode) async {}
+  Future<void> setPathHashMode(int mode) async =>
+      _unsupported('setPathHashMode');
 
   /// Current device radio tuning parameters (`CMD_GET_TUNING_PARAMS`).
   Future<TuningParams> getTuningParams() async =>
-      const TuningParams(rxDelayBaseMs: 0, airtimeFactorMs: 0);
+      _unsupported('getTuningParams');
 
   /// Set the physical radio tuning parameters (`CMD_SET_TUNING_PARAMS`).
-  Future<void> setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) async {}
+  Future<void> setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) async =>
+      _unsupported('setTuningParams');
 
   /// Run a CLI command on the device, returning its reply text (fw v14+).
   /// Returns null when unsupported (device firmware < v14).
@@ -261,47 +355,52 @@ class CompanionBridge {
 
   int getAutoAddMaxHops() => 0;
 
-  Future<void> setAutoAddConfig(int flags, int? maxHops) async {}
+  Future<void> setAutoAddConfig(int flags, int? maxHops) async =>
+      _unsupported('setAutoAddConfig');
 
   Future<void> setOtherParams({
     required int manualAddContacts,
     int? telemetryModes,
     int? advertLocPolicy,
     int? multiAcks,
-  }) async {}
+  }) async =>
+      _unsupported('setOtherParams');
 
   /// The raw advert packet blob for [pubkey], or a freshly built self advert
   /// when [pubkey] is null (`CMD_EXPORT_CONTACT`). Backs the `meshcore://` URI.
   Future<Uint8List?> exportContact(Uint8List? pubkey) async => null;
 
   /// Import a raw advert packet blob (`CMD_IMPORT_CONTACT`) as if received.
-  Future<bool> importContact(Uint8List data) async => false;
+  Future<bool> importContact(Uint8List data) async =>
+      _unsupported('importContact');
 
   /// Re-transmit a contact's saved advert zero-hop (`CMD_SHARE_CONTACT`).
-  Future<bool> shareContact(Uint8List pubkey) async => false;
+  Future<bool> shareContact(Uint8List pubkey) async =>
+      _unsupported('shareContact');
 
   /// Send a raw custom packet (`CMD_SEND_RAW_DATA`) directly along [path]
   /// (already-decoded path bytes plus their encoded length byte).
   Future<bool> sendRawData(
           Uint8List payload, Uint8List path, int pathLenByte) async =>
-      false;
+      _unsupported('sendRawData');
 
   /// Transmit an already-formed packet verbatim (`CMD_SEND_RAW_PACKET`).
   /// [priority] is accepted for protocol compatibility; the transport ignores it.
-  Future<bool> sendRawPacket(Packet packet, int priority) async => false;
+  Future<bool> sendRawPacket(Packet packet, int priority) async =>
+      _unsupported('sendRawPacket');
 
   Future<QueuedMessage?> syncNextMessage() async => null;
 
-  Future<Map<String, Object?>> getStats(int statsType) async => const {};
+  Future<MeshStats> getStats(int statsType) async => _unsupported('getStats');
 
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async =>
-      const SentResult.failure();
+      _unsupported('sendBinaryReq');
 
   /// Send an anonymous request (`CMD_SEND_ANON_REQ`) to [pubkey] carrying
   /// [data] (`[anon_req_type][reply_path_len][reply_path...]`). The response is
   /// delivered via [CompanionPushSink.pushBinaryResponse].
   Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async =>
-      const SentResult.failure();
+      _unsupported('sendAnonReq');
 
   Future<SentResult> sendTelemetryRequest(
     Uint8List pubkey, {
@@ -309,7 +408,7 @@ class CompanionBridge {
     bool wantLocation = true,
     bool wantEnvironment = true,
   }) async =>
-      const SentResult.failure();
+      _unsupported('sendTelemetryRequest');
 
   Future<bool> sendTracePathRaw(
     int tag,
@@ -317,23 +416,23 @@ class CompanionBridge {
     int flags,
     Uint8List pathBytes,
   ) async =>
-      false;
+      _unsupported('sendTracePathRaw');
 
   /// Send a flooded path-discovery request (a telemetry request) to [pubkey].
   /// A matching response is delivered via
   /// [CompanionPushSink.pushPathDiscoveryResponse].
   Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async =>
-      const SentResult.failure();
+      _unsupported('sendPathDiscoveryReq');
 
   /// Log in to a repeater/room server with [password]. The result is delivered
   /// via [CompanionPushSink.pushLoginSuccess]/[pushLoginFail].
   Future<SentResult> sendLogin(Uint8List pubkey, String password) async =>
-      const SentResult.failure();
+      _unsupported('sendLogin');
 
   /// Request the status of a repeater/room server. The response is delivered
   /// via [CompanionPushSink.pushStatusResponse].
   Future<SentResult> sendStatusReq(Uint8List pubkey) async =>
-      const SentResult.failure();
+      _unsupported('sendStatusReq');
 
   /// Tear down any login/keep-alive session with [pubkey].
   bool logout(Uint8List pubkey) => false;
@@ -344,15 +443,16 @@ class CompanionBridge {
 
   /// `CMD_SET_FLOOD_SCOPE_KEY` verb 0: set (or clear, with `null`) the flood
   /// scope override used for sends.
-  void setFloodScopeKey(Uint8List? key) {}
+  void setFloodScopeKey(Uint8List? key) => _unsupported('setFloodScopeKey');
 
   /// `CMD_SET_FLOOD_SCOPE_KEY` verb 1 (fw v12+): force unscoped flooding until
   /// the next scope set.
-  void setFloodUnscoped() {}
+  void setFloodUnscoped() => _unsupported('setFloodUnscoped');
 
   /// `CMD_SET_DEFAULT_FLOOD_SCOPE`: store the default region scope name and its
   /// 16-byte key (both cleared when [key] is null).
-  Future<void> setDefaultFloodScope(String name, Uint8List? key) async {}
+  Future<void> setDefaultFloodScope(String name, Uint8List? key) async =>
+      _unsupported('setDefaultFloodScope');
 
   /// The stored default flood scope: a (name, 16-byte key) pair, or `('', null)`
   /// when unset. Backs `CMD_GET_DEFAULT_FLOOD_SCOPE`.
@@ -360,17 +460,22 @@ class CompanionBridge {
 
   /// `CMD_REBOOT`: dispatch the physical reboot and clear ephemeral virtual
   /// operations. Does not wait for a firmware reply.
-  Future<void> reboot() async {}
+  Future<void> reboot() async => _unsupported('reboot');
 
   /// Bumped after a successful reboot/shutdown lifecycle action so the server
   /// can clear per-client ephemeral state (for example signing buffers).
   int get lifecycleGeneration => 0;
 
   /// Send a raw control-data packet zero-hop.
-  Future<bool> sendControlData(Uint8List data) async => false;
+  Future<bool> sendControlData(Uint8List data) async =>
+      _unsupported('sendControlData');
 
   AdvertPath? getAdvertPath(Uint8List prefix) => null;
 
-  Future<Uint8List> sign(Uint8List message) =>
-      throw UnsupportedError('sign not implemented');
+  Future<Uint8List> sign(Uint8List message) => _unsupported('sign');
 }
+
+Never _unsupported(String operation) => throw CompanionOperationError(
+      errCodeUnsupportedCmd,
+      message: '$operation not implemented',
+    );

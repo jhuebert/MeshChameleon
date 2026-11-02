@@ -7,7 +7,7 @@ import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:test/test.dart';
 
-class _TestSink implements CompanionPushSink {
+class _TestSink extends NoopCompanionPushSink {
   int msgWaiting = 0;
   final List<int> confirmed = [];
   final List<List<int>> telemetry = [];
@@ -22,21 +22,6 @@ class _TestSink implements CompanionPushSink {
   @override
   void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
       confirmed.add(ackCrc);
-
-  @override
-  void pushAdvert(Uint8List pubkey) {}
-
-  @override
-  void pushNewAdvert(Uint8List contactFrame) {}
-
-  @override
-  void pushContactDeleted(Uint8List pubkey) {}
-
-  @override
-  void pushContactsFull() {}
-
-  @override
-  void pushPathUpdated(Uint8List pubkey) {}
 
   @override
   void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
@@ -57,28 +42,6 @@ class _TestSink implements CompanionPushSink {
   @override
   void pushControlData(double snr, int rssi, int pathLen, Uint8List data) =>
       control.add([pathLen, ...data]);
-
-  @override
-  void pushPathDiscoveryResponse(Uint8List pubkeyPrefix6, int outPathLen,
-      Uint8List outPath, int inPathLen, Uint8List inPath) {}
-
-  @override
-  void pushLoginSuccess(Uint8List pubkeyPrefix6,
-      {bool legacy = false,
-      int permissions = 0,
-      int serverTag = 0,
-      int acl = 0,
-      int firmwareVer = 0}) {}
-
-  @override
-  void pushLoginFail(Uint8List pubkeyPrefix6) {}
-
-  @override
-  void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) {}
-
-  @override
-  void pushTraceData(int pathLen, int flags, int tag, int authCode,
-      Uint8List pathHashes, Uint8List pathSnrs, int finalSnrByte) {}
 }
 
 class _FakeScheduler implements MeshScheduler {

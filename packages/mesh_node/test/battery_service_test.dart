@@ -166,7 +166,7 @@ void main() {
     f.link.batteryAck = null;
     expect((await battery1).millivolts, 3800);
     expect((await battery2).millivolts, 3800);
-    expect((await core)['battery_mv'], 3800);
+    expect((await core).batteryMv, 3800);
     expect(f.link.batteryReads, 2);
   });
 
@@ -284,7 +284,7 @@ void main() {
     );
     final core = await f.node.getStats(statsTypeCore);
     final self = await f.node.getBatteryAndStorage();
-    expect(core['battery_mv'], 3650);
+    expect(core.batteryMv, 3650);
     expect(self.millivolts, 3650);
     expect(f.link.batteryReads, 2,
         reason: 'stats and battery/self telemetry share one sample');

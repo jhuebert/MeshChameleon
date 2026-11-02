@@ -674,7 +674,7 @@ void main() {
         _groupDataPacket(channel, Uint8List.fromList([1])),
       );
       await pump();
-      expect((await bounded.getStats(statsTypeCore))['queue_len'], 1);
+      expect((await bounded.getStats(statsTypeCore)).queueLen, 1);
 
       quotaLink.deliver(
         6.0,
@@ -682,7 +682,7 @@ void main() {
         _groupDataPacket(channel, Uint8List.fromList([2])),
       );
       await pump();
-      expect((await bounded.getStats(statsTypeCore))['queue_len'], 1);
+      expect((await bounded.getStats(statsTypeCore)).queueLen, 1);
 
       // A message that cannot fit even alone is dropped without evicting the
       // current queue.
@@ -692,7 +692,7 @@ void main() {
         _groupDataPacket(channel, Uint8List(255)),
       );
       await pump();
-      expect((await bounded.getStats(statsTypeCore))['queue_len'], 1);
+      expect((await bounded.getStats(statsTypeCore)).queueLen, 1);
       expect((await bounded.syncNextMessage())!.channelDataPayload, [2]);
       expect(await bounded.syncNextMessage(), isNull);
       bounded.stop();

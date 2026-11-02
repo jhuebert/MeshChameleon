@@ -1343,30 +1343,39 @@ class MeshNode extends CompanionBridge implements CliHost {
   Future<Uint8List> getAllowedRepeatFreq() => _radio.getAllowedRepeatFreq();
 
   @override
-  Future<Map<String, Object?>> getStats(int statsType) async {
+  Future<MeshStats> getStats(int statsType) async {
     switch (statsType) {
       case statsTypeCore:
         final batteryMv = await battery.refresh();
         final uptime = (clock.monotonicMilliseconds - _startedAtMonotonicMillis)
                 .clamp(0, 0xFFFFFFFF) ~/
             1000;
-        return {
-          'battery_mv': batteryMv,
-          'uptime_secs': uptime,
-          'errors': _transport.stats['recv_errors'] ?? 0,
-          'queue_len': _messageQueue.length,
-        };
+        return MeshStats(
+          batteryMv: batteryMv,
+          uptimeSecs: uptime,
+          errors: (_transport.stats['recv_errors'] as int?) ?? 0,
+          queueLen: _messageQueue.length,
+        );
       case statsTypeRadio:
         final noiseFloor = await _radio.refreshNoiseFloor();
-        return {
-          'noise_floor': noiseFloor,
-          'last_rssi': _transport.lastRxRssi,
-          'last_snr_scaled': _transport.lastRxSnrScaled,
-          'tx_air_secs': _transport.txAirSeconds,
-          'rx_air_secs': _transport.rxAirSeconds,
-        };
+        return MeshStats(
+          noiseFloor: noiseFloor,
+          lastRssi: _transport.lastRxRssi,
+          lastSnrScaled: _transport.lastRxSnrScaled,
+          txAirSecs: _transport.txAirSeconds,
+          rxAirSecs: _transport.rxAirSeconds,
+        );
       default:
-        return _transport.stats;
+        final stats = _transport.stats;
+        return MeshStats(
+          recv: (stats['recv'] as int?) ?? 0,
+          sent: (stats['sent'] as int?) ?? 0,
+          floodTx: (stats['flood_tx'] as int?) ?? 0,
+          directTx: (stats['direct_tx'] as int?) ?? 0,
+          floodRx: (stats['flood_rx'] as int?) ?? 0,
+          directRx: (stats['direct_rx'] as int?) ?? 0,
+          recvErrors: (stats['recv_errors'] as int?) ?? 0,
+        );
     }
   }
 

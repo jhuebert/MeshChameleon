@@ -6,7 +6,7 @@ import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:test/test.dart';
 
-class _Sink implements CompanionPushSink {
+class _Sink extends NoopCompanionPushSink {
   final List<int> confirmed = [];
   final List<List<int>> rawData = [];
   final List<List<int>> controlData = [];
@@ -31,9 +31,6 @@ class _Sink implements CompanionPushSink {
 
   @override
   void pushMsgWaiting() => msgWaiting++;
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
 }
 
 class _Router implements LocalPeerRouter {

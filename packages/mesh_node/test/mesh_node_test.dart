@@ -1217,7 +1217,7 @@ void main() {
     expect(msg!.timestamp, 102);
     monotonic += const Duration(seconds: 3);
     expect(
-      (await timeAlice.getStats(statsTypeCore))['uptime_secs'],
+      (await timeAlice.getStats(statsTypeCore)).uptimeSecs,
       3,
       reason: 'uptime follows monotonic time, not virtual wall time',
     );
@@ -1250,10 +1250,10 @@ void main() {
     final raw = packet.writeTo();
     link.deliver(6.0, -70, raw);
     await pump();
-    expect((await node.getStats(statsTypeCore))['queue_len'], 1);
+    expect((await node.getStats(statsTypeCore)).queueLen, 1);
 
     final callsBefore = List<String>.of(link.calls);
-    final uptimeBefore = (await node.getStats(statsTypeCore))['uptime_secs'];
+    final uptimeBefore = (await node.getStats(statsTypeCore)).uptimeSecs;
     expect(node.setTime(200000), isTrue); // jump virtual wall far forward
     expect(link.calls, callsBefore,
         reason: 'no host clock or radio clock write');
@@ -1261,13 +1261,13 @@ void main() {
     // Dedup TTL is monotonic, so the same packet is still rejected.
     link.deliver(6.0, -70, raw);
     await pump();
-    expect((await node.getStats(statsTypeCore))['queue_len'], 1);
-    expect((await node.getStats(statsTypeCore))['uptime_secs'], uptimeBefore);
+    expect((await node.getStats(statsTypeCore)).queueLen, 1);
+    expect((await node.getStats(statsTypeCore)).uptimeSecs, uptimeBefore);
 
     monotonic += const Duration(seconds: 301);
     link.deliver(6.0, -70, raw);
     await pump();
-    expect((await node.getStats(statsTypeCore))['queue_len'], 2,
+    expect((await node.getStats(statsTypeCore)).queueLen, 2,
         reason: 'dedup expires only on monotonic age');
   });
 
@@ -1988,14 +1988,23 @@ void main() {
     await pump();
 
     final core = await alice.getStats(statsTypeCore);
-    expect(core['uptime_secs'], isA<int>());
+    expect(core.uptimeSecs, isA<int>());
 
     final radio = await bob.getStats(statsTypeRadio);
-    expect(radio['noise_floor'], -110);
-    expect(radio['last_rssi'], -70);
-    expect(radio['last_snr_scaled'], 24);
-    expect(radio['tx_air_secs'], isA<int>());
-    expect(radio['rx_air_secs'], isA<int>());
+    expect(radio.noiseFloor, -110);
+    expect(radio.lastRssi, -70);
+    expect(radio.lastSnrScaled, 24);
+    expect(radio.txAirSecs, isA<int>());
+    expect(radio.rxAirSecs, isA<int>());
+
+    final packets = await alice.getStats(statsTypePackets);
+    expect(packets.sent, greaterThan(0));
+    expect(packets.recv, isA<int>());
+    expect(packets.floodTx, isA<int>());
+    expect(packets.directTx, isA<int>());
+    expect(packets.floodRx, isA<int>());
+    expect(packets.directRx, isA<int>());
+    expect(packets.recvErrors, isA<int>());
   });
 
   test('sessionStats exposes cached counters without device I/O', () async {

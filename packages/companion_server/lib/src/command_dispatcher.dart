@@ -756,26 +756,26 @@ class CompanionCommandDispatcher {
     switch (statsType) {
       case statsTypeCore:
         w
-          ..writeUInt16Le((stats['battery_mv'] as int?) ?? 0)
-          ..writeUInt32Le((stats['uptime_secs'] as int?) ?? 0)
-          ..writeUInt16Le((stats['errors'] as int?) ?? 0)
-          ..writeByte(((stats['queue_len'] as int?) ?? 0).clamp(0, 255));
+          ..writeUInt16Le(stats.batteryMv)
+          ..writeUInt32Le(stats.uptimeSecs)
+          ..writeUInt16Le(stats.errors)
+          ..writeByte(stats.queueLen.clamp(0, 255));
       case statsTypeRadio:
         w
-          ..writeUInt16Le((stats['noise_floor'] as int?) ?? 0)
-          ..writeByte(((stats['last_rssi'] as int?) ?? 0) & 0xFF)
-          ..writeByte(((stats['last_snr_scaled'] as int?) ?? 0) & 0xFF)
-          ..writeUInt32Le((stats['tx_air_secs'] as int?) ?? 0)
-          ..writeUInt32Le((stats['rx_air_secs'] as int?) ?? 0);
+          ..writeUInt16Le(stats.noiseFloor)
+          ..writeByte(stats.lastRssi & 0xFF)
+          ..writeByte(stats.lastSnrScaled & 0xFF)
+          ..writeUInt32Le(stats.txAirSecs)
+          ..writeUInt32Le(stats.rxAirSecs);
       default:
         w
-          ..writeUInt32Le((stats['recv'] as int?) ?? 0)
-          ..writeUInt32Le((stats['sent'] as int?) ?? 0)
-          ..writeUInt32Le((stats['flood_tx'] as int?) ?? 0)
-          ..writeUInt32Le((stats['direct_tx'] as int?) ?? 0)
-          ..writeUInt32Le((stats['flood_rx'] as int?) ?? 0)
-          ..writeUInt32Le((stats['direct_rx'] as int?) ?? 0)
-          ..writeUInt32Le((stats['recv_errors'] as int?) ?? 0);
+          ..writeUInt32Le(stats.recv)
+          ..writeUInt32Le(stats.sent)
+          ..writeUInt32Le(stats.floodTx)
+          ..writeUInt32Le(stats.directTx)
+          ..writeUInt32Le(stats.floodRx)
+          ..writeUInt32Le(stats.directRx)
+          ..writeUInt32Le(stats.recvErrors);
     }
     host.sendFrame(w.toBytes());
   }

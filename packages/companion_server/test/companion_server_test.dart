@@ -152,27 +152,27 @@ class TestBridge extends CompanionBridge {
   int statsReads = 0;
 
   @override
-  Future<Map<String, Object?>> getStats(int statsType) async {
+  Future<MeshStats> getStats(int statsType) async {
     statsReads++;
     final battery = await getBatteryAndStorage();
     if (statsType == statsTypeCore) {
-      return {
-        'battery_mv': battery.millivolts,
-        'uptime_secs': 7,
-        'errors': 0,
-        'queue_len': 0,
-      };
+      return MeshStats(
+        batteryMv: battery.millivolts,
+        uptimeSecs: 7,
+        errors: 0,
+        queueLen: 0,
+      );
     }
     if (statsType == statsTypeRadio) {
-      return {
-        'noise_floor': -110,
-        'last_rssi': -70,
-        'last_snr_scaled': 24,
-        'tx_air_secs': 1,
-        'rx_air_secs': 2,
-      };
+      return const MeshStats(
+        noiseFloor: -110,
+        lastRssi: -70,
+        lastSnrScaled: 24,
+        txAirSecs: 1,
+        rxAirSecs: 2,
+      );
     }
-    return const {};
+    return const MeshStats();
   }
 
   int currentTime = 100;

@@ -2,14 +2,18 @@
   "format": 1,
   "files": {
     "packages/companion_server/lib/src/bridge.dart": {
-      "covered": 83,
-      "total": 83
+      "covered": 130,
+      "total": 130
     },
     "packages/companion_server/lib/src/command_dispatcher.dart": {
-      "covered": 617,
-      "total": 621
+      "covered": 618,
+      "total": 622
     },
     "packages/companion_server/lib/src/command_spec.dart": {
+      "covered": 1,
+      "total": 1
+    },
+    "packages/companion_server/lib/src/mesh_stats.dart": {
       "covered": 1,
       "total": 1
     },
@@ -94,8 +98,8 @@
       "total": 10
     },
     "packages/mesh_node/lib/src/mesh_node.dart": {
-      "covered": 590,
-      "total": 606
+      "covered": 599,
+      "total": 614
     },
     "packages/mesh_node/lib/src/mesh_rx.dart": {
       "covered": 492,

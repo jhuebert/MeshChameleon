@@ -53,7 +53,10 @@ Inside `companion_server/lib/src/`, `server.dart` owns the TCP listener, client
 lifecycle, framing, timers, reply generation checks, and the push sink.
 `command_dispatcher.dart` owns the declarative command table and the command
 handlers, `push_codec.dart` holds the pure push/message byte encoders, and
-`bridge.dart` is the host interface.
+`bridge.dart` is the host interface. Unimplemented bridge operations throw
+`CompanionOperationError(errCodeUnsupportedCmd)`; only pure empty-state getters
+(no contacts, no messages, default preferences) have working defaults. Stats
+are returned as the typed `MeshStats` object.
 
 ## Running an end-to-end test without hardware
 

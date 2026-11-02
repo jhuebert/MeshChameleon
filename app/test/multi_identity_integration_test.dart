@@ -20,15 +20,12 @@ const _capabilities = DeviceCapabilities(
   supportsBle: false,
 );
 
-class _Sink implements CompanionPushSink {
+class _Sink extends NoopCompanionPushSink {
   final List<int> confirmed = [];
 
   @override
   void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
       confirmed.add(ackCrc);
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
 }
 
 class _FramedClient {
