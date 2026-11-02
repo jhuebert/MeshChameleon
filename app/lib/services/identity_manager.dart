@@ -117,7 +117,7 @@ class IdentityManager {
         ));
         continue;
       }
-      final state = await repository.loadState(record.id);
+      final (state, stateError) = await _loadStateForSummary(record.id);
       final keyAvailable =
           runtime?.keyAvailable ?? await repository.hasKey(record.id);
       out.add(IdentitySummary(
@@ -136,11 +136,21 @@ class IdentityManager {
         queuedChannel:
             state?.queue.where((message) => message.isChannel).length ?? 0,
         unavailableReason: runtime?.unavailableReason ??
+            stateError ??
             (keyAvailable ? null : 'Key unavailable'),
       ));
     }
     out.sort(_compareSummaries);
     _summaries = out;
+  }
+
+  Future<(NodeState?, String?)> _loadStateForSummary(String id) async {
+    try {
+      return (await repository.loadState(id), null);
+    } on NodeStateVersionException catch (e) {
+      onLog?.call('Could not read identity $id state: ${e.message}');
+      return (null, e.message);
+    }
   }
 
   static int _compareSummaries(IdentitySummary a, IdentitySummary b) {
@@ -247,8 +257,17 @@ class IdentityManager {
     }
 
     // Quarantine a corrupt state file before the node's lenient store load
-    // would otherwise start fresh silently.
-    await repository.loadState(record.id);
+    // would otherwise start fresh silently. A future schema is not corrupt:
+    // keep the file and mark this runtime unavailable until the app is updated.
+    try {
+      await repository.loadState(record.id);
+    } on NodeStateVersionException catch (e) {
+      runtime.unavailableReason = e.message;
+      onLog?.call(
+        'Could not start identity ${record.id}: ${e.message}',
+      );
+      return;
+    }
     final store = repository.openNodeStore(record.id);
     final linkView = hub.viewFor(record.id);
     final MeshNode node;

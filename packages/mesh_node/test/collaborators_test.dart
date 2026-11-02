@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:companion_server/companion_server.dart';
@@ -63,6 +64,28 @@ class _FakeScheduler implements MeshScheduler {
       jobs.remove(job);
       job.action();
     }
+  }
+}
+
+class _BlockingStore implements NodeStore {
+  final saveGate = Completer<void>();
+  bool saveStarted = false;
+  bool saveFinished = false;
+  bool flushed = false;
+
+  @override
+  Future<NodeState?> load() async => null;
+
+  @override
+  Future<void> save(NodeState state) async {
+    saveStarted = true;
+    await saveGate.future;
+    saveFinished = true;
+  }
+
+  @override
+  Future<void> flush() async {
+    flushed = true;
   }
 }
 
@@ -402,9 +425,10 @@ void main() {
       expect(cache.length, maxAdvertPathCacheEntries);
       final newest =
           Uint8List.fromList(_key(maxAdvertPathCacheEntries).sublist(0, 7));
-      expect(cache.lookup(newest)?.name, 'n$maxAdvertPathCacheEntries');
+      expect(
+          cache.paths[bytesToHex(newest)]?.name, 'n$maxAdvertPathCacheEntries');
       final oldest = Uint8List.fromList(_key(0).sublist(0, 7));
-      expect(cache.lookup(oldest), isNull);
+      expect(cache.paths[bytesToHex(oldest)], isNull);
     });
   });
 
@@ -549,6 +573,38 @@ void main() {
       expect(current.queue.single.text, 'hello');
       expect((await store.load())?.queue.single.text, 'hello');
       expect(persistence.storageUsedBytes, current.storageBytes);
+    });
+
+    test('flush waits for queued saves before flushing the store', () async {
+      final store = _BlockingStore();
+      var current = stateWithText('');
+      final persistence = StatePersistence(
+        store: store,
+        storageQuotaBytes: virtualStorageQuotaBytes,
+        snapshot: () => current,
+        publish: (state) => current = state,
+        isRetired: () => false,
+        isResetting: () => false,
+        isCurrent: (_) => true,
+        onStateChanged: () {},
+      );
+
+      final commit = persistence.commit(stateWithText('blocked'));
+      await Future<void>.delayed(Duration.zero);
+      expect(store.saveStarted, isTrue);
+      expect(store.saveFinished, isFalse);
+
+      var flushDone = false;
+      final flush = persistence.flush().then((_) => flushDone = true);
+      await Future<void>.delayed(Duration.zero);
+      expect(flushDone, isFalse);
+      expect(store.flushed, isFalse);
+
+      store.saveGate.complete();
+      await commit;
+      await flush;
+      expect(store.saveFinished, isTrue);
+      expect(store.flushed, isTrue);
     });
 
     test('rejects retired, resetting, and stale-generation commits', () async {

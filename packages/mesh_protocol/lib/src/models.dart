@@ -118,7 +118,6 @@ class NodePrefs {
     this.autoaddConfig = 0,
     this.autoaddMaxHops = 0,
     this.timezoneOffsetHours = 0,
-    this.clientRepeat = 0,
     this.pathHashMode = 0,
     this.rxDelayBaseMs = 0,
     this.airtimeFactorMs = 0,
@@ -151,7 +150,6 @@ class NodePrefs {
   /// Virtual timezone offset in whole hours (does not alter epoch seconds).
   int timezoneOffsetHours;
 
-  int clientRepeat;
   int pathHashMode;
 
   /// Device radio tuning (`CMD_GET/SET_TUNING_PARAMS`). The firmware treats
@@ -193,7 +191,6 @@ class NodePrefs {
     autoaddConfig = other.autoaddConfig;
     autoaddMaxHops = other.autoaddMaxHops;
     timezoneOffsetHours = other.timezoneOffsetHours;
-    clientRepeat = other.clientRepeat;
     pathHashMode = other.pathHashMode;
     rxDelayBaseMs = other.rxDelayBaseMs;
     airtimeFactorMs = other.airtimeFactorMs;

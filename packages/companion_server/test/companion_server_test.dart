@@ -720,7 +720,7 @@ void main() {
     final resp = await client.frames.next();
     expect(server.metrics.commandsReceived, 1);
     expect(server.metrics.payloadBytesIn, 2);
-    expect(server.metrics.repliesSent, 1);
+    expect(server.metrics.replyFramesSent, 1);
     expect(server.metrics.payloadBytesOut, resp.length);
     expect(server.metrics.appTargetVer, appProtocolVersion);
 
@@ -733,7 +733,7 @@ void main() {
     final err = await client.frames.next();
     expect(err[0], respCodeErr);
     expect(server.metrics.unsupportedCommands, 1);
-    expect(server.metrics.errorReplies, 1);
+    expect(server.metrics.errorReplyFrames, 1);
 
     await server.disconnectClient(reason: 'test close');
     expect(server.metrics.clientConnected, isFalse);
@@ -742,6 +742,10 @@ void main() {
   });
 
   test('metrics count a client eviction', () async {
+    client.send([cmdDeviceQuery, appProtocolVersion]);
+    await client.frames.next();
+    expect(server.metrics.appTargetVer, appProtocolVersion);
+
     final replacement =
         FramedClient(await Socket.connect('127.0.0.1', server.port!));
     addTearDown(replacement.close);
@@ -750,6 +754,7 @@ void main() {
     expect(server.metrics.clientConnections, 2);
     expect(server.metrics.clientDisconnects, 1);
     expect(server.metrics.evictions, 1);
+    expect(server.metrics.appTargetVer, isNull);
   });
 
   test('server_rejects_outbound_prefix_as_command', () async {
@@ -1523,6 +1528,8 @@ void main() {
       client.send(command);
       expect(await client.frames.next(), [respCodeDisabled]);
     }
+    expect(server.metrics.disabledReplyFrames, 2);
+    expect(server.metrics.errorReplyFrames, 0);
   });
 
   test('virtual key export/import switches signing and clears sign buffer',

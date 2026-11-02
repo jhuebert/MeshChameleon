@@ -582,6 +582,28 @@ void main() {
         await repo.loadState(record.id) ?? defaultNodeState(record.name);
     expect(fresh.prefs.nodeName, record.name);
   });
+
+  test('future_state_version_is_surfaced_and_not_quarantined', () async {
+    final repo = repository();
+    await repo.loadOrCreate();
+    final record = (await repo.records()).single;
+    final file = repo.stateFile(record.id);
+    await file.parent.create(recursive: true);
+    await file.writeAsString(jsonEncode({
+      'version': nodeStateSchemaVersion + 1,
+      'prefs': {'node_name': 'from the future'},
+    }));
+
+    await expectLater(
+      repo.loadState(record.id),
+      throwsA(isA<NodeStateVersionException>()),
+    );
+    expect(await file.exists(), isTrue);
+    final quarantined = file.parent
+        .list()
+        .where((e) => e.path.contains('node_state.json.corrupt-'));
+    expect(await quarantined.length, 0);
+  });
 }
 
 class _FailingIdentityStore extends IdentityStore {

@@ -98,7 +98,10 @@ class StatePersistence {
     }
   }
 
-  Future<void> flush() async => store?.flush();
+  Future<void> flush() async {
+    await _queue.idle;
+    await store?.flush();
+  }
 
   Future<void> _save(NodeState state) async {
     final s = store;

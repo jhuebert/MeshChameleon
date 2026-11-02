@@ -14,11 +14,12 @@ class CompanionMetrics {
   int clientErrors = 0;
   int writeErrors = 0;
   int commandsReceived = 0;
-  int repliesSent = 0;
+  int replyFramesSent = 0;
   int pushesSent = 0;
   int payloadBytesIn = 0;
   int payloadBytesOut = 0;
-  int errorReplies = 0;
+  int errorReplyFrames = 0;
+  int disabledReplyFrames = 0;
   int unsupportedCommands = 0;
 
   /// Protocol version from the most recent DEVICE_QUERY / APP_START.
@@ -70,8 +71,8 @@ class CompanionMetrics {
     payloadBytesIn += payloadBytes;
   }
 
-  void replySent(int payloadBytes) {
-    repliesSent++;
+  void replyFrameSent(int payloadBytes) {
+    replyFramesSent++;
     payloadBytesOut += payloadBytes;
   }
 
@@ -80,11 +81,16 @@ class CompanionMetrics {
     payloadBytesOut += payloadBytes;
   }
 
-  void errorReplySent() => errorReplies++;
+  void errorReplyFrameSent() => errorReplyFrames++;
+
+  void disabledReplyFrameSent() => disabledReplyFrames++;
 
   void unsupportedCommandReceived() => unsupportedCommands++;
 
   void writeFailed() => writeErrors++;
 
   void appTargetVersionReceived(int version) => appTargetVer = version;
+
+  /// Clear the handshake version when a new client session starts.
+  void appTargetVersionReset() => appTargetVer = null;
 }

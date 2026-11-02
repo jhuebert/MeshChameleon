@@ -68,14 +68,6 @@ class RequestTracker {
 
   Uint8List? discoveryTarget(int tag) => _pendingDiscovery[tag];
 
-  /// Remove and return the discovery target when [sender] matches it.
-  Uint8List? takeDiscovery(int tag, Uint8List sender) {
-    final target = _pendingDiscovery[tag];
-    if (target == null || !bytesEqual(target, sender)) return null;
-    _pendingDiscovery.remove(tag);
-    return target;
-  }
-
   void registerTelemetry(int tag, Uint8List target) =>
       _pendingTelemetry[tag] = Uint8List.fromList(target);
 
@@ -144,6 +136,6 @@ class RequestTracker {
     _lastRequestTag = 0;
   }
 
-  static Uint8List _prefix4(Uint8List pubkey) => Uint8List.fromList(
-      pubkey.sublist(0, pubkey.length < 4 ? pubkey.length : 4));
+  static Uint8List _prefix4(Uint8List pubkey) => Uint8List.fromList(pubkey
+      .sublist(0, pubkey.length < keyPrefix4 ? pubkey.length : keyPrefix4));
 }

@@ -109,11 +109,46 @@ void main() {
       expect(p.recvTimestamp, 99);
     });
 
-    test('a JSON document with no version still loads', () {
+    test('a JSON document with no version still loads as legacy v1', () {
       final decoded = NodeState.fromJson(<String, Object?>{});
       expect(decoded.contacts, isEmpty);
       expect(decoded.channels, isEmpty);
       expect(decoded.queue, isEmpty);
+    });
+
+    test('loads the v1 and v2 fixture layouts', () async {
+      final v1 = NodeState.fromJson(
+        jsonDecode(
+          await File('test/fixtures/node_state_v1.json').readAsString(),
+        ) as Map<String, Object?>,
+      );
+      expect(v1.prefs.nodeName, 'legacy');
+      expect(v1.prefs.autoaddMaxHops, 0);
+      expect(v1.prefs.timezoneOffsetHours, 0);
+      expect(v1.customSettings, isEmpty);
+
+      final v2 = NodeState.fromJson(
+        jsonDecode(
+          await File('test/fixtures/node_state_v2.json').readAsString(),
+        ) as Map<String, Object?>,
+      );
+      expect(v2.prefs.nodeName, 'current');
+      expect(v2.prefs.pathHashMode, 2);
+      expect(v2.customSettings['sensor'], 'value');
+    });
+
+    test('rejects a future schema version instead of using defaults', () {
+      final json = NodeState(prefs: NodePrefs()).toJson()
+        ..['version'] = nodeStateSchemaVersion + 1;
+
+      try {
+        NodeState.fromJson(json);
+        fail('expected NodeStateVersionException');
+      } on NodeStateVersionException catch (e) {
+        expect(e.version, nodeStateSchemaVersion + 1);
+        expect(e.message, contains('unsupported node state version'));
+        expect(e.toString(), e.message);
+      }
     });
 
     test('snapshot_is_deep_copy_before_async_save', () {
@@ -342,6 +377,24 @@ void main() {
       final file = File('${dir.path}/bad.json');
       await file.writeAsString('{not json');
       expect(await JsonNodeStore(file: file).load(), isNull);
+    });
+
+    test('surfaces a future schema without deleting or overwriting it',
+        () async {
+      final file = File('${dir.path}/future.json');
+      await file.writeAsString(jsonEncode({
+        'version': nodeStateSchemaVersion + 1,
+        'prefs': {'node_name': 'from the future'},
+      }));
+
+      await expectLater(
+        JsonNodeStore(file: file).load(),
+        throwsA(isA<NodeStateVersionException>()),
+      );
+      expect(
+        jsonDecode(await file.readAsString())['prefs']['node_name'],
+        'from the future',
+      );
     });
 
     test('serialises concurrent saves last-write-wins', () async {

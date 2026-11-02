@@ -12,7 +12,8 @@ void main() {
     final companion = CompanionMetrics(now: () => now)
       ..recordClientConnected('192.168.1.20')
       ..commandReceived(2)
-      ..replySent(80)
+      ..replyFrameSent(80)
+      ..disabledReplyFrameSent()
       ..pushSent(7)
       ..appTargetVersionReceived(3);
     final link = LinkMetrics(now: () => now)
@@ -90,6 +91,7 @@ void main() {
     expect(report, contains('Commit: abcdef123456'));
     expect(report, contains('Proxy: Listening on :5000'));
     expect(report, contains('Client address: 192.168.1.20'));
+    expect(report, contains('Disabled replies: 1'));
     expect(report, contains('Raw TX/RX packets: 1 / 1'));
     expect(report, contains('Physical radio totals are unique'));
     expect(report, contains('Battery optimization: Unrestricted'));

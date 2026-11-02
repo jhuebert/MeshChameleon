@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -68,6 +69,29 @@ void main() {
     expect(summary.channelCount, 1);
     expect(summary.contactCount, 0);
     expect(summary.prefixHex, hasLength(8));
+  });
+
+  test('future_state_version_marks_the_identity_unavailable', () async {
+    await manager.load();
+    final id = manager.summaries.single.id;
+    final file = repository.stateFile(id);
+    await file.writeAsString(jsonEncode({
+      'version': nodeStateSchemaVersion + 1,
+      'prefs': {'node_name': 'from the future'},
+    }));
+
+    await manager.load();
+    expect(
+      manager.summaries.single.unavailableReason,
+      contains('unsupported node state version'),
+    );
+
+    await start();
+    expect(manager.runtimes.single.node, isNull);
+    expect(
+      manager.summaries.single.unavailableReason,
+      contains('unsupported node state version'),
+    );
   });
 
   test('start_live_runs_every_identity_and_isolates_counts', () async {

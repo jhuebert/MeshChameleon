@@ -318,11 +318,9 @@ class MeshNode extends CompanionBridge implements CliHost {
   Future<void> load() async {
     final state = await store?.load();
     if (state == null) return;
-    prefs.copyFrom(state.prefs);
-    _contactTable.replacePersistent(state.contacts);
-    channels
-      ..clear()
-      ..addAll(state.channels);
+    _applyState(state);
+    // A persisted file may predate the current public-channel defaults or
+    // contain provider settings that are no longer supported.
     channels.putIfAbsent(0, defaultPublicChannel);
     final publicSecret = LocalIdentity.defaultPublicChannelSecret;
     final publicChannel = channels[0];
@@ -331,8 +329,6 @@ class MeshNode extends CompanionBridge implements CliHost {
         publicChannel.name.toLowerCase() == 'public') {
       channels[0] = defaultPublicChannel();
     }
-    _messageQueue.replace(state.queue);
-    _advertPathCache.replace(state.advertPaths);
     _customVars
       ..clear()
       ..addAll(sensorSettings.initialSettings);
@@ -1248,7 +1244,7 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   @override
   bool logout(Uint8List pubkey) {
-    final prefix = Uint8List.fromList(pubkey.sublist(0, 4));
+    final prefix = Uint8List.fromList(pubkey.sublist(0, keyPrefix4));
     _requests.takeLogin(prefix);
     _requests.takeStatus(prefix);
     _stopKeepAlive(pubkey);
@@ -1484,7 +1480,7 @@ class MeshNode extends CompanionBridge implements CliHost {
         customSettings: customSettings ?? _customVars,
       );
 
-  void _publish(NodeState state) {
+  void _applyState(NodeState state) {
     prefs.copyFrom(state.prefs);
     _contactTable.replacePersistent(state.contacts);
     channels
@@ -1495,6 +1491,10 @@ class MeshNode extends CompanionBridge implements CliHost {
     _customVars
       ..clear()
       ..addAll(state.customSettings);
+  }
+
+  void _publish(NodeState state) {
+    _applyState(state);
   }
 
   /// Save a candidate, then publish it. A save failure leaves node state

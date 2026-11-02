@@ -459,7 +459,7 @@ class MessageSender {
       flood: flood,
     );
     if (!deps.isCurrent(generation)) return const SentResult.failure();
-    requests.setPendingLogin(Uint8List.fromList(pubkey.sublist(0, 4)));
+    requests.setPendingLogin(Uint8List.fromList(pubkey.sublist(0, keyPrefix4)));
     try {
       await deps.transmit(packet, flood: flood, identityGeneration: generation);
     } catch (_) {
@@ -503,7 +503,8 @@ class MessageSender {
       flood: flood,
     );
     if (!deps.isCurrent(generation)) return const SentResult.failure();
-    requests.setPendingStatus(Uint8List.fromList(pubkey.sublist(0, 4)));
+    requests
+        .setPendingStatus(Uint8List.fromList(pubkey.sublist(0, keyPrefix4)));
     try {
       await deps.transmit(packet, flood: flood, identityGeneration: generation);
     } catch (_) {

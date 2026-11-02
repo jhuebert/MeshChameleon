@@ -143,7 +143,6 @@ void main() {
         autoaddConfig: 0x06,
         autoaddMaxHops: 4,
         timezoneOffsetHours: -6,
-        clientRepeat: 1,
         pathHashMode: 2,
         rxDelayBaseMs: 100,
         airtimeFactorMs: 200,
@@ -170,7 +169,6 @@ void main() {
       expect(target.autoaddConfig, 0x06);
       expect(target.autoaddMaxHops, 4);
       expect(target.timezoneOffsetHours, -6);
-      expect(target.clientRepeat, 1);
       expect(target.pathHashMode, 2);
       expect(target.rxDelayBaseMs, 100);
       expect(target.airtimeFactorMs, 200);

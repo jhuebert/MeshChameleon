@@ -237,6 +237,13 @@ const int phVerMask = 0x03;
 // ---------------------------------------------------------------------------
 const int pubKeySize = 32;
 
+/// Public-key prefix lengths used by companion request/response routing.
+const int keyPrefix4 = 4;
+const int keyPrefix6 = 6;
+
+/// Public-key prefix length used as the advert-path cache key.
+const int advertPathPrefix7 = 7;
+
 /// The MeshCore expanded private key `[scalar(32)][prefix(32)]`.
 const int privateKeySize = 64;
 const int signatureSize = 64;

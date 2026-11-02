@@ -11,8 +11,6 @@ class AdvertPathCache {
 
   int get length => _paths.length;
 
-  AdvertPath? lookup(Uint8List prefix) => _paths[bytesToHex(prefix)];
-
   /// Return a cloned cache with [packet]'s inbound path recorded for [pubkey].
   Map<String, AdvertPath> candidate(
     Packet packet,
@@ -20,7 +18,7 @@ class AdvertPathCache {
     String name,
     int now,
   ) {
-    final prefix = Uint8List.fromList(pubkey.sublist(0, 7));
+    final prefix = Uint8List.fromList(pubkey.sublist(0, advertPathPrefix7));
     final key = bytesToHex(prefix);
     final map = <String, AdvertPath>{
       for (final entry in _paths.entries) entry.key: entry.value.clone(),

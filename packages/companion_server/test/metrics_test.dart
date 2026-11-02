@@ -15,20 +15,25 @@ void main() {
     expect(metrics.currentClientDuration, const Duration(seconds: 5));
 
     metrics.commandReceived(2);
-    metrics.replySent(80);
+    metrics.replyFrameSent(80);
     metrics.pushSent(7);
-    metrics.errorReplySent();
+    metrics.errorReplyFrameSent();
+    metrics.disabledReplyFrameSent();
     metrics.unsupportedCommandReceived();
     metrics.appTargetVersionReceived(3);
 
     expect(metrics.commandsReceived, 1);
     expect(metrics.payloadBytesIn, 2);
-    expect(metrics.repliesSent, 1);
+    expect(metrics.replyFramesSent, 1);
     expect(metrics.pushesSent, 1);
     expect(metrics.payloadBytesOut, 87);
-    expect(metrics.errorReplies, 1);
+    expect(metrics.errorReplyFrames, 1);
+    expect(metrics.disabledReplyFrames, 1);
     expect(metrics.unsupportedCommands, 1);
     expect(metrics.appTargetVer, 3);
+
+    metrics.appTargetVersionReset();
+    expect(metrics.appTargetVer, isNull);
 
     metrics.clientDisconnected('idle timeout', idleTimeout: true);
     expect(metrics.clientConnected, isFalse);

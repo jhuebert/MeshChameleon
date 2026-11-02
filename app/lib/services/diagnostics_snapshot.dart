@@ -197,7 +197,7 @@ class DiagnosticsSnapshot {
     line('App protocol version: ${companion.appTargetVer ?? 'unknown'}');
     line('Connections: ${formatCount(companion.clientConnections)}');
     line('Commands received: ${formatCount(companion.commandsReceived)}');
-    line('Replies sent: ${formatCount(companion.repliesSent)}');
+    line('Reply frames sent: ${formatCount(companion.replyFramesSent)}');
     line('Pushes sent: ${formatCount(companion.pushesSent)}');
     line('Payload in/out: ${formatBytes(companion.payloadBytesIn)} / '
         '${formatBytes(companion.payloadBytesOut)}');
@@ -205,7 +205,8 @@ class DiagnosticsSnapshot {
         '(evictions ${formatCount(companion.evictions)}, '
         'idle ${formatCount(companion.idleTimeouts)}, '
         'errors ${formatCount(companion.clientErrors)})');
-    line('Error replies: ${formatCount(companion.errorReplies)}');
+    line('Error reply frames: ${formatCount(companion.errorReplyFrames)}');
+    line('Disabled replies: ${formatCount(companion.disabledReplyFrames)}');
     line('Unsupported commands: ${formatCount(companion.unsupportedCommands)}');
     if (companion.lastDisconnectReason != null) {
       line('Last disconnect: ${companion.lastDisconnectReason}');

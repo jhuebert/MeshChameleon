@@ -106,7 +106,7 @@ class PacketBuilder {
       ..writeByte(flagsByte & 0xFF)
       ..writeBytes(text.where((b) => b != 0).toList());
     return CryptoUtils.sha256([...input.toBytes(), ...senderPubkey])
-        .sublist(0, 4);
+        .sublist(0, keyPrefix4);
   }
 
   /// Create a discrete ACK packet from a precomputed ACK payload.

@@ -47,8 +47,6 @@ class ContactTable {
     yield* _transient;
   }
 
-  int get persistentCount => _persistent.length;
-
   List<Contact> since(int timestamp) =>
       _persistent.where((c) => c.lastmod > timestamp).toList();
 

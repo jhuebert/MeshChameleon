@@ -57,6 +57,10 @@ class TcpDeviceLink implements RadioLink {
       socket.setOption(SocketOption.tcpNoDelay, true);
       _socket = socket;
       _codec.reset();
+      // `listen` reports link state, but a failed write can also complete
+      // `done` with the same error. Observe it so a closed peer never leaves an
+      // unhandled asynchronous error behind.
+      unawaited(socket.done.catchError((_) {}));
       socket.listen(
         _onData,
         onError: (Object e) {

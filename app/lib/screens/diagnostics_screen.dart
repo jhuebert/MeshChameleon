@@ -177,7 +177,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         ),
         _InfoRow(
           label: 'Errors',
-          value: '${formatCount(metrics.errorReplies)} replies, '
+          value: '${formatCount(metrics.errorReplyFrames)} replies, '
+              '${formatCount(metrics.disabledReplyFrames)} disabled, '
               '${formatCount(metrics.unsupportedCommands)} unsupported',
         ),
         _InfoRow(

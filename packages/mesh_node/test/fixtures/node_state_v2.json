@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "prefs": {
+    "node_name": "current",
+    "path_hash_mode": 2
+  },
+  "contacts": [],
+  "channels": [],
+  "queue": [],
+  "advert_paths": [],
+  "custom_settings": {
+    "sensor": "value"
+  }
+}

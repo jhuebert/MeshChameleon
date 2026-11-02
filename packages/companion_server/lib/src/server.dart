@@ -60,8 +60,11 @@ class CompanionServer implements CompanionPushSink {
       SerialFrameCodec(direction: FrameDirection.inbound);
   Timer? _idleTimer;
   Timer? _heartbeatTimer;
-  int _appTargetVer = 0;
   final List<int> _signBuffer = <int>[];
+
+  /// Protocol version reported by the current client, from the shared counter
+  /// object so diagnostics and framing cannot disagree.
+  int get appTargetVer => metrics.appTargetVer ?? 0;
 
   /// Commands are executed in arrival order, one at a time.
   Future<void> _commandTail = Future<void>.value();
@@ -155,7 +158,7 @@ class CompanionServer implements CompanionPushSink {
     // During a bridge switch the new bridge is installed by the barrier; the
     // old bridge must not receive a new client's push sink in the meantime.
     if (!_switchingBridge) _bridge.setPushSink(this);
-    _appTargetVer = 0;
+    metrics.appTargetVersionReset();
 
     socket.listen(
       (data) {
@@ -242,13 +245,14 @@ class CompanionServer implements CompanionPushSink {
   // -------------------------------------------------------------------------
 
   /// Send a command reply. Replies from an older client generation are dropped.
-  void _sendFrame(List<int> payload, {bool error = false}) {
+  void _sendFrame(List<int> payload,
+      {bool error = false, bool disabled = false}) {
     final generation = _commandGeneration;
     if (generation != null && generation != _connectionGeneration) {
       _log('dropping reply from evicted client generation $generation');
       return;
     }
-    _writeTo(_client, payload, push: false, error: error);
+    _writeTo(_client, payload, push: false, error: error, disabled: disabled);
   }
 
   /// Send an asynchronous push to the current client regardless of which
@@ -261,6 +265,7 @@ class CompanionServer implements CompanionPushSink {
     List<int> payload, {
     required bool push,
     bool error = false,
+    bool disabled = false,
   }) {
     if (client == null) return;
     try {
@@ -268,8 +273,9 @@ class CompanionServer implements CompanionPushSink {
       if (push) {
         metrics.pushSent(payload.length);
       } else {
-        metrics.replySent(payload.length);
-        if (error) metrics.errorReplySent();
+        metrics.replyFrameSent(payload.length);
+        if (error) metrics.errorReplyFrameSent();
+        if (disabled) metrics.disabledReplyFrameSent();
       }
     } catch (e) {
       metrics.writeFailed();
@@ -286,7 +292,7 @@ class CompanionServer implements CompanionPushSink {
       _sendFrame(Uint8List.fromList([respCodeErr, code]), error: true);
 
   void sendDisabled() =>
-      _sendFrame(Uint8List.fromList([respCodeDisabled]), error: true);
+      _sendFrame(Uint8List.fromList([respCodeDisabled]), disabled: true);
 
   void _sendOperationError(CompanionOperationError e) {
     if (e.message != null) {
@@ -348,8 +354,12 @@ class CompanionServer implements CompanionPushSink {
 
   @override
   void pushTelemetryResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
-      _sendPushFrame(Uint8List.fromList(
-          [pushCodeTelemetryResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
+      _sendPushFrame(Uint8List.fromList([
+        pushCodeTelemetryResponse,
+        0,
+        ...pubkeyPrefix6.take(keyPrefix6),
+        ...data
+      ]));
 
   @override
   void pushBinaryResponse(int tag, Uint8List data) =>
@@ -393,7 +403,7 @@ class CompanionServer implements CompanionPushSink {
     final w = BufferWriter()
       ..writeByte(pushCodePathDiscoveryResponse)
       ..writeByte(0) // reserved
-      ..writeBytes(pubkeyPrefix6.take(6).toList())
+      ..writeBytes(pubkeyPrefix6.take(keyPrefix6).toList())
       ..writeByte(outPathLen & 0xFF)
       ..writeBytes(outPath)
       ..writeByte(inPathLen & 0xFF)
@@ -413,7 +423,7 @@ class CompanionServer implements CompanionPushSink {
     final w = BufferWriter()
       ..writeByte(pushCodeLoginSuccess)
       ..writeByte(legacy ? 0 : (permissions & 0xFF))
-      ..writeBytes(pubkeyPrefix6.take(6).toList());
+      ..writeBytes(pubkeyPrefix6.take(keyPrefix6).toList());
     if (!legacy) {
       w
         ..writeUInt32Le(serverTag)
@@ -424,13 +434,18 @@ class CompanionServer implements CompanionPushSink {
   }
 
   @override
-  void pushLoginFail(Uint8List pubkeyPrefix6) => _sendPushFrame(
-      Uint8List.fromList([pushCodeLoginFail, 0, ...pubkeyPrefix6.take(6)]));
+  void pushLoginFail(Uint8List pubkeyPrefix6) =>
+      _sendPushFrame(Uint8List.fromList(
+          [pushCodeLoginFail, 0, ...pubkeyPrefix6.take(keyPrefix6)]));
 
   @override
   void pushStatusResponse(Uint8List pubkeyPrefix6, Uint8List data) =>
-      _sendPushFrame(Uint8List.fromList(
-          [pushCodeStatusResponse, 0, ...pubkeyPrefix6.take(6), ...data]));
+      _sendPushFrame(Uint8List.fromList([
+        pushCodeStatusResponse,
+        0,
+        ...pubkeyPrefix6.take(keyPrefix6),
+        ...data
+      ]));
 
   @override
   void pushControlData(double snr, int rssi, int pathLen, Uint8List data) {
@@ -642,7 +657,6 @@ class CompanionServer implements CompanionPushSink {
 
   void _cmdDeviceQuery(Uint8List data) {
     if (data.isNotEmpty) {
-      _appTargetVer = data[0];
       metrics.appTargetVersionReceived(data[0]);
     }
     final info = bridge.getDeviceInfo();
@@ -662,7 +676,6 @@ class CompanionServer implements CompanionPushSink {
 
   void _cmdAppStart(Uint8List data) {
     if (data.isNotEmpty) {
-      _appTargetVer = data[0];
       metrics.appTargetVersionReceived(data[0]);
     }
     final prefs = bridge.getSelfInfo();
@@ -1101,7 +1114,7 @@ class CompanionServer implements CompanionPushSink {
     final txtType = r.readByte();
     final attempt = r.readByte();
     final timestamp = r.readUInt32Le();
-    final prefix = r.readBytes(6);
+    final prefix = r.readBytes(keyPrefix6);
     final text = r.readCString();
     final contact = bridge.getContactByKeyPrefix(prefix);
     if (contact == null) return sendErr(errCodeNotFound);
@@ -1222,7 +1235,7 @@ class CompanionServer implements CompanionPushSink {
           ..writeBytes(payload);
         return w.toBytes();
       }
-      if (_appTargetVer >= 3) {
+      if (appTargetVer >= 3) {
         final w = BufferWriter()
           ..writeByte(respCodeChannelMsgRecvV3)
           ..writeByte(snrByte & 0xFF)
@@ -1245,10 +1258,10 @@ class CompanionServer implements CompanionPushSink {
       return w.toBytes();
     }
     final prefix = msg.senderKey.length >= 6
-        ? msg.senderKey.sublist(0, 6)
+        ? msg.senderKey.sublist(0, keyPrefix6)
         : Uint8List.fromList(
             [...msg.senderKey, ...List.filled(6 - msg.senderKey.length, 0)]);
-    if (_appTargetVer >= 3) {
+    if (appTargetVer >= 3) {
       final w = BufferWriter()
         ..writeByte(respCodeContactMsgRecvV3)
         ..writeByte(snrByte & 0xFF)
@@ -1376,7 +1389,7 @@ class CompanionServer implements CompanionPushSink {
   void _cmdGetAdvertPath(Uint8List data) {
     if (data.length < 1 + pubKeySize) return sendErr(errCodeIllegalArg);
     final pubkey = data.sublist(1, 1 + pubKeySize);
-    final found = bridge.getAdvertPath(pubkey.sublist(0, 7));
+    final found = bridge.getAdvertPath(pubkey.sublist(0, advertPathPrefix7));
     if (found == null) return sendErr(errCodeNotFound);
     final pathByteLen = PathUtils.getByteLength(found.pathLen);
     final w = BufferWriter()
@@ -1441,7 +1454,7 @@ class CompanionServer implements CompanionPushSink {
       _sendFrame(Uint8List.fromList([
         pushCodeTelemetryResponse,
         0,
-        ...bridge.getPublicKey().sublist(0, 6),
+        ...bridge.getPublicKey().sublist(0, keyPrefix6),
         ...lpp,
       ]));
       return;

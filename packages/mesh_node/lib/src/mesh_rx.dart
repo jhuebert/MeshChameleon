@@ -389,7 +389,8 @@ class MeshRx {
       // The firmware ACKs signed messages with
       // sha256(plaintext up to the text end | self pubkey).
       ackBytes = Uint8List.fromList(CryptoUtils.sha256(
-          [...plaintext.sublist(0, end), ...identity.publicKey]).sublist(0, 4));
+              [...plaintext.sublist(0, end), ...identity.publicKey])
+          .sublist(0, keyPrefix4));
     } else {
       if (txtType == txtTypeCliCommand) {
         rawCommand = _readCStringBytes(plaintext, r.position);
@@ -1033,7 +1034,7 @@ class MeshRx {
   }) {
     if (data.length < 4) return;
     final tag = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
-    final prefix4 = Uint8List.fromList(senderPubkey.sublist(0, 4));
+    final prefix4 = Uint8List.fromList(senderPubkey.sublist(0, keyPrefix4));
     sessions.markActive(senderPubkey);
 
     final discoveryTarget = requests.discoveryTarget(tag);
@@ -1045,7 +1046,7 @@ class MeshRx {
         bytesEqual(discoveryTarget, senderPubkey)) {
       requests.removeDiscovery(tag);
       pushSink?.pushPathDiscoveryResponse(
-        Uint8List.fromList(senderPubkey.sublist(0, 6)),
+        Uint8List.fromList(senderPubkey.sublist(0, keyPrefix6)),
         outPathLen,
         outPath,
         inPathLen,
@@ -1060,7 +1061,7 @@ class MeshRx {
         data.length > 4) {
       requests.removeTelemetry(tag);
       pushSink?.pushTelemetryResponse(
-        Uint8List.fromList(senderPubkey.sublist(0, 6)),
+        Uint8List.fromList(senderPubkey.sublist(0, keyPrefix6)),
         Uint8List.fromList(data.sublist(4)),
       );
       return;
@@ -1084,7 +1085,7 @@ class MeshRx {
     if (requests.takeStatus(prefix4)) {
       if (data.length > 4) {
         pushSink?.pushStatusResponse(
-          Uint8List.fromList(senderPubkey.sublist(0, 6)),
+          Uint8List.fromList(senderPubkey.sublist(0, keyPrefix6)),
           Uint8List.fromList(data.sublist(4)),
         );
       }
@@ -1101,7 +1102,7 @@ class MeshRx {
   }
 
   void _handleLoginResponse(Uint8List senderPubkey, Uint8List data) {
-    final prefix6 = Uint8List.fromList(senderPubkey.sublist(0, 6));
+    final prefix6 = Uint8List.fromList(senderPubkey.sublist(0, keyPrefix6));
     // Legacy repeater login replies with the literal "OK".
     if (data.length >= 6 && data[4] == 0x4F && data[5] == 0x4B) {
       pushSink?.pushLoginSuccess(prefix6, legacy: true);

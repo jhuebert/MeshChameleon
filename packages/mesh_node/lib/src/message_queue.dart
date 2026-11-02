@@ -40,8 +40,4 @@ class MessageQueue {
       ..clear()
       ..addAll(messages);
   }
-
-  void removeFirst() {
-    if (_messages.isNotEmpty) _messages.removeAt(0);
-  }
 }

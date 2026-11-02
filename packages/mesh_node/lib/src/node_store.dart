@@ -8,6 +8,21 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 /// layout changes and migrate the previous released version.
 const int nodeStateSchemaVersion = 2;
 
+/// Thrown when a persisted [NodeState] declares a version this build cannot
+/// read. Never treat this as an empty first-run state: the file may contain a
+/// newer build's contacts, channels, and messages.
+class NodeStateVersionException implements Exception {
+  const NodeStateVersionException(this.version);
+
+  final Object? version;
+
+  String get message => 'unsupported node state version $version '
+      '(this build supports up to $nodeStateSchemaVersion)';
+
+  @override
+  String toString() => message;
+}
+
 /// Thrown when a candidate state would exceed the deterministic virtual quota.
 ///
 /// This is distinct from a physical filesystem failure, which propagates as a
@@ -85,6 +100,19 @@ class NodeState {
       );
 
   factory NodeState.fromJson(Map<String, Object?> json) {
+    final rawVersion = json['version'];
+    // Versionless state predates the explicit version field and is read as v1.
+    // v1 files may omit autoadd_max_hops, timezone_offset_hours, and
+    // custom_settings; _prefsFromJson and the collection readers default them.
+    final version = rawVersion == null
+        ? 1
+        : rawVersion is int
+            ? rawVersion
+            : null;
+    if (version == null || version < 1 || version > nodeStateSchemaVersion) {
+      throw NodeStateVersionException(rawVersion);
+    }
+
     final contacts = <Contact>[];
     for (final raw in _listOf(json['contacts'])) {
       final contact = _contactFromJson(_asMap(raw));
@@ -212,6 +240,10 @@ class JsonNodeStore implements NodeStore {
       final state = NodeState.fromJson(decoded.cast<String, Object?>());
       _lastBytes = state.storageBytes;
       return state;
+    } on NodeStateVersionException {
+      // A future schema is not corruption: surface it so the owner can keep
+      // the file and the user can recover with a newer build.
+      rethrow;
     } on FormatException {
       return null;
     } on FileSystemException {
@@ -301,7 +333,6 @@ Map<String, Object?> _prefsToJson(NodePrefs p) => <String, Object?>{
       'autoadd_config': p.autoaddConfig,
       'autoadd_max_hops': p.autoaddMaxHops,
       'timezone_offset_hours': p.timezoneOffsetHours,
-      'client_repeat': p.clientRepeat,
       'path_hash_mode': p.pathHashMode,
       'rx_delay_base_ms': p.rxDelayBaseMs,
       'airtime_factor_ms': p.airtimeFactorMs,
@@ -337,7 +368,6 @@ NodePrefs _prefsFromJson(Map<String, Object?> j) {
     autoaddMaxHops: _int(j['autoadd_max_hops'], defaults.autoaddMaxHops),
     timezoneOffsetHours:
         _int(j['timezone_offset_hours'], defaults.timezoneOffsetHours),
-    clientRepeat: _int(j['client_repeat'], defaults.clientRepeat),
     pathHashMode: _int(j['path_hash_mode'], defaults.pathHashMode),
     rxDelayBaseMs: _int(j['rx_delay_base_ms'], defaults.rxDelayBaseMs),
     airtimeFactorMs: _int(j['airtime_factor_ms'], defaults.airtimeFactorMs),
