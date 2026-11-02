@@ -8,6 +8,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Restored access to existing 0.2.0 identity keys by allowing the v10
+  secure-storage backend to import the old Jetpack Security entries on first
+  access.
 - Serialized identity-catalog mutations so concurrent create/rename/activate
   operations cannot drop a newer identity.
 - Kept unreferenced identity state directories for recovery instead of deleting
