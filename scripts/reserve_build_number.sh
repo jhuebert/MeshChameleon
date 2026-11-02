@@ -13,7 +13,7 @@ set -euo pipefail
 repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is not set}"
 variable="${BUILD_NUMBER_VARIABLE:-BUILD_NUMBER}"
 [[ -n "${GH_TOKEN:-}" ]] ||
-  { echo "reserve_build_number: GH_TOKEN is not set; configure the BUILD_NUMBER_TOKEN secret" >&2; exit 1; }
+  { echo "reserve_build_number: GH_TOKEN is not set; configure the REPO_AUTOMATION_TOKEN secret" >&2; exit 1; }
 
 die() {
   echo "reserve_build_number: $*" >&2
