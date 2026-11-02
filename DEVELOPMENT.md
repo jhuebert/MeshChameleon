@@ -41,6 +41,14 @@ app/                Flutter app: UI, foreground service, secure storage
 app/integration_test/  opt-in hardware tests (see its README)
 ```
 
+Inside `mesh_node/lib/src/`, `mesh_node.dart` is the companion facade and
+lifecycle owner. Inbound packets are routed by `mesh_rx.dart`, outbound packet
+construction lives in `message_sender.dart`, and `physical_radio.dart` owns the
+serialised radio configuration/cache. Smaller collaborators own contacts,
+advert paths, the inbound queue, request tags, ACKs, connections, flood scope,
+raw transport, and state persistence. Keep protocol behavior changes in the
+owning collaborator and add focused tests for that collaborator.
+
 ## Running an end-to-end test without hardware
 
 The pure-Dart packages include a stock-companion simulator (`FakeDeviceLink`)
