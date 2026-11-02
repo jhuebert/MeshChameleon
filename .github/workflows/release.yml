@@ -1,7 +1,7 @@
 name: Release
 
 # Manual, signed release: bump, verify, fast-forward main, tag, publish.
-# Prerequisites (docs/RELEASE_PLAN.md 2.1-2.2): an upload key and an app signing
+# Prerequisites: an upload key and an app signing
 # key, plus the `release` environment secrets:
 #   UPLOAD_KEYSTORE_BASE64, UPLOAD_KEYSTORE_PASSWORD,
 #   UPLOAD_KEY_ALIAS, UPLOAD_KEY_PASSWORD
@@ -352,12 +352,7 @@ jobs:
           )
 
       - name: Check store assets
-        run: |
-          if [[ -x scripts/check_store_assets.sh ]]; then
-            ./scripts/check_store_assets.sh
-          else
-            echo "::notice::scripts/check_store_assets.sh is not present yet; skipping"
-          fi
+        run: ./scripts/check_store_assets.sh
 
       - name: Upload dry-run artifacts
         if: ${{ inputs.dry_run }}

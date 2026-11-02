@@ -217,12 +217,11 @@ class RawRxFrame {
   /// Parse `[0x88][snr*4][rssi][raw...]`.
   static RawRxFrame? parse(Uint8List frame) {
     if (frame.length < 4 || frame[0] != pushCodeLogRxData) return null;
-    final snrByte = frame[1] >= 0x80 ? frame[1] - 0x100 : frame[1];
-    final rssiByte = frame[2] >= 0x80 ? frame[2] - 0x100 : frame[2];
+    final reader = BufferReader(frame)..skipBytes(1);
     return RawRxFrame(
-      snr: snrByte / 4.0,
-      rssi: rssiByte,
-      raw: Uint8List.fromList(frame.sublist(3)),
+      snr: reader.readInt8() / 4.0,
+      rssi: reader.readInt8(),
+      raw: reader.readRemainingBytes(),
     );
   }
 }

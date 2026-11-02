@@ -9,7 +9,6 @@ class BufferReader {
 
   final Uint8List _buffer;
   int _pointer = 0;
-  int _lastPointer = 0;
 
   int get position => _pointer;
   int get remaining => _buffer.length - _pointer;
@@ -17,7 +16,6 @@ class BufferReader {
   int readByte() => readBytes(1)[0];
 
   Uint8List readBytes(int count) {
-    _lastPointer = _pointer;
     if (count < 0 || _pointer + count > _buffer.length) {
       throw RangeError(
         'Attempted to read $count bytes at offset $_pointer, but only '
@@ -30,7 +28,6 @@ class BufferReader {
   }
 
   void skipBytes(int count) {
-    _lastPointer = _pointer;
     if (count < 0 || _pointer + count > _buffer.length) {
       throw RangeError('Attempted to skip $count bytes at offset $_pointer');
     }
@@ -38,8 +35,6 @@ class BufferReader {
   }
 
   Uint8List readRemainingBytes() => readBytes(remaining);
-
-  int readUInt8() => readBytes(1)[0];
 
   int readInt8() {
     final b = readByte();
@@ -66,8 +61,6 @@ class BufferReader {
     return v >= 0x80000000 ? v - 0x100000000 : v;
   }
 
-  void rewind() => _pointer = _lastPointer;
-
   /// Read a NUL-terminated UTF-8 string, consuming up to [maxLength] bytes.
   String readCString({int maxLength = -1}) {
     final maxLen = maxLength >= 0 ? maxLength : remaining;
@@ -79,7 +72,7 @@ class BufferReader {
       value.add(byte);
       counter++;
     }
-    return _tryUtf8(value);
+    return utf8.decode(value, allowMalformed: true);
   }
 }
 
@@ -117,19 +110,11 @@ class BufferWriter {
     writeBytes(bytes);
   }
 
-  void writeString(String string) =>
-      writeBytes(utf8.encode(string));
+  void writeString(String string) => writeBytes(utf8.encode(string));
 
   /// Write a UTF-8 string into exactly [maxLength] bytes, NUL padded.
-  void writeCString(String string, int maxLength) {
-    final bytes = Uint8List(maxLength);
-    final encoded = utf8.encode(string);
-    final limit = encoded.length < maxLength ? encoded.length : maxLength;
-    for (var i = 0; i < limit; i++) {
-      bytes[i] = encoded[i];
-    }
-    writeBytes(bytes);
-  }
+  void writeCString(String string, int maxLength) =>
+      writeBytesPadded(utf8.encode(string), maxLength);
 
   /// Write [bytes] into exactly [totalLength] bytes, zero padded/truncated.
   void writeBytesPadded(List<int> bytes, int totalLength) {
@@ -142,12 +127,13 @@ class BufferWriter {
   }
 }
 
-String _tryUtf8(List<int> value) {
-  try {
-    return utf8.decode(value, allowMalformed: true);
-  } catch (_) {
-    return String.fromCharCodes(value);
+/// Whether two byte sequences have identical contents.
+bool bytesEqual(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
   }
+  return true;
 }
 
 /// Convert a lowercase/uppercase hex string to bytes.

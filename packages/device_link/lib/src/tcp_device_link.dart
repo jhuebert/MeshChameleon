@@ -98,29 +98,28 @@ class TcpDeviceLink implements RadioLink {
 
   void _onData(Uint8List data) {
     for (final frame in _codec.ingest(data)) {
-      final frame_ = frame;
-      if (frame_.isEmpty) continue;
-      if (frame_[0] == pushCodeLogRxData) {
-        final raw = RawRxFrame.parse(frame_);
+      if (frame.isEmpty) continue;
+      if (frame[0] == pushCodeLogRxData) {
+        final raw = RawRxFrame.parse(frame);
         if (raw != null) _rawRxListener?.call(raw.snr, raw.rssi, raw.raw);
         continue;
       }
       final pending = _pending;
       if (pending != null && !pending.isCompleted) {
-        if (frame_[0] == respCodeErr) {
+        if (frame[0] == respCodeErr) {
           _pending = null;
-          if (frame_.length < 2) {
+          if (frame.length < 2) {
             pending.completeError(
               const DeviceCommandError.malformed(
                 message: 'truncated ERR reply from device',
               ),
             );
           } else {
-            pending.completeError(DeviceCommandError.device(frame_[1]));
+            pending.completeError(DeviceCommandError.device(frame[1]));
           }
-        } else if (_expected.contains(frame_[0])) {
+        } else if (_expected.contains(frame[0])) {
           _pending = null;
-          pending.complete(frame_);
+          pending.complete(frame);
         }
       }
     }
@@ -145,15 +144,19 @@ class TcpDeviceLink implements RadioLink {
     return completer.future;
   }
 
+  Socket _requireSocket() {
+    final socket = _socket;
+    if (socket == null) {
+      throw const DeviceCommandError.disconnected(
+        message: 'device link not connected',
+      );
+    }
+    return socket;
+  }
+
   Future<Uint8List> _request(Uint8List frame, Set<int> expected) {
     return _runExclusive(() async {
-      final socket = _socket;
-      if (socket == null) {
-        throw const DeviceCommandError.disconnected(
-          message: 'device link not connected',
-        );
-      }
-      if (_pending != null) throw StateError('request already in flight');
+      final socket = _requireSocket();
       final completer = Completer<Uint8List>();
       _pending = completer;
       _expected = expected;
@@ -183,7 +186,7 @@ class TcpDeviceLink implements RadioLink {
   Future<void> _requestOk(Uint8List frame) async {
     final reply = await _request(
       frame,
-      {respCodeOk, respCodeErr, respCodeDisabled},
+      {respCodeOk, respCodeDisabled},
     );
     if (reply.isEmpty) {
       throw const DeviceCommandError.malformed(
@@ -206,7 +209,7 @@ class TcpDeviceLink implements RadioLink {
     // cannot be mistaken for another in-flight request's reply.
     await _request(
       DeviceFrames.sendRawPacket(packet, priority),
-      {respCodeOk, respCodeErr},
+      {respCodeOk},
     );
   }
 
@@ -214,7 +217,7 @@ class TcpDeviceLink implements RadioLink {
   Future<DeviceInfo> deviceInfo() async {
     final frame = await _request(
       DeviceFrames.deviceQuery(),
-      {respCodeDeviceInfo, respCodeErr},
+      {respCodeDeviceInfo},
     );
     return parseDeviceInfo(frame);
   }
@@ -226,7 +229,7 @@ class TcpDeviceLink implements RadioLink {
   Future<RadioStats> radioStats() async {
     final frame = await _request(
       DeviceFrames.getStats(statsTypeRadio),
-      {respCodeStats, respCodeErr},
+      {respCodeStats},
     );
     final stats = RadioStats.parse(frame);
     if (stats == null) {
@@ -240,8 +243,7 @@ class TcpDeviceLink implements RadioLink {
   /// Read the full device SELF_INFO (radio params + name + location).
   @override
   Future<ParsedSelfInfo> selfInfo() async {
-    final frame = await _request(
-        DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
+    final frame = await _request(DeviceFrames.appStart(), {respCodeSelfInfo});
     final info = ParsedSelfInfo.parse(frame);
     if (info == null) {
       throw const DeviceCommandError.malformed(
@@ -278,12 +280,7 @@ class TcpDeviceLink implements RadioLink {
   /// firmware reply (reboot/poweroff do not send one).
   Future<void> _dispatchLifecycle(Uint8List payload, String action) {
     return _runExclusive(() async {
-      final socket = _socket;
-      if (socket == null) {
-        throw const DeviceCommandError.disconnected(
-          message: 'device link not connected',
-        );
-      }
+      final socket = _requireSocket();
       try {
         socket.add(
           _codec.encodeFrame(payload, prefix: frameInboundPrefix),
@@ -301,7 +298,7 @@ class TcpDeviceLink implements RadioLink {
   Future<TuningParams> tuningParams() async {
     final frame = await _request(
       DeviceFrames.getTuningParams(),
-      {respCodeTuningParams, respCodeErr},
+      {respCodeTuningParams},
     );
     final params = TuningParams.parse(frame);
     if (params == null) {
@@ -327,7 +324,7 @@ class TcpDeviceLink implements RadioLink {
     try {
       final frame = await _request(
         DeviceFrames.getBattAndStorage(),
-        {respCodeBattAndStorage, respCodeErr},
+        {respCodeBattAndStorage},
       );
       final r = BufferReader(frame)..skipBytes(1);
       final mv = r.readUInt16Le();
@@ -346,7 +343,7 @@ class TcpDeviceLink implements RadioLink {
   Future<String> runCliCommand(String command) async {
     final frame = await _request(
       DeviceFrames.runCliCommand(command),
-      {respCodeCliReply, respCodeDisabled, respCodeErr},
+      {respCodeCliReply, respCodeDisabled},
     );
     if (frame.isNotEmpty && frame[0] == respCodeDisabled) {
       throw const DeviceCommandError.disabled();
@@ -358,7 +355,7 @@ class TcpDeviceLink implements RadioLink {
   Future<Uint8List> getAllowedRepeatFreq() async {
     final frame = await _request(
       DeviceFrames.getAllowedRepeatFreq(),
-      {respCodeAllowedRepeatFreq, respCodeErr},
+      {respCodeAllowedRepeatFreq},
     );
     if (frame.isEmpty || frame[0] != respCodeAllowedRepeatFreq) {
       throw const DeviceCommandError.malformed(
@@ -386,10 +383,11 @@ class TcpDeviceLink implements RadioLink {
           .trim();
     }
 
+    const defaults = DeviceInfo();
     return DeviceInfo(
       firmwareVerCode: fw,
-      maxContacts: maxContacts > 0 ? maxContacts : 1000,
-      maxChannels: maxChannels > 0 ? maxChannels : 8,
+      maxContacts: maxContacts > 0 ? maxContacts : defaults.maxContacts,
+      maxChannels: maxChannels > 0 ? maxChannels : defaults.maxChannels,
       manufacturer: cstring(20, 40),
       version: cstring(60, 20),
       clientRepeat: frame.length >= 81 ? frame[80] : 0,

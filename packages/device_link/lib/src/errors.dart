@@ -8,9 +8,6 @@ enum DeviceCommandErrorKind {
   /// The device replied `RESP_CODE_DISABLED`.
   disabled,
 
-  /// The physical protocol version does not support the operation.
-  unsupported,
-
   /// No reply arrived before the link timeout.
   timeout,
 
@@ -35,9 +32,6 @@ class DeviceCommandError implements Exception {
 
   const DeviceCommandError.disabled({String? message})
       : this(DeviceCommandErrorKind.disabled, message: message);
-
-  const DeviceCommandError.unsupported({String? message})
-      : this(DeviceCommandErrorKind.unsupported, message: message);
 
   const DeviceCommandError.timeout({String? message})
       : this(DeviceCommandErrorKind.timeout, message: message);
@@ -67,12 +61,11 @@ class DeviceCommandError implements Exception {
   /// Companion protocol error code corresponding to this failure.
   int get clientErrorCode => switch (kind) {
         DeviceCommandErrorKind.device => code ?? errCodeBadState,
-        DeviceCommandErrorKind.disabled => 15,
-        DeviceCommandErrorKind.unsupported => 1,
+        DeviceCommandErrorKind.disabled => respCodeDisabled,
         DeviceCommandErrorKind.timeout ||
         DeviceCommandErrorKind.disconnected ||
         DeviceCommandErrorKind.malformed =>
-          4,
+          errCodeBadState,
       };
 
   @override

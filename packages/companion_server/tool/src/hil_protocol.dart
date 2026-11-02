@@ -41,13 +41,8 @@ class HilConnection {
   final List<Completer<HilFrame>> _waiters = <Completer<HilFrame>>[];
   final List<HilFrame> log = <HilFrame>[];
   Socket? _socket;
-  int appTargetVer = appProtocolVersion;
   DeviceInfo? deviceInfo;
   Uint8List? publicKey;
-
-  void Function(HilFrame frame)? onFrame;
-
-  bool get connected => _socket != null;
 
   Future<void> connect() async {
     final socket =
@@ -59,7 +54,6 @@ class HilConnection {
       for (final payload in _codec.ingest(data)) {
         final frame = HilFrame(payload);
         log.add(frame);
-        onFrame?.call(frame);
         if (_waiters.isNotEmpty) {
           _waiters.removeAt(0).complete(frame);
         } else {
@@ -103,8 +97,6 @@ class HilConnection {
     socket.add(bytes);
   }
 
-  Future<void> flush() async => _socket?.flush();
-
   Future<HilFrame> next({
     Duration timeout = const Duration(seconds: 5),
     bool includePushes = false,
@@ -127,18 +119,6 @@ class HilConnection {
       }
       if (frame.isPush && !includePushes) continue;
       return frame;
-    }
-  }
-
-  /// Drop any already-buffered replies/pushes before a new command.
-  Future<void> quiesce(
-      {Duration quiet = const Duration(milliseconds: 40)}) async {
-    while (true) {
-      try {
-        await next(timeout: quiet, includePushes: true);
-      } on TimeoutException {
-        return;
-      }
     }
   }
 
@@ -174,14 +154,7 @@ class HilConnection {
     return next(timeout: timeout);
   }
 
-  Future<HilFrame> requestHex(
-    String hex, {
-    Duration timeout = const Duration(seconds: 5),
-  }) =>
-      request(parseHex(hex), timeout: timeout);
-
   Future<void> handshake({int appVersion = appProtocolVersion}) async {
-    appTargetVer = appVersion;
     final info = await request([cmdDeviceQuery, appVersion]);
     deviceInfo = TcpDeviceInfoParser.parse(info.payload);
     final self = await request([
@@ -299,5 +272,3 @@ Map<String, Object?> parseQueuedMessage(Uint8List f) {
   }
   return {'kind': 'other', 'code': code, 'len': f.length};
 }
-
-String jsonLine(Map<String, Object?> value) => jsonEncode(value);

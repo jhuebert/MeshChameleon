@@ -6,6 +6,8 @@ import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
 
+import 'json_file.dart';
+
 /// Current on-disk identity index schema.
 ///
 /// Version 2 adds the per-identity `enabled` flag. Version 1 catalogs are read
@@ -110,13 +112,16 @@ class IdentityIndex {
   final String? activeId;
   final List<IdentityRecord> identities;
 
-  IdentityRecord? get activeRecord {
-    final id = activeId;
-    if (id == null) return null;
+  IdentityRecord? recordById(String id) {
     for (final record in identities) {
       if (record.id == id) return record;
     }
     return null;
+  }
+
+  IdentityRecord? get activeRecord {
+    final id = activeId;
+    return id == null ? null : recordById(id);
   }
 
   IdentityIndex copyWith({
@@ -198,14 +203,13 @@ class IdentityIndexStore {
   final File file;
 
   File get _backupFile => File('${file.path}.bak');
-  File get _tempFile => File('${file.path}.tmp');
-  Future<void> _tail = Future<void>.value();
+  late final JsonFile _json = JsonFile(file);
 
   Future<IdentityIndex?> load() async {
-    final primary = await _read(file);
+    final primary = await _readOrNull(file);
     if (primary != null) return primary;
     if (await _backupFile.exists()) {
-      final backup = await _read(_backupFile);
+      final backup = await _readOrNull(_backupFile);
       if (backup != null) return backup;
     }
     if (await file.exists() || await _backupFile.exists()) {
@@ -214,6 +218,15 @@ class IdentityIndexStore {
       );
     }
     return null;
+  }
+
+  Future<IdentityIndex?> _readOrNull(File source) async {
+    try {
+      return await _read(source);
+    } on IdentityIndexException {
+      // A semantically invalid primary must still fall back to the backup.
+      return null;
+    }
   }
 
   Future<IdentityIndex?> _read(File source) async {
@@ -233,20 +246,10 @@ class IdentityIndexStore {
     }
   }
 
-  Future<void> save(IdentityIndex index) {
-    // Serialise writes so two catalog mutations can never share the temp file.
-    final write = _tail.then(
-      (_) => _write(index),
-      onError: (Object _) => _write(index),
-    );
-    _tail = write.then((_) {}, onError: (Object _) {});
-    return write;
-  }
+  Future<void> save(IdentityIndex index) =>
+      _json.write(index.toJson(), beforeRename: _rotateBackup);
 
-  Future<void> _write(IdentityIndex index) async {
-    await file.parent.create(recursive: true);
-    final encoded = jsonEncode(index.toJson());
-    await _tempFile.writeAsString(encoded, flush: true);
+  Future<void> _rotateBackup() async {
     // Rotate only a readable catalog into the backup slot. A corrupt primary
     // must never overwrite the last good recovery copy.
     var primaryReadable = false;
@@ -255,15 +258,13 @@ class IdentityIndexStore {
     } on IdentityIndexException {
       primaryReadable = false;
     }
-    if (primaryReadable) {
-      try {
-        await file.copy(_backupFile.path);
-      } catch (_) {
-        // A backup failure must not prevent the authoritative save. The next
-        // successful save retries it.
-      }
+    if (!primaryReadable) return;
+    try {
+      await file.copy(_backupFile.path);
+    } catch (_) {
+      // A backup failure must not prevent the authoritative save. The next
+      // successful save retries it.
     }
-    await _tempFile.rename(file.path);
   }
 
   /// New stable 16-byte hex identity id, avoiding [taken].

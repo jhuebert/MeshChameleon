@@ -13,7 +13,7 @@ set(APPLICATION_ID "org.huebert.meshchameleon")
 # versions of CMake.
 cmake_policy(SET CMP0063 NEW)
 
-# flutter_secure_storage_linux 1.2.x bundles an old nlohmann/json, whose literal
+# flutter_secure_storage_linux 3.x bundles nlohmann/json 3.11.2, whose literal
 # operators trip -Wdeprecated-literal-operator on clang >= 20. Flutter's
 # APPLY_STANDARD_SETTINGS compiles plugins with -Werror, so the warning fails the
 # build. Drop this once that plugin ships a newer json.hpp.

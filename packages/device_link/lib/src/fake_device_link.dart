@@ -10,19 +10,11 @@ import 'radio_link.dart';
 /// one another's transmissions, modelling over-air delivery.
 class FakeRadioBus {
   final List<FakeDeviceLink> _links = [];
-  final List<void Function(FakeDeviceLink from, Uint8List packet)> _taps = [];
 
   void attach(FakeDeviceLink link) => _links.add(link);
   void detach(FakeDeviceLink link) => _links.remove(link);
 
-  /// Observe every transmission (for assertions in tests).
-  void addTap(void Function(FakeDeviceLink from, Uint8List packet) tap) =>
-      _taps.add(tap);
-
   void transmit(FakeDeviceLink from, Uint8List packet, double snr, int rssi) {
-    for (final tap in _taps) {
-      tap(from, packet);
-    }
     for (final link in _links) {
       if (identical(link, from)) continue;
       link.deliver(snr, rssi, _consumeDirectRoute(packet));
@@ -42,10 +34,9 @@ class FakeRadioBus {
     }
     final hashSize = packet.pathHashSize;
     final count = packet.pathHashCount - 1;
-    final base = packet.pathLenByte & 0xC0;
     packet
       ..path = Uint8List.fromList(packet.path.sublist(hashSize))
-      ..pathLenByte = base | count;
+      ..pathLenByte = PathUtils.encodePathLen(hashSize, count);
     return packet.writeTo();
   }
 }
@@ -72,13 +63,11 @@ class FakeDeviceLink implements RadioLink {
     this.snr = 6.0,
     this.rssi = -70,
     this.bus,
-    this.echoSelf = false,
     this.deviceNodeName = 'Fake companion',
     this.maxTxPower = 22,
     this.noiseFloorDbm = -110,
     this.connectFailures = 0,
     this.rebootDisconnects = false,
-    this.shutdownDisconnects = true,
     Uint8List? allowedRepeatFreq,
   }) : allowedRepeatFreq = allowedRepeatFreq ?? Uint8List(0);
 
@@ -94,14 +83,9 @@ class FakeDeviceLink implements RadioLink {
   /// Model the device dropping the link while rebooting.
   final bool rebootDisconnects;
 
-  /// Model the device dropping the link after a successful poweroff.
-  final bool shutdownDisconnects;
-
   /// Raw `CMD_GET_ALLOWED_REPEAT_FREQ` ranges returned by this simulator.
   final Uint8List allowedRepeatFreq;
 
-  /// When true, the simulator also loops the transmitted frame back to itself.
-  final bool echoSelf;
   final String deviceNodeName;
 
   /// Maximum TX power reported by the simulated device's `SELF_INFO`.
@@ -146,12 +130,9 @@ class FakeDeviceLink implements RadioLink {
   Completer<void>? txPowerAck;
   Completer<void>? tuningAck;
   Completer<void>? selfInfoAck;
-  Completer<void>? deviceInfoAck;
-  Completer<void>? tuningParamsAck;
 
   /// Test hooks that make the corresponding operation fail.
   DeviceCommandError? radioParamsError;
-  DeviceCommandError? txPowerError;
   DeviceCommandError? tuningError;
   DeviceCommandError? selfInfoError;
   DeviceCommandError? deviceInfoError;
@@ -162,6 +143,13 @@ class FakeDeviceLink implements RadioLink {
 
   Future<void> _wait(Completer<void>? ack) async {
     if (ack != null) await ack.future;
+  }
+
+  void _dropLink() {
+    if (_state == LinkState.disconnected) return;
+    bus?.detach(this);
+    _state = LinkState.disconnected;
+    _stateController.add(_state);
   }
 
   @override
@@ -186,10 +174,7 @@ class FakeDeviceLink implements RadioLink {
   @override
   Future<void> disconnect() async {
     calls.add('disconnect');
-    if (_state == LinkState.disconnected) return;
-    bus?.detach(this);
-    _state = LinkState.disconnected;
-    _stateController.add(_state);
+    _dropLink();
   }
 
   @override
@@ -205,7 +190,6 @@ class FakeDeviceLink implements RadioLink {
     transmitted.add(Uint8List.fromList(packet));
     transmitPriorities.add(priority);
     bus?.transmit(this, packet, snr, rssi);
-    if (echoSelf) deliver(snr, rssi, packet);
     await _wait(rawTxAck);
   }
 
@@ -218,7 +202,6 @@ class FakeDeviceLink implements RadioLink {
   Future<DeviceInfo> deviceInfo() async {
     calls.add('deviceInfo');
     if (deviceInfoError != null) throw deviceInfoError!;
-    await _wait(deviceInfoAck);
     return deviceInfo_;
   }
 
@@ -269,7 +252,6 @@ class FakeDeviceLink implements RadioLink {
   @override
   Future<void> setTxPower(int dbm) async {
     calls.add('setTxPower');
-    if (txPowerError != null) throw txPowerError!;
     await _wait(txPowerAck);
     _currentParams = RadioParams(
       frequencyHz: _currentParams.frequencyHz,
@@ -285,11 +267,7 @@ class FakeDeviceLink implements RadioLink {
     calls.add('reboot');
     if (rebootError != null) throw rebootError!;
     rebootRequests++;
-    if (rebootDisconnects && _state == LinkState.connected) {
-      bus?.detach(this);
-      _state = LinkState.disconnected;
-      _stateController.add(_state);
-    }
+    if (rebootDisconnects) _dropLink();
   }
 
   @override
@@ -298,18 +276,13 @@ class FakeDeviceLink implements RadioLink {
     cliCommands.add('poweroff');
     if (shutdownError != null) throw shutdownError!;
     shutdownRequests++;
-    if (shutdownDisconnects && _state == LinkState.connected) {
-      bus?.detach(this);
-      _state = LinkState.disconnected;
-      _stateController.add(_state);
-    }
+    _dropLink();
   }
 
   @override
   Future<TuningParams> tuningParams() async {
     calls.add('tuningParams');
     if (tuningParamsError != null) throw tuningParamsError!;
-    await _wait(tuningParamsAck);
     return _tuning;
   }
 

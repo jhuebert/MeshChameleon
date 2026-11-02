@@ -23,30 +23,29 @@ class CryptoUtils {
       Uint8List.fromList(crypto.Hmac(crypto.sha256, key).convert(data).bytes);
 
   /// AES-128 ECB encrypt, zero-padding to a 16-byte boundary.
-  static Uint8List aesEcbEncrypt(List<int> key, List<int> data) {
+  static Uint8List aesEcbEncrypt(List<int> key, List<int> data) =>
+      _aesEcb(true, key, data);
+
+  /// AES-128 ECB decrypt, returning the first [ciphertext.length] bytes.
+  static Uint8List aesEcbDecrypt(List<int> key, List<int> ciphertext) =>
+      Uint8List.sublistView(
+        _aesEcb(false, key, ciphertext),
+        0,
+        ciphertext.length,
+      );
+
+  static Uint8List _aesEcb(bool encrypt, List<int> key, List<int> data) {
     final cipher = pc.ECBBlockCipher(pc.AESEngine())
-      ..init(true, pc.KeyParameter(Uint8List.fromList(key)));
-    final padLen = (cipherBlockSize - (data.length % cipherBlockSize)) % cipherBlockSize;
-    final padded = Uint8List.fromList([...data, ...List<int>.filled(padLen, 0)]);
+      ..init(encrypt, pc.KeyParameter(Uint8List.fromList(key)));
+    final padLen =
+        (cipherBlockSize - (data.length % cipherBlockSize)) % cipherBlockSize;
+    final padded =
+        Uint8List.fromList([...data, ...List<int>.filled(padLen, 0)]);
     final out = Uint8List(padded.length);
     for (var i = 0; i < padded.length; i += cipherBlockSize) {
       cipher.processBlock(padded, i, out, i);
     }
     return out;
-  }
-
-  /// AES-128 ECB decrypt, returning the first [ciphertext.length] bytes.
-  static Uint8List aesEcbDecrypt(List<int> key, List<int> ciphertext) {
-    final cipher = pc.ECBBlockCipher(pc.AESEngine())
-      ..init(false, pc.KeyParameter(Uint8List.fromList(key)));
-    final origLen = ciphertext.length;
-    final padLen = (cipherBlockSize - (origLen % cipherBlockSize)) % cipherBlockSize;
-    final padded = Uint8List.fromList([...ciphertext, ...List<int>.filled(padLen, 0)]);
-    final out = Uint8List(padded.length);
-    for (var i = 0; i < padded.length; i += cipherBlockSize) {
-      cipher.processBlock(padded, i, out, i);
-    }
-    return Uint8List.sublistView(out, 0, origLen);
   }
 
   /// `mac(2) || AES-ECB(plaintext)`.
@@ -73,7 +72,8 @@ class CryptoUtils {
     }
     final mac = data.sublist(0, cipherMacSize);
     final ciphertext = data.sublist(cipherMacSize);
-    final expected = hmacSha256(sharedSecret, ciphertext).sublist(0, cipherMacSize);
+    final expected =
+        hmacSha256(sharedSecret, ciphertext).sublist(0, cipherMacSize);
     var diff = 0;
     for (var i = 0; i < cipherMacSize; i++) {
       diff |= mac[i] ^ expected[i];
@@ -168,15 +168,6 @@ class CryptoUtils {
     ]);
   }
 
-  /// X25519 public key derived from a (clamped) private scalar.
-  static Future<Uint8List> x25519PublicFromPrivate(List<int> privateScalar) async {
-    final keyPair =
-        await c.X25519().newKeyPairFromSeed(Uint8List.fromList(privateScalar));
-    return Uint8List.fromList(
-      (await keyPair.extractPublicKey()).bytes,
-    );
-  }
-
   /// X25519 ECDH shared secret with a peer Ed25519 public key.
   static Future<Uint8List> x25519SharedSecret(
     List<int> privateScalar,
@@ -186,9 +177,9 @@ class CryptoUtils {
     final keyPair =
         await c.X25519().newKeyPairFromSeed(Uint8List.fromList(privateScalar));
     final shared = await c.X25519().sharedSecretKey(
-      keyPair: keyPair,
-      remotePublicKey: c.SimplePublicKey(peerX, type: c.KeyPairType.x25519),
-    );
+          keyPair: keyPair,
+          remotePublicKey: c.SimplePublicKey(peerX, type: c.KeyPairType.x25519),
+        );
     return Uint8List.fromList(await shared.extractBytes());
   }
 
@@ -218,8 +209,8 @@ class CryptoUtils {
     List<int> expanded64,
     List<int> message,
   ) {
-    if (expanded64.length != 64) {
-      throw ArgumentError('expanded key must be 64 bytes');
+    if (expanded64.length != privateKeySize) {
+      throw ArgumentError('expanded key must be $privateKeySize bytes');
     }
     final scalar = expanded64.sublist(0, 32);
     final prefix = expanded64.sublist(32, 64);
@@ -303,8 +294,8 @@ class CryptoUtils {
 
   static BigInt _mod(BigInt a) => ((a % _p25519) + _p25519) % _p25519;
 
-  static BigInt get _d25519 => (BigInt.from(-121665) *
-          BigInt.from(121666).modInverse(_p25519)) %
+  static BigInt get _d25519 =>
+      (BigInt.from(-121665) * BigInt.from(121666).modInverse(_p25519)) %
       _p25519;
 
   static Uint8List _bigIntTo32Le(BigInt value) {
@@ -316,10 +307,6 @@ class CryptoUtils {
     }
     return out;
   }
-
-  // Retained for callers that need the raw curve constants.
-  static BigInt get fieldPrime => _p25519;
-  static BigInt get edwardsD => _d25519;
 
   /// Base64 decode helper for channel PSKs.
   static Uint8List base64ToBytes(String value) =>

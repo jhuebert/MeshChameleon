@@ -378,7 +378,8 @@ class _IdentityCard extends StatelessWidget {
         ),
         title: Row(
           children: [
-            Flexible(child: Text(summary.name, overflow: TextOverflow.ellipsis)),
+            Flexible(
+                child: Text(summary.name, overflow: TextOverflow.ellipsis)),
             if (summary.active) ...[
               const SizedBox(width: 8),
               Container(
@@ -416,14 +417,9 @@ class _IdentityCard extends StatelessWidget {
                 '${summary.queuedChannel} channel messages queued',
               ),
             ),
-            if (!summary.keyAvailable)
+            if (!summary.keyAvailable || summary.unavailableReason != null)
               Text(
                 summary.unavailableReason ?? 'Key unavailable',
-                style: TextStyle(color: theme.colorScheme.error),
-              )
-            else if (summary.unavailableReason != null)
-              Text(
-                summary.unavailableReason!,
                 style: TextStyle(color: theme.colorScheme.error),
               ),
           ],

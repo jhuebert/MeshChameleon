@@ -9,11 +9,11 @@ import 'screens/diagnostics_screen.dart';
 import 'screens/identities_screen.dart';
 import 'screens/log_screen.dart';
 import 'services/build_info.dart';
-import 'services/foreground_service.dart';
+import 'services/network_connection_store.dart';
+import 'widgets/device_target_icon.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ForegroundService().initialize();
   final buildInfo = await BuildInfo.load();
   runApp(ProxyApp(buildInfo: buildInfo));
 }
@@ -94,7 +94,11 @@ class HomeScreen extends StatelessWidget {
           const SizedBox(height: 12),
           Card(
             child: ListTile(
-              leading: Icon(app.deviceConnected ? Icons.bluetooth_connected : Icons.bluetooth),
+              leading: Icon(
+                deviceTargetIcon(
+                  app.deviceConnected ? app.lastSession?.kind : null,
+                ),
+              ),
               title: const Text('Device link'),
               subtitle: Text(app.deviceLabel ?? 'Not connected'),
               trailing: app.deviceConnected
@@ -103,8 +107,8 @@ class HomeScreen extends StatelessWidget {
                       child: const Text('Disconnect'),
                     )
                   : const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const ConnectScreen())),
+              onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ConnectScreen())),
             ),
           ),
           Card(
@@ -153,8 +157,7 @@ class HomeScreen extends StatelessWidget {
               subtitle: const Text(
                   'Reconnect the last device and restart the proxy on open'),
               value: app.autoResume,
-              onChanged:
-                  app.busy ? null : (value) => app.setAutoResume(value),
+              onChanged: app.busy ? null : (value) => app.setAutoResume(value),
             ),
           ),
           const _BatteryOptimizationCard(),
@@ -233,7 +236,9 @@ class _ProxyPortCardState extends State<_ProxyPortCard> {
   Future<void> _save() async {
     final app = context.read<AppState>();
     final value = int.tryParse(_controller.text.trim());
-    if (value == null || !await app.setProxyPort(value)) {
+    if (value == null ||
+        !isValidTcpPort(value) ||
+        !await app.setProxyPort(value)) {
       _controller.text = app.port.toString();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -390,7 +395,8 @@ class _StatusCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text('Identities: ${app.identities.length}'
                 ' (${app.identities.where((summary) => summary.live).length} live)'),
-            Text('Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
+            Text(
+                'Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
             Text('Proxy: ${app.proxyStatus.name}'
                 '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),
           ],

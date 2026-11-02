@@ -11,6 +11,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The simulated companion is available in release builds.
 - **Backup & restore** now opens from the home screen instead of Information.
 - Identity menus use short action labels for unavailable choices.
+- Identity keys use the `flutter_secure_storage` v10 cipher backend
+  (AES-256-GCM with RSA-OAEP key wrapping); existing v9 keys migrate on first
+  access.
+- The foreground-service, package-info, and secure-storage plugins now support
+  Flutter's built-in Kotlin.
+- Saved-session and connection-history files are written atomically.
 
 ## [0.2.0] - 2026-11-01
 

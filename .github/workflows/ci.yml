@@ -54,14 +54,12 @@ jobs:
       - name: Analyze and test
         run: ./scripts/check.sh
 
-      # When app/pubspec.lock is tracked (see docs/RELEASE_PLAN.md 1.4), this
-      # fails if dependency resolution rewrote it. It is a no-op while the
-      # lockfile is still git-ignored.
+      # When app/pubspec.lock is tracked, this fails if dependency
+      # resolution rewrote it. It is a no-op while the lockfile is ignored.
       - name: Check the app lockfile is unchanged
         run: git diff --exit-code -- app/pubspec.lock
 
       - name: Check store assets
-        if: hashFiles('scripts/check_store_assets.sh') != ''
         run: ./scripts/check_store_assets.sh
 
       - name: Build debug APK

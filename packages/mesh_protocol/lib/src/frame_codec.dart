@@ -57,11 +57,11 @@ class SerialFrameCodec {
         'payload exceeds $maxPayloadLength bytes',
       );
     }
-    final out = Uint8List(3 + payload.length);
+    final out = Uint8List(serialHeaderSize + payload.length);
     out[0] = prefix;
     out[1] = payload.length & 0xFF;
     out[2] = (payload.length >> 8) & 0xFF;
-    out.setRange(3, out.length, payload);
+    out.setRange(serialHeaderSize, out.length, payload);
     return out;
   }
 
@@ -85,24 +85,28 @@ class SerialFrameCodec {
         continue;
       }
       final available = _buffer.length - _startIndex;
-      if (available < 3) {
+      if (available < serialHeaderSize) {
         _compact(force: true);
         return frames;
       }
-      final payloadLength = _buffer[_startIndex + 1] | (_buffer[_startIndex + 2] << 8);
+      final payloadLength =
+          _buffer[_startIndex + 1] | (_buffer[_startIndex + 2] << 8);
       if (payloadLength > maxPayloadLength) {
         _startIndex++;
         _compact();
         continue;
       }
-      final frameLength = 3 + payloadLength;
+      final frameLength = serialHeaderSize + payloadLength;
       if (available < frameLength) {
         _compact(force: true);
         return frames;
       }
       frames.add(
         Uint8List.fromList(
-          _buffer.sublist(_startIndex + 3, _startIndex + frameLength),
+          _buffer.sublist(
+            _startIndex + serialHeaderSize,
+            _startIndex + frameLength,
+          ),
         ),
       );
       _startIndex += frameLength;

@@ -313,10 +313,7 @@ class TestBridge extends CompanionBridge {
 
   @override
   Future<SentResult> sendTextMessage(Uint8List pubkey, String text,
-      {int txtType = txtTypePlain,
-      int attempt = 0,
-      int? timestamp,
-      bool waitForAck = false}) async {
+      {int txtType = txtTypePlain, int attempt = 0, int? timestamp}) async {
     sentTextPubkey = pubkey;
     sentText = text;
     sentTextAttempt = attempt;

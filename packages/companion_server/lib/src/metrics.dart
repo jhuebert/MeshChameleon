@@ -25,8 +25,6 @@ class CompanionMetrics {
   int? appTargetVer;
 
   DateTime? currentClientSince;
-  DateTime? lastClientConnectedAt;
-  DateTime? lastClientDisconnectedAt;
   String? currentClientAddress;
   String? lastDisconnectReason;
 
@@ -39,7 +37,6 @@ class CompanionMetrics {
   void recordClientConnected(String? address) {
     clientConnections++;
     currentClientSince = _now();
-    lastClientConnectedAt = currentClientSince;
     currentClientAddress = address;
   }
 
@@ -51,7 +48,6 @@ class CompanionMetrics {
     evictions++;
     currentClientSince = null;
     currentClientAddress = null;
-    lastClientDisconnectedAt = _now();
     lastDisconnectReason = 'evicted by a new client';
   }
 
@@ -66,7 +62,6 @@ class CompanionMetrics {
     if (idleTimeout) idleTimeouts++;
     currentClientSince = null;
     currentClientAddress = null;
-    lastClientDisconnectedAt = _now();
     lastDisconnectReason = reason;
   }
 

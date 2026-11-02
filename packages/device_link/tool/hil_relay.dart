@@ -89,7 +89,7 @@ const Map<int, Set<int>> _replyCodes = {
   cmdSendTracePath: {respCodeSent},
   cmdSetDevicePin: {respCodeDisabled},
   cmdSetOtherParams: {respCodeOk},
-  cmdSendTelemetryReq: {respCodeSent, pushCodeTelemetryResponse},
+  cmdSendTelemetryReq: {respCodeSent},
   cmdGetCustomVars: {respCodeCustomVars},
   cmdSetCustomVar: {respCodeOk},
   cmdGetAdvertPath: {respCodeAdvertPath},
@@ -404,7 +404,6 @@ Future<void> _serve(
           if (rule.closeAfter) 'closeAfter': true,
         };
       }
-      log(entry);
       if (verbose) {
         stdout.writeln(
             'dev>app ${matchedCmd == null ? 'push/other' : _cmdName(matchedCmd)} '
@@ -414,6 +413,7 @@ Future<void> _serve(
         rule.seen++;
         if (rule.drop || (rule.dropNth != null && rule.seen == rule.dropNth)) {
           entry['dropped'] = true;
+          log(entry);
           continue;
         }
       }
@@ -432,6 +432,8 @@ Future<void> _serve(
         outgoing = copy;
         entry['rewritten'] = bytesToHex(outgoing);
       }
+
+      log(entry);
 
       void deliver() {
         sendToApp(outgoing);

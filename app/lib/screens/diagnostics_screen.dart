@@ -214,7 +214,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           value: '${formatCount(metrics.connectAttempts)} attempts, '
               '${formatCount(metrics.connectSuccesses)} connected, '
               '${formatCount(metrics.unexpectedDrops)} dropped, '
-              '${formatCount(snapshot.reconnectAttempts)} reconnected',
+              '${formatCount(snapshot.reconnectSuccesses)} reconnected',
         ),
         if (snapshot.deviceConnected)
           _InfoRow(
@@ -325,6 +325,13 @@ class _IdentityTile extends StatelessWidget {
             label: 'RX errors',
             value: formatCount(packets.receiveErrors),
           ),
+          if (packets.lastRssi != 0)
+            _InfoRow(
+              label: 'Signal',
+              value: '${packets.lastRssi} dBm, '
+                  '${packets.lastSnr.toStringAsFixed(1)} dB SNR, '
+                  'noise ${packets.noiseFloor} dBm',
+            ),
           _InfoRow(
             label: 'Queue',
             value: '${formatCount(packets.queueLength)} messages',

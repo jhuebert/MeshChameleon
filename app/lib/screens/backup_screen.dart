@@ -9,7 +9,7 @@ import '../app_state.dart';
 import '../services/backup_codec.dart';
 import '../services/backup_service.dart';
 
-/// User-facing backup and restore, reachable from the Information screen.
+/// User-facing backup and restore, reachable from the Home screen.
 ///
 /// The flow is deliberately short: pick a passphrase, pick a file; or pick a
 /// file, enter the passphrase, confirm a plain summary. No external tooling or

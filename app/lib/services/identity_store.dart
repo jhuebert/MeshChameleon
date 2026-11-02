@@ -5,9 +5,9 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 /// Stores each virtual identity (64-byte expanded key) in Android
 /// Keystore-backed secure storage.
 ///
-/// On Android the values live in Jetpack Security `EncryptedSharedPreferences`
-/// (AES-256-GCM, with the master key held in the hardware-backed Android
-/// Keystore). Keys are never written to plaintext storage, logs, or the app UI.
+/// On Android the values use AES-256-GCM data encryption with an RSA-OAEP key
+/// wrapping key held in the hardware-backed Android Keystore. Keys are never
+/// written to plaintext storage, logs, or the app UI.
 ///
 /// The pre-multi-identity `meshcore_identity_v1` entry is deliberately ignored;
 /// this store only addresses the per-record `meshcore_identity_v2/<id>` slots.
@@ -15,11 +15,14 @@ class IdentityStore {
   IdentityStore({FlutterSecureStorage? storage})
       : _storage = storage ?? _defaultStorage();
 
-  /// `EncryptedSharedPreferences` requires API 23+; the app's `minSdk` is 24.
-  /// Prefer it over the legacy RSA/AES-CBC backend, which the plugin still
-  /// defaults to.
+  /// v10 migrates v9 `EncryptedSharedPreferences` entries on first access.
+  /// Keep migration backups enabled and never auto-reset on a storage error:
+  /// an unreadable key must surface as unavailable, not erase the catalog.
   static FlutterSecureStorage _defaultStorage() => const FlutterSecureStorage(
-        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        aOptions: AndroidOptions(
+          resetOnError: false,
+          migrateWithBackup: true,
+        ),
       );
 
   static const _prefix = 'meshcore_identity_v2/';
@@ -43,13 +46,19 @@ class IdentityStore {
   }
 
   /// Whether a non-empty key slot exists, without validating the key material.
+  ///
+  /// Storage errors are reported as "unavailable" so one unreadable slot
+  /// cannot block loading the rest of the catalog.
   Future<bool> hasById(String id) async {
-    final value = await _storage.read(key: _storageKey(id));
-    return value != null && value.isNotEmpty;
+    try {
+      final value = await _storage.read(key: _storageKey(id));
+      return value != null && value.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
-  Future<void> saveById(String id, LocalIdentity identity) =>
-      _storage.write(
+  Future<void> saveById(String id, LocalIdentity identity) => _storage.write(
         key: _storageKey(id),
         value: bytesToHex(identity.meshcore64),
       );

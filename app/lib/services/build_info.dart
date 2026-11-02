@@ -93,7 +93,7 @@ class BuildInfo {
       : 'unavailable';
 
   String get buildTimeLabel =>
-      hasBuildTime ? _formatUtc(buildTime!) : 'unavailable';
+      hasBuildTime ? formatUtc(buildTime!) : 'unavailable';
 
   String get modeLabel =>
       kReleaseMode ? 'release' : (kProfileMode ? 'profile' : 'debug');
@@ -142,11 +142,13 @@ class BuildInfo {
     if (value.isEmpty) return null;
     return DateTime.tryParse(value)?.toUtc();
   }
+}
 
-  static String _formatUtc(DateTime value) {
-    final utc = value.toUtc();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${utc.year}-${two(utc.month)}-${two(utc.day)} '
-        '${two(utc.hour)}:${two(utc.minute)} UTC';
-  }
+/// Format [value] as UTC, optionally including seconds.
+String formatUtc(DateTime value, {bool includeSeconds = false}) {
+  final utc = value.toUtc();
+  String two(int n) => n.toString().padLeft(2, '0');
+  final seconds = includeSeconds ? ':${two(utc.second)}' : '';
+  return '${utc.year}-${two(utc.month)}-${two(utc.day)} '
+      '${two(utc.hour)}:${two(utc.minute)}$seconds UTC';
 }

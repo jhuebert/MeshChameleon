@@ -29,18 +29,19 @@ class VirtualResetResult {
   bool get partialKeyFailure => dataReset && keyError != null;
 }
 
+/// The default public channel (name `Public`, MeshCore default PSK).
+Channel defaultPublicChannel() => Channel(
+      name: 'Public',
+      secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
+    );
+
 /// S2-default virtual state used by resets (no identity, no physical data).
 NodeState freshVirtualState([
   VirtualSensorSettingsProvider sensorSettings =
       const EmptyVirtualSensorSettingsProvider(),
-]) {
-  final channel = Channel(
-    name: 'Public',
-    secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
-  );
-  return NodeState(
-    prefs: NodePrefs(),
-    channels: {0: channel},
-    customSettings: sensorSettings.initialSettings,
-  );
-}
+]) =>
+    NodeState(
+      prefs: NodePrefs(),
+      channels: {0: defaultPublicChannel()},
+      customSettings: sensorSettings.initialSettings,
+    );

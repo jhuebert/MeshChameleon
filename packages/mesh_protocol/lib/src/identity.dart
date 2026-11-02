@@ -36,11 +36,6 @@ class LocalIdentity {
   /// Both the seed form and the 64-byte expanded form can sign.
   bool get canSign => _seed != null || _firmwareKey != null;
 
-  /// 1-byte identity hash (first byte of the public key).
-  int get hashByte => publicKey[0];
-
-  Uint8List get publicKeyPrefix6 => Uint8List.sublistView(publicKey, 0, 6);
-
   /// X25519 private scalar (clamped) for ECDH.
   Uint8List get x25519Private {
     final cached = _x25519Private;
@@ -66,8 +61,7 @@ class LocalIdentity {
         List<int>.generate(32, (_) => rng.nextInt(256)),
       );
       final identity = await fromSeed(seed);
-      if (identity.publicKey[0] != 0x00 &&
-          identity.publicKey[0] != 0xFF) {
+      if (identity.publicKey[0] != 0x00 && identity.publicKey[0] != 0xFF) {
         return identity;
       }
     }
@@ -116,10 +110,9 @@ class LocalIdentity {
   /// symmetric, non-zero ECDH exchange with the upstream test keypair. This is
   /// deliberately not a length check or scalar clamp.
   static Future<bool> validateMeshcore64(Uint8List key) async {
-    if (key.length != 64) return false;
+    if (key.length != privateKeySize) return false;
     try {
-      final publicKey =
-          CryptoUtils.ed25519PublicFromScalar(key.sublist(0, 32));
+      final publicKey = CryptoUtils.ed25519PublicFromScalar(key.sublist(0, 32));
       if (publicKey[0] == 0x00 || publicKey[0] == 0xFF) return false;
 
       final testPrivate = Uint8List.fromList(_validationTestPrivate);
@@ -147,17 +140,13 @@ class LocalIdentity {
     }
   }
 
-  /// Firmware-name alias for [validateMeshcore64].
-  static Future<bool> validatePrivateKey(Uint8List key) =>
-      validateMeshcore64(key);
-
   /// Create an identity from the 64-byte MeshCore firmware key form.
   ///
   /// The public key is derived from the scalar; signing uses the expanded key
   /// directly (no seed recovery needed).
   static Future<LocalIdentity> fromMeshcore64(Uint8List key) async {
-    if (key.length != 64) {
-      throw ArgumentError('MeshCore key must be 64 bytes');
+    if (key.length != privateKeySize) {
+      throw ArgumentError('MeshCore key must be $privateKeySize bytes');
     }
     final scalar = CryptoUtils.x25519ClampScalar(key.sublist(0, 32));
     final pub = CryptoUtils.ed25519PublicFromScalar(key.sublist(0, 32));
@@ -173,8 +162,10 @@ class LocalIdentity {
   /// Import a 32-byte seed or 64-byte MeshCore key.
   static Future<LocalIdentity> import(Uint8List key) {
     if (key.length == 32) return fromSeed(key);
-    if (key.length == 64) return fromMeshcore64(key);
-    throw ArgumentError('key must be 32 or 64 bytes, got ${key.length}');
+    if (key.length == privateKeySize) return fromMeshcore64(key);
+    throw ArgumentError(
+      'key must be 32 or $privateKeySize bytes, got ${key.length}',
+    );
   }
 
   /// The 64-byte MeshCore storage/export form.
@@ -223,10 +214,6 @@ class LocalIdentity {
   /// ECDH shared secret with a peer Ed25519 public key.
   Future<Uint8List> sharedSecret(Uint8List peerEd25519Public) =>
       CryptoUtils.x25519SharedSecret(x25519Private, peerEd25519Public);
-
-  /// The X25519 public key (for peers that need it).
-  Future<Uint8List> x25519Public() =>
-      CryptoUtils.x25519PublicFromPrivate(x25519Private);
 
   /// The initial MeshCore default public channel secret.
   static Uint8List get defaultPublicChannelSecret =>

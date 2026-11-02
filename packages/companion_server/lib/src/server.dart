@@ -92,7 +92,6 @@ class CompanionServer implements CompanionPushSink {
     _idleTimer?.cancel();
     _idleTimer = null;
     _disconnectClient(reason: 'server stop');
-    _bridge.setPushSink(null);
     await _server?.close();
     _server = null;
   }
@@ -120,7 +119,6 @@ class CompanionServer implements CompanionPushSink {
           previous.setPushSink(null);
           _bridge = next;
         }
-        _switchingBridge = false;
         _bridge.setPushSink(_client == null ? null : this);
       } finally {
         _switchingBridge = false;
@@ -654,9 +652,9 @@ class CompanionServer implements CompanionPushSink {
       ..writeByte((info.maxContacts ~/ 2).clamp(0, 255))
       ..writeByte(info.maxChannels.clamp(0, 255))
       ..writeUInt32Le(info.blePin);
-    _writeFixedString(w, info.buildDate, 12);
-    _writeFixedString(w, info.manufacturer, 40);
-    _writeFixedString(w, info.version, 20);
+    w.writeCString(info.buildDate, 12);
+    w.writeCString(info.manufacturer, 40);
+    w.writeCString(info.version, 20);
     w.writeByte(info.clientRepeat & 0xFF);
     w.writeByte(bridge.getPathHashMode() & 0xFF);
     _sendFrame(w.toBytes());
@@ -885,22 +883,8 @@ class CompanionServer implements CompanionPushSink {
     _sendFrame(end.toBytes());
   }
 
-  Uint8List _contactFrame(Contact c) {
-    final pathLen = c.outPathLen < 0 ? 0xFF : c.outPathLen.clamp(0, 255);
-    final w = BufferWriter()
-      ..writeByte(respCodeContact)
-      ..writeBytes(c.publicKey)
-      ..writeByte(c.advType)
-      ..writeByte(c.flags)
-      ..writeByte(pathLen);
-    w.writeBytesPadded(c.outPath, maxPathSize);
-    w.writeCString(c.name, maxNameSize);
-    w.writeUInt32Le(c.lastAdvertTimestamp);
-    w.writeInt32Le((c.gpsLat * 1e6).round());
-    w.writeInt32Le((c.gpsLon * 1e6).round());
-    w.writeUInt32Le(c.lastmod);
-    return w.toBytes();
-  }
+  Uint8List _contactFrame(Contact c) =>
+      Uint8List.fromList([respCodeContact, ...c.toCompanionFrameBody()]);
 
   void _cmdGetContactByKey(Uint8List data) {
     if (data.length < pubKeySize) return sendErr(errCodeIllegalArg);
@@ -1176,8 +1160,7 @@ class CompanionServer implements CompanionPushSink {
     // applies only to CHANNEL_DATA_RECV pushes. The whole command must also fit
     // the 176-byte companion payload, so a long path reduces the data budget.
     if (payload.length > maxGroupDataLength ||
-        payload.length >
-            maxGroupDataLengthForCompanionPath(pathBytes.length)) {
+        payload.length > maxGroupDataLengthForCompanionPath(pathBytes.length)) {
       return sendErr(errCodeIllegalArg);
     }
     final commandLength = 5 + pathBytes.length + payload.length;
@@ -1431,12 +1414,7 @@ class CompanionServer implements CompanionPushSink {
     final reqData = data.sublist(pubKeySize);
     final result = await bridge.sendBinaryReq(pubkey, reqData);
     if (!result.success) return sendErr(errCodeNotFound);
-    final w = BufferWriter()
-      ..writeByte(respCodeSent)
-      ..writeByte(result.isFlood ? 1 : 0)
-      ..writeUInt32Le(result.expectedAck ?? 0)
-      ..writeUInt32Le(result.timeoutMs ?? 10000);
-    _sendFrame(w.toBytes());
+    _sendSent(result);
   }
 
   Future<void> _cmdSendAnonReq(Uint8List data) async {
@@ -1653,10 +1631,6 @@ class CompanionServer implements CompanionPushSink {
   // -------------------------------------------------------------------------
   // Helpers
   // -------------------------------------------------------------------------
-
-  void _writeFixedString(BufferWriter w, String value, int length) {
-    w.writeCString(value, length);
-  }
 
   void _log(String message) => onLog?.call('[CompanionServer] $message');
 }

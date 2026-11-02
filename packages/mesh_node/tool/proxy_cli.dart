@@ -36,7 +36,6 @@ Options:
 /// Parsed command line for the headless proxy.
 class ProxyCliOptions {
   const ProxyCliOptions({
-    this.simulated = false,
     this.deviceHost,
     this.devicePort = defaultCompanionPort,
     this.proxyPort = defaultCompanionPort,
@@ -44,8 +43,6 @@ class ProxyCliOptions {
     this.stateDir,
   });
 
-  /// Explicitly requested the simulated companion.
-  final bool simulated;
   final String? deviceHost;
   final int devicePort;
   final int proxyPort;
@@ -95,7 +92,6 @@ class ProxyCliOptions {
       throw const FormatException('--device needs a host');
     }
     return ProxyCliOptions(
-      simulated: simulated,
       deviceHost: deviceHost,
       devicePort: devicePort,
       proxyPort: proxyPort,

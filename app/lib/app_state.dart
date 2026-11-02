@@ -43,7 +43,6 @@ class NotificationContent {
 }
 
 /// Build the foreground-service notification copy.
-@visibleForTesting
 NotificationContent buildNotificationContent({
   required int identityCount,
   String? activeName,
@@ -82,8 +81,8 @@ typedef TcpDeviceLinkFactory = RadioLink Function(
   void Function(String message) onLog,
 );
 
-/// Owns the device session, identity manager, proxy server, and navigation
-/// state, and exposes them to the UI.
+/// Owns the device session, identity manager, proxy server, and backup state,
+/// and exposes them to the UI.
 class AppState extends ChangeNotifier {
   AppState({
     IdentityRepository? repository,
@@ -196,7 +195,7 @@ class AppState extends ChangeNotifier {
   ) =>
       TcpDeviceLink(host: host, port: port, onLog: onLog);
 
-  /// What this build can do; gates the BLE UI and session restore.
+  /// What this build can do; gates session restore.
   final DeviceCapabilities capabilities;
 
   /// Delay before an unexpected link drop is retried.
@@ -549,7 +548,7 @@ class AppState extends ChangeNotifier {
   Future<bool> connectTcp({required String host, int? tcpPort}) async {
     final normalizedHost = host.trim();
     final devicePort = tcpPort ?? defaultCompanionPort;
-    if (normalizedHost.isEmpty || devicePort < 1 || devicePort > 65535) {
+    if (!isValidTcpHost(normalizedHost) || !isValidTcpPort(devicePort)) {
       log('Enter a host and a port between 1 and 65535');
       return false;
     }
@@ -780,7 +779,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<bool> setProxyPort(int value) async {
-    if (value < 1 || value > 65535 || proxyStatus == ProxyStatus.running) {
+    if (!isValidTcpPort(value) || proxyStatus == ProxyStatus.running) {
       return false;
     }
     port = value;
@@ -962,6 +961,7 @@ class AppState extends ChangeNotifier {
     deviceConnected = false;
     deviceConnectedAt = null;
     deviceInfo = null;
+    deviceLabel = null;
     log('Device powered off; automatic reconnect suppressed');
     final current = lastSession;
     if (current != null) {
@@ -989,16 +989,18 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> disconnectDevice() async {
-    if (server != null || proxyStatus == ProxyStatus.running) {
-      await stopProxy();
-    }
+    // Mark the disconnect before awaiting anything so a link drop during
+    // proxy shutdown cannot schedule an unexpected reconnect.
     _disconnecting = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     await _linkStateSub?.cancel();
     _linkStateSub = null;
-    await _manager?.stopLive();
     try {
+      if (server != null || proxyStatus == ProxyStatus.running) {
+        await stopProxy();
+      }
+      await _manager?.stopLive();
       await link?.disconnect();
     } finally {
       link = null;
@@ -1028,6 +1030,7 @@ class AppState extends ChangeNotifier {
       );
 
   Future<void> _startForegroundService() async {
+    if (!Platform.isAndroid) return;
     try {
       final content = _notificationContent();
       await _foreground.start(title: content.title, text: content.text);

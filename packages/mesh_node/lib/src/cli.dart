@@ -15,7 +15,7 @@ enum CliTarget {
   /// PIN/factory-reset style destructive command, always denied.
   disabled,
 
-  /// Reboot/shutdown lifecycle (implemented by T12).
+  /// Reboot/shutdown lifecycle.
   lifecycle,
 
   /// Not in the standard companion allowlist.
@@ -294,7 +294,6 @@ class CliPhysicalCommand {
     required this.command,
     this.refreshRadio = false,
     this.refreshTuning = false,
-    this.mutation = false,
     this.savedRadio = false,
     this.replyIsSecret = false,
   });
@@ -303,7 +302,6 @@ class CliPhysicalCommand {
   final String command;
   final bool refreshRadio;
   final bool refreshTuning;
-  final bool mutation;
 
   /// `set radio` saves firmware prefs and normally needs a reboot to apply.
   final bool savedRadio;
@@ -347,7 +345,6 @@ class CliPhysicalValidator {
       case 'set wifi.clear':
         return const CliPhysicalCommand(
           command: 'set wifi.clear',
-          mutation: true,
         );
     }
 
@@ -359,7 +356,6 @@ class CliPhysicalValidator {
       return CliPhysicalCommand(
         command: command,
         refreshRadio: true,
-        mutation: true,
         savedRadio: true,
       );
     }
@@ -371,7 +367,6 @@ class CliPhysicalValidator {
       return CliPhysicalCommand(
         command: command,
         refreshRadio: true,
-        mutation: true,
       );
     }
     if (command.startsWith('set af ')) {
@@ -382,7 +377,6 @@ class CliPhysicalValidator {
       return CliPhysicalCommand(
         command: command,
         refreshTuning: true,
-        mutation: true,
       );
     }
     if (command.startsWith('set dutycycle ')) {
@@ -393,7 +387,6 @@ class CliPhysicalValidator {
       return CliPhysicalCommand(
         command: command,
         refreshTuning: true,
-        mutation: true,
       );
     }
     if (command.startsWith('set rxdelay ')) {
@@ -404,7 +397,6 @@ class CliPhysicalValidator {
       return CliPhysicalCommand(
         command: command,
         refreshTuning: true,
-        mutation: true,
       );
     }
     if (command.startsWith('set int.thresh ')) {
@@ -412,15 +404,15 @@ class CliPhysicalValidator {
       if (value == null || value < 0 || value > 255) {
         throw const CliFormatException('invalid interference threshold');
       }
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set cad ')) {
       _requireOnOff(command.substring(8));
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set radio.rxgain ')) {
       _requireOnOff(command.substring(17));
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set agc.reset.interval ')) {
       final value = _strictBigInt(command.substring(23));
@@ -434,37 +426,36 @@ class CliPhysicalValidator {
               : value.toInt();
       return CliPhysicalCommand(
         command: 'set agc.reset.interval $clamped',
-        mutation: true,
       );
     }
     if (command.startsWith('set txdelay ')) {
       _requireDelay(command.substring(12));
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set direct.txdelay ')) {
       _requireDelay(command.substring(19));
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set wifi.ssid ')) {
       final value = command.substring(14);
       if (utf8.encode(value).length > 32) {
         throw const CliFormatException('WiFi SSID too long');
       }
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set wifi.pwd ')) {
       final value = command.substring(13);
       if (utf8.encode(value).length > 63) {
         throw const CliFormatException('WiFi password too long');
       }
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     if (command.startsWith('set wifi.enabled ')) {
       final value = command.substring(17);
       if (value != '0' && value != '1') {
         throw const CliFormatException('WiFi enabled must be 0 or 1');
       }
-      return CliPhysicalCommand(command: command, mutation: true);
+      return CliPhysicalCommand(command: command);
     }
     throw const CliFormatException('unknown physical CLI command');
   }
@@ -525,7 +516,7 @@ class CliPhysicalValidator {
   }
 }
 
-/// Remote CLI policy scaffolding shared with T14.
+/// Remote CLI policy for physical commands.
 ///
 /// Permission (contact flag 0x10) and authentication are decided by the
 /// incoming-text dispatch layer. This only fixes the target policy: physical

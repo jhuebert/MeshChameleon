@@ -38,10 +38,8 @@ class SharedRadioHub {
 
   /// Return the stable view for [identityId]. The view delegates lifecycle,
   /// configuration, and state to the shared base link.
-  RadioLink viewFor(String identityId) => _views.putIfAbsent(
-        identityId,
-        () => _SharedRadioLinkView(this, identityId),
-      );
+  RadioLink viewFor(String identityId) =>
+      _views.putIfAbsent(identityId, () => _SharedRadioLinkView(this));
 
   /// Register the hub as the base link's raw-RX listener.
   void attach() {
@@ -135,10 +133,9 @@ class SharedRadioHub {
 
 /// A per-identity [RadioLink] facade over [SharedRadioHub].
 class _SharedRadioLinkView implements RadioLink {
-  _SharedRadioLinkView(this._hub, this.identityId);
+  _SharedRadioLinkView(this._hub);
 
   final SharedRadioHub _hub;
-  final String identityId;
   RawRxListener? _listener;
 
   @override
@@ -212,6 +209,5 @@ class _SharedRadioLinkView implements RadioLink {
       _hub.base.runCliCommand(command);
 
   @override
-  Future<Uint8List> getAllowedRepeatFreq() =>
-      _hub.base.getAllowedRepeatFreq();
+  Future<Uint8List> getAllowedRepeatFreq() => _hub.base.getAllowedRepeatFreq();
 }

@@ -13,7 +13,8 @@ class MeshCoreUuids {
   static final serviceGuid = Guid(service);
 
   /// Results from the active MeshCore companion scan.
-  static Stream<List<ScanResult>> get scanResults => FlutterBluePlus.scanResults;
+  static Stream<List<ScanResult>> get scanResults =>
+      FlutterBluePlus.scanResults;
 
   /// Start scanning for MeshCore companion devices advertising the NUS service.
   static Future<void> startScan() => FlutterBluePlus.startScan(
@@ -126,8 +127,7 @@ class BleDeviceLink implements RadioLink {
   @override
   Future<void> disconnect() async {
     await _cancelSubscriptions();
-    _failAll(
-        const DeviceCommandError.disconnected(message: 'disconnected'));
+    _failAll(const DeviceCommandError.disconnected(message: 'disconnected'));
     try {
       await device.disconnect();
     } catch (_) {}
@@ -193,8 +193,7 @@ class BleDeviceLink implements RadioLink {
     if (pending != null && !pending.isCompleted) pending.completeError(error);
   }
 
-  Future<void> _writeFrame(
-      BluetoothCharacteristic rx, Uint8List frame) async {
+  Future<void> _writeFrame(BluetoothCharacteristic rx, Uint8List frame) async {
     if (frame.length > maxCompanionPayloadSize) {
       throw ArgumentError.value(
         frame.length,
@@ -246,7 +245,7 @@ class BleDeviceLink implements RadioLink {
   Future<void> _requestOk(Uint8List frame) async {
     final reply = await _request(
       frame,
-      {respCodeOk, respCodeErr, respCodeDisabled},
+      {respCodeOk, respCodeDisabled},
     );
     if (reply.isEmpty) {
       throw const DeviceCommandError.malformed(message: 'empty device reply');
@@ -263,27 +262,24 @@ class BleDeviceLink implements RadioLink {
 
   @override
   Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) async {
-    final rx = _rx;
-    if (rx == null) throw StateError('BLE not connected');
     // The firmware replies OK/ERR for raw TX; consume it so it can't be
     // mistaken for another in-flight request's reply.
     await _request(
       DeviceFrames.sendRawPacket(packet, priority),
-      {respCodeOk, respCodeErr},
+      {respCodeOk},
     );
   }
 
   @override
   Future<DeviceInfo> deviceInfo() async {
     final frame =
-        await _request(DeviceFrames.deviceQuery(), {respCodeDeviceInfo, respCodeErr});
+        await _request(DeviceFrames.deviceQuery(), {respCodeDeviceInfo});
     return TcpDeviceLink.parseDeviceInfo(frame);
   }
 
   @override
   Future<ParsedSelfInfo> selfInfo() async {
-    final frame =
-        await _request(DeviceFrames.appStart(), {respCodeSelfInfo, respCodeErr});
+    final frame = await _request(DeviceFrames.appStart(), {respCodeSelfInfo});
     final info = ParsedSelfInfo.parse(frame);
     if (info == null) {
       throw const DeviceCommandError.malformed(
@@ -300,7 +296,7 @@ class BleDeviceLink implements RadioLink {
   Future<RadioStats> radioStats() async {
     final frame = await _request(
       DeviceFrames.getStats(statsTypeRadio),
-      {respCodeStats, respCodeErr},
+      {respCodeStats},
     );
     final stats = RadioStats.parse(frame);
     if (stats == null) {
@@ -344,12 +340,11 @@ class BleDeviceLink implements RadioLink {
       );
     }
     return _runExclusive(() async {
-      var attempted = false;
       try {
-        attempted = true;
         await _writeFrame(rx, payload);
       } catch (e) {
-        if (attempted && _state == LinkState.disconnected) return;
+        // A disconnect observed after the write was dispatched is expected.
+        if (_state == LinkState.disconnected) return;
         rethrow;
       }
     });
@@ -359,7 +354,7 @@ class BleDeviceLink implements RadioLink {
   Future<TuningParams> tuningParams() async {
     final frame = await _request(
       DeviceFrames.getTuningParams(),
-      {respCodeTuningParams, respCodeErr},
+      {respCodeTuningParams},
     );
     final params = TuningParams.parse(frame);
     if (params == null) {
@@ -384,7 +379,7 @@ class BleDeviceLink implements RadioLink {
   Future<String> runCliCommand(String command) async {
     final frame = await _request(
       DeviceFrames.runCliCommand(command),
-      {respCodeCliReply, respCodeDisabled, respCodeErr},
+      {respCodeCliReply, respCodeDisabled},
     );
     if (frame.isNotEmpty && frame[0] == respCodeDisabled) {
       throw const DeviceCommandError.disabled();
@@ -396,7 +391,7 @@ class BleDeviceLink implements RadioLink {
   Future<Uint8List> getAllowedRepeatFreq() async {
     final frame = await _request(
       DeviceFrames.getAllowedRepeatFreq(),
-      {respCodeAllowedRepeatFreq, respCodeErr},
+      {respCodeAllowedRepeatFreq},
     );
     if (frame.isEmpty || frame[0] != respCodeAllowedRepeatFreq) {
       throw const DeviceCommandError.malformed(
@@ -411,7 +406,7 @@ class BleDeviceLink implements RadioLink {
     try {
       final frame = await _request(
         DeviceFrames.getBattAndStorage(),
-        {respCodeBattAndStorage, respCodeErr},
+        {respCodeBattAndStorage},
       );
       final r = BufferReader(frame)..skipBytes(1);
       return BatteryReading(

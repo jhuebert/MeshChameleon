@@ -15,3 +15,6 @@ pubspec.lock
 app/android/.gradle/
 app/android/local.properties
 app/android/key.properties
+
+# Local-only release planning
+/docs/RELEASE_PLAN.md

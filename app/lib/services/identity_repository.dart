@@ -168,7 +168,8 @@ class IdentityRepository {
     if (store is JsonNodeStore && await file.exists()) {
       final length = await file.length();
       if (length > 0) {
-        final stamp = DateTime.now().toUtc().toIso8601String().replaceAll(':', '-');
+        final stamp =
+            DateTime.now().toUtc().toIso8601String().replaceAll(':', '-');
         try {
           await file.rename('${file.path}.corrupt-$stamp');
           onLog?.call('Quarantined corrupt identity state for $id');
@@ -279,13 +280,7 @@ class IdentityRepository {
   /// state cleanup failures are logged because the record is already gone.
   Future<void> delete(String id) async {
     final index = await loadOrCreate();
-    IdentityRecord? record;
-    for (final item in index.identities) {
-      if (item.id == id) {
-        record = item;
-        break;
-      }
-    }
+    final record = index.recordById(id);
     if (record == null) {
       throw const IdentityDeleteException('identity not found');
     }
@@ -377,13 +372,7 @@ class IdentityRepository {
   /// the companion endpoint; activate another identity first.
   Future<IdentityRecord> setEnabled(String id, bool enabled) async {
     final index = await loadOrCreate();
-    IdentityRecord? record;
-    for (final item in index.identities) {
-      if (item.id == id) {
-        record = item;
-        break;
-      }
-    }
+    final record = index.recordById(id);
     if (record == null) {
       throw const IdentityStateException('identity not found');
     }
@@ -401,13 +390,7 @@ class IdentityRepository {
 
   Future<void> setActive(String id) async {
     final index = await loadOrCreate();
-    IdentityRecord? record;
-    for (final item in index.identities) {
-      if (item.id == id) {
-        record = item;
-        break;
-      }
-    }
+    final record = index.recordById(id);
     if (record == null) {
       throw const IdentityDeleteException('identity not found');
     }
@@ -423,13 +406,7 @@ class IdentityRepository {
   /// Clear everything virtual except the identity key and current name.
   Future<void> clearLocalData(String id) async {
     final index = await loadOrCreate();
-    IdentityRecord? record;
-    for (final item in index.identities) {
-      if (item.id == id) {
-        record = item;
-        break;
-      }
-    }
+    final record = index.recordById(id);
     if (record == null) {
       throw const IdentityDeleteException('identity not found');
     }

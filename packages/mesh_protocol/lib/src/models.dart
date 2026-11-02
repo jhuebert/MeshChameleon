@@ -45,7 +45,23 @@ class Contact {
 
   String get publicKeyHex => bytesToHex(publicKey);
 
-  Uint8List get publicKeyPrefix6 => Uint8List.sublistView(publicKey, 0, 6);
+  /// The companion contact-record frame body (without the leading response
+  /// code).
+  Uint8List toCompanionFrameBody() {
+    final pathLen = outPathLen < 0 ? 0xFF : outPathLen.clamp(0, 255);
+    final w = BufferWriter()
+      ..writeBytes(publicKey)
+      ..writeByte(advType)
+      ..writeByte(flags)
+      ..writeByte(pathLen);
+    w.writeBytesPadded(outPath, maxPathSize);
+    w.writeCString(name, maxNameSize);
+    w.writeUInt32Le(lastAdvertTimestamp);
+    w.writeInt32Le((gpsLat * 1e6).round());
+    w.writeInt32Le((gpsLon * 1e6).round());
+    w.writeUInt32Le(lastmod);
+    return w.toBytes();
+  }
 
   /// Whether [outPathLen] is a learned direct route.
   ///
@@ -138,8 +154,9 @@ class NodePrefs {
   int clientRepeat;
   int pathHashMode;
 
-  /// Device radio tuning (`CMD_GET/SET_TUNING_PARAMS`): the receive-delay base
-  /// and airtime factor, both in milliseconds ×1000 on the wire.
+  /// Device radio tuning (`CMD_GET/SET_TUNING_PARAMS`). The firmware treats
+  /// these as floating-point seconds and sends them scaled by 1000; they are
+  /// stored here as integer milliseconds.
   int rxDelayBaseMs;
   int airtimeFactorMs;
 
@@ -196,7 +213,7 @@ class DeviceInfo {
     this.blePin = 0,
     this.buildDate = '',
     this.manufacturer = 'MeshChameleon',
-    this.version = 'meshchameleon 0.2.0',
+    this.version = activeDeviceVersion,
     this.clientRepeat = 0,
     this.pathHashMode = 0,
   });
@@ -280,7 +297,8 @@ DeviceInfo buildVirtualDeviceInfo({
       blePin: 0,
       buildDate: '',
       manufacturer: virtualBoardName,
-      version: targetBaseline ? targetCompatibilityVersion : activeDeviceVersion,
+      version:
+          targetBaseline ? targetCompatibilityVersion : activeDeviceVersion,
       clientRepeat: clientRepeat,
       pathHashMode: pathHashMode,
     );
@@ -302,8 +320,9 @@ class RadioParams {
   final int txPowerDbm;
 }
 
-/// Device radio tuning parameters (`RESP_CODE_TUNING_PARAMS`). Both values are
-/// milliseconds ×1000 on the wire (`rx_delay_base`, `airtime_factor`).
+/// Device radio tuning parameters (`RESP_CODE_TUNING_PARAMS`). The firmware's
+/// floating-point `rx_delay_base`/`airtime_factor` seconds are sent scaled by
+/// 1000; these fields hold the integer-millisecond values.
 class TuningParams {
   const TuningParams({
     required this.rxDelayBaseMs,

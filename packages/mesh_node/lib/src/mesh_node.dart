@@ -57,6 +57,26 @@ class _Connection {
 /// is dropped. Matches openHop's `DEFAULT_OFFLINE_QUEUE_SIZE`.
 const int defaultOfflineQueueSize = 512;
 
+/// Serialises asynchronous work so a later operation always observes an
+/// earlier one's result, even when that result is an error.
+class _SerialQueue {
+  Future<void> _tail = Future<void>.value();
+
+  Future<T> run<T>(Future<T> Function() action) {
+    final completer = Completer<T>();
+    _tail = _tail.then((_) async {
+      try {
+        completer.complete(await action());
+      } catch (e, s) {
+        completer.completeError(e, s);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<void> get idle => _tail;
+}
+
 /// The reimplemented MeshCore companion node.
 ///
 /// Holds the proxy identity and all node state, drives the app-facing
@@ -85,7 +105,7 @@ class MeshNode extends CompanionBridge {
     VirtualClock? clock,
   })  : prefs = prefs ?? NodePrefs(),
         clock = clock ?? VirtualClock() {
-    channels[0] = _defaultChannel();
+    channels[0] = defaultPublicChannel();
     _customVars.addAll(sensorSettings.initialSettings);
     _startedAtMonotonicMillis = this.clock.monotonicMilliseconds;
     battery = BatteryService(
@@ -199,7 +219,7 @@ class MeshNode extends CompanionBridge {
   Uint8List? _floodScopeOverride;
   bool _floodUnscoped = false;
 
-  /// Recently seen packet hashes (hex -> epoch seconds). Used to suppress
+  /// Recently seen packet hashes (hex -> monotonic seconds). Used to suppress
   /// duplicate queued messages (retransmits, repeated reception) while still
   /// ACKing direct duplicates. Mirrors `Mesh.cpp`'s `hasSeen` table and
   /// openHop's `_check_dedup` (300s TTL, 1000 entries). Dart's Map preserves
@@ -229,11 +249,6 @@ class MeshNode extends CompanionBridge {
     }
     return false;
   }
-
-  static Channel _defaultChannel() => Channel(
-        name: 'Public',
-        secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
-      );
 
   CancelScheduled _scheduleAck(Duration delay, void Function() action) {
     final generation = _identityGeneration;
@@ -274,13 +289,13 @@ class MeshNode extends CompanionBridge {
     channels
       ..clear()
       ..addAll(state.channels);
-    channels.putIfAbsent(0, _defaultChannel);
+    channels.putIfAbsent(0, defaultPublicChannel);
     final publicSecret = LocalIdentity.defaultPublicChannelSecret;
     final publicChannel = channels[0];
     if (publicChannel != null &&
-        _bytesEqual(publicChannel.secret, publicSecret) &&
+        bytesEqual(publicChannel.secret, publicSecret) &&
         publicChannel.name.toLowerCase() == 'public') {
-      channels[0] = _defaultChannel();
+      channels[0] = defaultPublicChannel();
     }
     _messageQueue
       ..clear()
@@ -300,14 +315,14 @@ class MeshNode extends CompanionBridge {
 
   /// Serialises physical configuration transactions (fresh repeat query, write
   /// ACK, readback) without nesting the device link's request lock.
-  Future<void> _configTail = Future<void>.value();
+  final _configQueue = _SerialQueue();
 
   /// Serialises identity replacement requests.
-  Future<void> _identityTail = Future<void>.value();
+  final _identityQueue = _SerialQueue();
 
   /// Serialises state saves/publication so an old snapshot cannot publish
   /// across an identity switch.
-  Future<void> _stateTail = Future<void>.value();
+  final _stateQueue = _SerialQueue();
 
   int _identityGeneration = 0;
   bool _identitySwapping = false;
@@ -341,30 +356,6 @@ class MeshNode extends CompanionBridge {
   /// Last identity lifecycle diagnostic (never contains key material).
   String? get identityDiagnostic => _identityDiagnostic;
 
-  Future<T> _runIdentity<T>(Future<T> Function() action) {
-    final completer = Completer<T>();
-    _identityTail = _identityTail.then((_) async {
-      try {
-        completer.complete(await action());
-      } catch (e, s) {
-        completer.completeError(e, s);
-      }
-    });
-    return completer.future;
-  }
-
-  Future<T> _runState<T>(Future<T> Function() action) {
-    final completer = Completer<T>();
-    _stateTail = _stateTail.then((_) async {
-      try {
-        completer.complete(await action());
-      } catch (e, s) {
-        completer.completeError(e, s);
-      }
-    });
-    return completer.future;
-  }
-
   Future<void> _waitForPhysicalTxIdle() {
     if (_activePhysicalTx == 0) return Future<void>.value();
     return (_physicalTxIdle ??= Completer<void>()).future;
@@ -377,7 +368,6 @@ class MeshNode extends CompanionBridge {
   bool _tuningCacheVerified = false;
   bool _needsReconcile = false;
   String? _physicalDiagnostic;
-  String? _storageDiagnostic;
 
   /// A write/timeout left the physical radio cache uncertain; do not retry the
   /// write automatically. Reconcile with a settings read or reconnect.
@@ -390,28 +380,10 @@ class MeshNode extends CompanionBridge {
   /// the active radio to match the saved values.
   bool get physicalRadioRequiresReboot => _radioRequiresReboot;
 
-  /// Alias used by diagnostics.
-  bool get radioRequiresReboot => _radioRequiresReboot;
-
   bool get tuningCacheVerified => _tuningCacheVerified;
-
-  /// One settings read is due to reconcile an uncertain/unverified cache.
-  bool get physicalReconcilePending => _needsReconcile;
 
   /// Last physical-operation diagnostic (never contains secrets).
   String? get physicalDiagnostic => _physicalDiagnostic;
-
-  Future<T> _runConfig<T>(Future<T> Function() action) {
-    final completer = Completer<T>();
-    _configTail = _configTail.then((_) async {
-      try {
-        completer.complete(await action());
-      } catch (e, s) {
-        completer.completeError(e, s);
-      }
-    });
-    return completer.future;
-  }
 
   CompanionOperationError _operationError(DeviceCommandError e) =>
       CompanionOperationError(
@@ -437,7 +409,7 @@ class MeshNode extends CompanionBridge {
     'recv_errors': 0,
   };
 
-  /// Wall-clock time of the last [start], used for the uptime stat.
+  /// Monotonic time of the last [start], used for the uptime stat.
   int _startedAtMonotonicMillis = 0;
 
   /// Most recent received-frame radio metrics, reported in the radio stats.
@@ -506,6 +478,10 @@ class MeshNode extends CompanionBridge {
   void stop() {
     link.setRawRxListener(null);
     battery.stop();
+    _cancelTransientSessions();
+  }
+
+  void _cancelTransientSessions() {
     _cancelAckSchedules();
     for (final ack in _pendingAcks) {
       ack.timer.cancel();
@@ -526,9 +502,9 @@ class MeshNode extends CompanionBridge {
     stop();
     await _waitForPhysicalTxIdle();
     try {
-      await _configTail;
-      await _identityTail;
-      await _stateTail;
+      await _configQueue.idle;
+      await _identityQueue.idle;
+      await _stateQueue.idle;
       await store?.flush();
     } catch (_) {
       // Failures were already reported through their save futures.
@@ -543,7 +519,7 @@ class MeshNode extends CompanionBridge {
   Uint8List getPublicKey() => identity.publicKey;
 
   bool _sameIdentity(LocalIdentity a, LocalIdentity b) =>
-      _bytesEqual(a.meshcore64, b.meshcore64);
+      bytesEqual(a.meshcore64, b.meshcore64);
 
   bool get _identityBlocked => _identityPaused || _identitySwapping;
 
@@ -568,7 +544,7 @@ class MeshNode extends CompanionBridge {
   /// contacts/channels/prefs/queue/advert paths are retained; identity-derived
   /// runtime state and in-flight work are cleared.
   Future<void> replaceIdentity(LocalIdentity candidate) =>
-      _runIdentity(() => _replaceIdentityLocked(candidate));
+      _identityQueue.run(() => _replaceIdentityLocked(candidate));
 
   Future<void> _replaceIdentityLocked(LocalIdentity candidate) async {
     final candidateKey = candidate.meshcore64;
@@ -623,7 +599,7 @@ class MeshNode extends CompanionBridge {
         }
       }
 
-      await _runState(() async {
+      await _stateQueue.run(() async {
         identity = candidate;
         _identityGeneration++;
         _clearIdentityRuntimeState();
@@ -643,7 +619,7 @@ class MeshNode extends CompanionBridge {
     bool rotateIdentity = false,
     bool preserveName = false,
   }) {
-    return _runIdentity(() async {
+    return _identityQueue.run(() async {
       LocalIdentity? candidate;
       if (rotateIdentity) {
         candidate = await LocalIdentity.generate();
@@ -660,7 +636,7 @@ class MeshNode extends CompanionBridge {
       try {
         final fresh = freshVirtualState(sensorSettings);
         if (preserveName) fresh.prefs.nodeName = prefs.nodeName;
-        await _runState(() async {
+        await _stateQueue.run(() async {
           final s = store;
           if (s != null) await s.flush();
           await _saveState(fresh);
@@ -669,7 +645,6 @@ class MeshNode extends CompanionBridge {
         _notifyStateChanged();
 
         _clearIdentityRuntimeState();
-        _storageDiagnostic = null;
         _lastRxRssi = 0;
         _lastRxSnrScaled = 0;
         _txAirMicros = 0;
@@ -725,20 +700,12 @@ class MeshNode extends CompanionBridge {
   /// contacts, channels, preferences, queue, advert paths and custom sensor
   /// settings are deliberately retained.
   void _clearIdentityRuntimeState() {
-    _cancelAckSchedules();
-    for (final ack in _pendingAcks) {
-      ack.timer.cancel();
-    }
-    _pendingAcks.clear();
+    _cancelTransientSessions();
     _pendingDiscovery.clear();
     _pendingTelemetry.clear();
     _pendingBinary.clear();
     _pendingLogin = null;
     _pendingStatus = null;
-    for (final conn in _connections.values) {
-      conn.stop();
-    }
-    _connections.clear();
     _transientContacts.clear();
     _seenPackets.clear();
     _sentGroupPacketHashes.clear();
@@ -827,13 +794,11 @@ class MeshNode extends CompanionBridge {
   /// The virtual companion's advertised capabilities. Physical board strings,
   /// capacities, firmware code and path mode are never copied in; only the
   /// physical client-repeat byte is reported because it controls the modem.
-  DeviceInfo get virtualDeviceInfo => buildVirtualDeviceInfo(
+  @override
+  DeviceInfo getDeviceInfo() => buildVirtualDeviceInfo(
         clientRepeat: physical.clientRepeat,
         pathHashMode: prefs.pathHashMode,
       );
-
-  @override
-  DeviceInfo getDeviceInfo() => virtualDeviceInfo;
 
   /// Adopt capabilities from a fresh physical DEVICE_INFO/SELF_INFO read.
   ///
@@ -887,8 +852,7 @@ class MeshNode extends CompanionBridge {
         message: 'invalid sensor setting value',
       );
     }
-    final candidate = Map<String, String>.of(_customVars)
-      ..[name] = normalized;
+    final candidate = Map<String, String>.of(_customVars)..[name] = normalized;
     await _commit(_snapshot(customSettings: candidate));
   }
 
@@ -933,7 +897,7 @@ class MeshNode extends CompanionBridge {
   Contact? getContactByKeyPrefix(Uint8List prefix) {
     for (final c in _allContacts) {
       if (c.publicKey.length >= prefix.length &&
-          _bytesEqual(c.publicKey.sublist(0, prefix.length), prefix)) {
+          bytesEqual(c.publicKey.sublist(0, prefix.length), prefix)) {
         return c;
       }
     }
@@ -946,8 +910,7 @@ class MeshNode extends CompanionBridge {
     bool hasGps = true,
     int? identityGeneration,
   }) async {
-    if (identityGeneration != null &&
-        !_identityCurrent(identityGeneration)) {
+    if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
     final candidate = [for (final c in contacts) c.clone()];
@@ -957,8 +920,7 @@ class MeshNode extends CompanionBridge {
     if (idx >= 0) {
       final old = candidate[idx];
       final updated = contact.clone()
-        ..syncSince =
-            contact.syncSince != 0 ? contact.syncSince : old.syncSince
+        ..syncSince = contact.syncSince != 0 ? contact.syncSince : old.syncSince
         ..rawAdvert = contact.rawAdvert ?? old.rawAdvert;
       if (!hasGps) {
         updated
@@ -986,14 +948,13 @@ class MeshNode extends CompanionBridge {
       _snapshot(contacts: candidate),
       identityGeneration: identityGeneration,
     );
-    if (identityGeneration != null &&
-        !_identityCurrent(identityGeneration)) {
+    if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
 
     // Promote over a transient slot only after the persistent add succeeded.
-    _transientContacts.removeWhere(
-        (c) => c.publicKeyHex == contact.publicKeyHex);
+    _transientContacts
+        .removeWhere((c) => c.publicKeyHex == contact.publicKeyHex);
     if (evicted != null) {
       _forgetContactState(evicted.publicKey);
       pushSink?.pushContactDeleted(evicted.publicKey);
@@ -1093,8 +1054,7 @@ class MeshNode extends CompanionBridge {
           secret: Uint8List.fromList(e.value.secret),
         ),
     };
-    candidate[index] =
-        Channel(name: name, secret: Uint8List.fromList(secret));
+    candidate[index] = Channel(name: name, secret: Uint8List.fromList(secret));
     await _commit(_snapshot(channels: candidate));
   }
 
@@ -1180,7 +1140,7 @@ class MeshNode extends CompanionBridge {
     final device = attachedDevicePublicKey;
     final isDevice = device != null &&
         device.length == pubkey.length &&
-        _bytesEqual(device, pubkey);
+        bytesEqual(device, pubkey);
     if (isDevice || (localRouter?.isBlockedPeer(pubkey) ?? false)) {
       throw const CompanionOperationError(
         errCodeIllegalArg,
@@ -1196,7 +1156,6 @@ class MeshNode extends CompanionBridge {
     int txtType = txtTypePlain,
     int attempt = 0,
     int? timestamp,
-    bool waitForAck = false,
   }) async {
     if (_semanticBlocked) return const SentResult.failure();
     _ensureNotBlockedPeer(pubkey);
@@ -1329,14 +1288,12 @@ class MeshNode extends CompanionBridge {
     }
     if (dataType == dataTypeReserved) return false;
     if (payload.length > maxGroupDataLength) return false;
-    if (payload.length >
-        maxGroupDataLengthForCompanionPath(pathBytes.length)) {
+    if (payload.length > maxGroupDataLengthForCompanionPath(pathBytes.length)) {
       return false;
     }
     // The whole SEND_CHANNEL_DATA payload must fit the companion frame, in
     // addition to the 165-byte radio-side group-data limit.
-    final commandLength =
-        5 + (flood ? 0 : pathBytes.length) + payload.length;
+    final commandLength = 5 + (flood ? 0 : pathBytes.length) + payload.length;
     if (commandLength > maxCompanionPayloadSize) return false;
     final packet = PacketBuilder.createGroupData(
       channel: channel,
@@ -1414,14 +1371,7 @@ class MeshNode extends CompanionBridge {
     // Like the firmware, ensure a contact exists (a zero-hop one if unknown) so
     // the response can be decrypted and matched.
     var contact = getContactByKey(pubkey);
-    if (contact == null) {
-      try {
-        contact = await _ensureAnonContact(pubkey);
-      } on CompanionOperationError catch (e) {
-        _storageDiagnostic = e.message;
-        return const SentResult.failure();
-      }
-    }
+    contact ??= await _ensureAnonContact(pubkey);
     if (!_identityCurrent(generation)) return const SentResult.failure();
     final tag = _nextRequestTag();
     final flood = !contact.hasDirectRoute;
@@ -1698,7 +1648,10 @@ class MeshNode extends CompanionBridge {
     final tag = _nextRequestTag();
     final rng = Random.secure();
     final data = Uint8List.fromList([
-      0, 0, 0, 0,
+      0,
+      0,
+      0,
+      0,
       ...List<int>.generate(4, (_) => rng.nextInt(256)),
     ]);
     final flood = !contact.hasDirectRoute;
@@ -1733,10 +1686,10 @@ class MeshNode extends CompanionBridge {
   @override
   bool logout(Uint8List pubkey) {
     final prefix = Uint8List.fromList(pubkey.sublist(0, 4));
-    if (_pendingLogin != null && _bytesEqual(_pendingLogin!, prefix)) {
+    if (_pendingLogin != null && bytesEqual(_pendingLogin!, prefix)) {
       _pendingLogin = null;
     }
-    if (_pendingStatus != null && _bytesEqual(_pendingStatus!, prefix)) {
+    if (_pendingStatus != null && bytesEqual(_pendingStatus!, prefix)) {
       _pendingStatus = null;
     }
     _stopKeepAlive(pubkey);
@@ -1992,7 +1945,7 @@ class MeshNode extends CompanionBridge {
     int cr, {
     bool? clientRepeat,
   }) {
-    return _runConfig(() async {
+    return _configQueue.run(() async {
       if (freqHz < 150000000 || freqHz > 2500000000) {
         throw _illegalArgument('frequency outside 150000-2500000 kHz');
       }
@@ -2070,7 +2023,7 @@ class MeshNode extends CompanionBridge {
 
   @override
   Future<void> setTxPower(int dbm) {
-    return _runConfig(() async {
+    return _configQueue.run(() async {
       if (dbm < -9) {
         throw _illegalArgument('TX power below -9 dBm');
       }
@@ -2105,11 +2058,7 @@ class MeshNode extends CompanionBridge {
   Future<void> _readBackSelfInfo({bool markReconcile = true}) async {
     try {
       final info = await link.selfInfo();
-      prefs.frequencyHz = info.radioParams.frequencyHz;
-      prefs.bandwidthHz = info.radioParams.bandwidthHz;
-      prefs.spreadingFactor = info.radioParams.spreadingFactor;
-      prefs.codingRate = info.radioParams.codingRate;
-      prefs.txPowerDbm = info.txPowerDbm;
+      _applyRadioParams(info.radioParams);
       prefs.maxTxPower = info.maxTxPower;
       physical = physical.copyWith(maxTxPower: info.maxTxPower);
       _radioCacheUncertain = false;
@@ -2125,6 +2074,21 @@ class MeshNode extends CompanionBridge {
     _notifyPhysicalConfigChanged();
   }
 
+  void _applyRadioParams(RadioParams params) {
+    prefs
+      ..frequencyHz = params.frequencyHz
+      ..bandwidthHz = params.bandwidthHz
+      ..spreadingFactor = params.spreadingFactor
+      ..codingRate = params.codingRate
+      ..txPowerDbm = params.txPowerDbm;
+  }
+
+  void _applyTuningParams(TuningParams params) {
+    prefs
+      ..rxDelayBaseMs = params.rxDelayBaseMs
+      ..airtimeFactorMs = params.airtimeFactorMs;
+  }
+
   /// Adopt the connected device's actual radio parameters as the node's own
   /// without re-configuring the device (used at attach/reconnect time).
   ///
@@ -2132,11 +2096,7 @@ class MeshNode extends CompanionBridge {
   /// location and other preferences are virtual state and are deliberately not
   /// adopted here.
   void syncRadioParams(RadioParams params) {
-    prefs.frequencyHz = params.frequencyHz;
-    prefs.bandwidthHz = params.bandwidthHz;
-    prefs.spreadingFactor = params.spreadingFactor;
-    prefs.codingRate = params.codingRate;
-    prefs.txPowerDbm = params.txPowerDbm;
+    _applyRadioParams(params);
     _radioCacheUncertain = false;
     _radioCacheVerified = true;
     _needsReconcile = false;
@@ -2159,15 +2119,14 @@ class MeshNode extends CompanionBridge {
 
   @override
   Future<TuningParams> getTuningParams() {
-    return _runConfig(() async {
+    return _configQueue.run(() async {
       if (_needsReconcile) {
         _needsReconcile = false;
         await _readBackSelfInfo(markReconcile: false);
       }
       try {
         final params = await link.tuningParams();
-        prefs.rxDelayBaseMs = params.rxDelayBaseMs;
-        prefs.airtimeFactorMs = params.airtimeFactorMs;
+        _applyTuningParams(params);
         _hasTuningCache = true;
         _tuningCacheVerified = true;
         _physicalDiagnostic = null;
@@ -2190,7 +2149,7 @@ class MeshNode extends CompanionBridge {
 
   @override
   Future<void> setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) {
-    return _runConfig(() async {
+    return _configQueue.run(() async {
       final params = TuningParams(
         rxDelayBaseMs: rxDelayBaseMs,
         airtimeFactorMs: airtimeFactorMs,
@@ -2207,16 +2166,14 @@ class MeshNode extends CompanionBridge {
         throw _operationError(e);
       }
 
-      prefs.rxDelayBaseMs = rxDelayBaseMs;
-      prefs.airtimeFactorMs = airtimeFactorMs;
+      _applyTuningParams(params);
       _hasTuningCache = true;
       _tuningCacheVerified = false;
       _physicalDiagnostic = null;
       _persist();
       try {
         final readBack = await link.tuningParams();
-        prefs.rxDelayBaseMs = readBack.rxDelayBaseMs;
-        prefs.airtimeFactorMs = readBack.airtimeFactorMs;
+        _applyTuningParams(readBack);
         _tuningCacheVerified = true;
         _persist();
       } on DeviceCommandError catch (e) {
@@ -2290,7 +2247,6 @@ class MeshNode extends CompanionBridge {
 
   String _cliDeviceError(DeviceCommandError e) => switch (e.kind) {
         DeviceCommandErrorKind.disabled => 'Error: disabled',
-        DeviceCommandErrorKind.unsupported => 'Error: unsupported',
         DeviceCommandErrorKind.timeout ||
         DeviceCommandErrorKind.disconnected ||
         DeviceCommandErrorKind.malformed =>
@@ -2381,7 +2337,7 @@ class MeshNode extends CompanionBridge {
     }
 
     try {
-      final reply = await _runConfig(() async {
+      final reply = await _configQueue.run(() async {
         final text = await link.runCliCommand(spec.command);
         await _refreshPhysicalCliCaches(spec, text);
         return text;
@@ -2434,8 +2390,7 @@ class MeshNode extends CompanionBridge {
   Future<void> _refreshTuningCacheDirect() async {
     try {
       final params = await link.tuningParams();
-      prefs.rxDelayBaseMs = params.rxDelayBaseMs;
-      prefs.airtimeFactorMs = params.airtimeFactorMs;
+      _applyTuningParams(params);
       _hasTuningCache = true;
       _tuningCacheVerified = true;
       _physicalDiagnostic = null;
@@ -2461,9 +2416,8 @@ class MeshNode extends CompanionBridge {
     switch (statsType) {
       case statsTypeCore:
         final batteryMv = await battery.refresh();
-        final uptime = (clock.monotonicMilliseconds -
-                _startedAtMonotonicMillis)
-            .clamp(0, 0xFFFFFFFF) ~/
+        final uptime = (clock.monotonicMilliseconds - _startedAtMonotonicMillis)
+                .clamp(0, 0xFFFFFFFF) ~/
             1000;
         return {
           'battery_mv': batteryMv,
@@ -2525,8 +2479,7 @@ class MeshNode extends CompanionBridge {
     // or identity storage is uncertain. Already-started sends are awaited by
     // the replacement path before the key changes.
     if (_semanticBlocked) return;
-    if (identityGeneration != null &&
-        !_identityCurrent(identityGeneration)) {
+    if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
     if (flood && !preservePath) {
@@ -2680,7 +2633,7 @@ class MeshNode extends CompanionBridge {
     if (!await PacketBuilder.verifyAdvert(packet.payload)) return;
     if (!_identityCurrent(generation)) return;
     final pubkey = Uint8List.fromList(packet.payload.sublist(0, pubKeySize));
-    if (_bytesEqual(pubkey, identity.publicKey)) return;
+    if (bytesEqual(pubkey, identity.publicKey)) return;
     final ts = BufferReader(packet.payload.sublist(pubKeySize)).readUInt32Le();
     final appdata =
         packet.payload.sublist(pubKeySize + timestampSize + signatureSize);
@@ -2699,8 +2652,8 @@ class MeshNode extends CompanionBridge {
       _transientContacts.removeAt(transientIdx);
     }
 
-    final existingIdx = contacts
-        .indexWhere((c) => c.publicKeyHex == bytesToHex(pubkey));
+    final existingIdx =
+        contacts.indexWhere((c) => c.publicKeyHex == bytesToHex(pubkey));
     if (existingIdx >= 0) {
       final existing = contacts[existingIdx];
       if (ts <= existing.lastAdvertTimestamp) return;
@@ -2725,8 +2678,7 @@ class MeshNode extends CompanionBridge {
           ),
           identityGeneration: generation,
         );
-      } on CompanionOperationError catch (e) {
-        _storageDiagnostic = e.message;
+      } on CompanionOperationError {
         return;
       }
       if (!_identityCurrent(generation)) return;
@@ -2755,11 +2707,11 @@ class MeshNode extends CompanionBridge {
           _snapshot(advertPaths: pathCache),
           identityGeneration: generation,
         );
-      } on CompanionOperationError catch (e) {
-        _storageDiagnostic = e.message;
+      } on CompanionOperationError {
+        // Path caching is best-effort; discovery still notifies the client.
       }
       if (!_identityCurrent(generation)) return;
-      pushSink?.pushNewAdvert(_contactFrameBody(newContact));
+      pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
       return;
     }
 
@@ -2773,11 +2725,11 @@ class MeshNode extends CompanionBridge {
             _snapshot(advertPaths: pathCache),
             identityGeneration: generation,
           );
-        } on CompanionOperationError catch (e) {
-          _storageDiagnostic = e.message;
+        } on CompanionOperationError {
+          // Path caching is best-effort; the contact table is already full.
         }
         if (!_identityCurrent(generation)) return;
-        pushSink?.pushNewAdvert(_contactFrameBody(newContact));
+        pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
         pushSink?.pushContactsFull();
         return;
       }
@@ -2796,11 +2748,10 @@ class MeshNode extends CompanionBridge {
         identityGeneration: generation,
       );
     } on CompanionOperationError catch (e) {
-      _storageDiagnostic = e.message;
       if (!_identityCurrent(generation)) return;
       if (e.code == errCodeTableFull) {
         // Virtual quota is a full-table condition for auto-add discovery.
-        pushSink?.pushNewAdvert(_contactFrameBody(newContact));
+        pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
         pushSink?.pushContactsFull();
       }
       return;
@@ -2849,10 +2800,8 @@ class MeshNode extends CompanionBridge {
       final end = (9 + textLen).clamp(0, plaintext.length);
       // The firmware ACKs signed messages with
       // sha256(plaintext up to the text end | self pubkey).
-      ackBytes = Uint8List.fromList(
-          CryptoUtils.sha256(
-                  [...plaintext.sublist(0, end), ...identity.publicKey])
-              .sublist(0, 4));
+      ackBytes = Uint8List.fromList(CryptoUtils.sha256(
+          [...plaintext.sublist(0, end), ...identity.publicKey]).sublist(0, 4));
     } else {
       if (txtType == txtTypeCliCommand) {
         rawCommand = _readCStringBytes(plaintext, r.position);
@@ -2882,7 +2831,8 @@ class MeshNode extends CompanionBridge {
     if (!_identityCurrent(generation)) return;
     final expectsAck = txtType == txtTypePlain || txtType == txtTypeSigned;
     if (expectsAck) {
-      _scheduleTextAck(packet, sender, await identity.sharedSecret(sender.publicKey), ackBytes);
+      _scheduleTextAck(packet, sender,
+          await identity.sharedSecret(sender.publicKey), ackBytes);
     }
 
     // Deduplicate before any remote CLI side effect. Duplicate reception of
@@ -2983,8 +2933,8 @@ class MeshNode extends CompanionBridge {
       reply = _cliOperationError(e);
     }
     if (!_identityCurrent(generation)) return;
-    _scheduleCliReply(sender, requestTimestamp, _cliReply(prefix, reply),
-        generation);
+    _scheduleCliReply(
+        sender, requestTimestamp, _cliReply(prefix, reply), generation);
   }
 
   void _scheduleCliReply(
@@ -3005,7 +2955,7 @@ class MeshNode extends CompanionBridge {
     String reply,
     int generation,
   ) async {
-    if (!_identityCurrent(generation) || _semanticBlocked) return;
+    if (!_identityCurrent(generation)) return;
     var timestamp = clock.wallSeconds;
     if (timestamp <= requestTimestamp) timestamp = requestTimestamp + 1;
     if (timestamp <= _lastPacketTimestamp) timestamp = _lastPacketTimestamp + 1;
@@ -3092,29 +3042,9 @@ class MeshNode extends CompanionBridge {
     bool peerOrigin = false,
   }) async {
     if (packet.payload.length < 3) return;
-    final channelHash = packet.payload[0];
-    Channel? channel;
-    int? channelIdx;
-    channels.forEach((idx, ch) {
-      if (_channelHash(ch.secret) == channelHash) {
-        channel = ch;
-        channelIdx = idx;
-      }
-    });
-    if (channel == null) return;
-    final ch = channel!;
-    final secret = Uint8List(32);
-    secret.setRange(0, ch.secret.length.clamp(0, 32), ch.secret);
-    late Uint8List plaintext;
-    try {
-      plaintext = CryptoUtils.macThenDecrypt(
-        secret.sublist(0, 16),
-        secret,
-        packet.payload.sublist(1),
-      );
-    } catch (_) {
-      return;
-    }
+    final decoded = _decryptChannelPayload(packet);
+    if (decoded == null) return;
+    final plaintext = decoded.plaintext;
     final packetHash = bytesToHex(packet.calculatePacketHash());
     final sentCount = _sentGroupPacketHashes[packetHash];
     if (sentCount != null) {
@@ -3142,7 +3072,7 @@ class MeshNode extends CompanionBridge {
         timestamp: ts,
         text: text,
         isChannel: true,
-        channelIdx: channelIdx ?? 0,
+        channelIdx: decoded.channelIdx,
         pathLen: packet.isRouteFlood ? packet.pathLenByte : 0xFF,
         snr: packet.snr,
         rssi: packet.rssi,
@@ -3153,29 +3083,9 @@ class MeshNode extends CompanionBridge {
 
   Future<void> _onGroupData(Packet packet, int generation) async {
     if (packet.payload.length < 4) return;
-    final channelHash = packet.payload[0];
-    Channel? channel;
-    int? channelIdx;
-    channels.forEach((idx, ch) {
-      if (_channelHash(ch.secret) == channelHash) {
-        channel = ch;
-        channelIdx = idx;
-      }
-    });
-    if (channel == null) return;
-    final ch = channel!;
-    final secret = Uint8List(32);
-    secret.setRange(0, ch.secret.length.clamp(0, 32), ch.secret);
-    late Uint8List plaintext;
-    try {
-      plaintext = CryptoUtils.macThenDecrypt(
-        secret.sublist(0, 16),
-        secret,
-        packet.payload.sublist(1),
-      );
-    } catch (_) {
-      return;
-    }
+    final decoded = _decryptChannelPayload(packet);
+    if (decoded == null) return;
+    final plaintext = decoded.plaintext;
     if (plaintext.length < 3) return;
     final dataType = plaintext[0] | (plaintext[1] << 8);
     final dataLen = plaintext[2];
@@ -3190,7 +3100,7 @@ class MeshNode extends CompanionBridge {
       QueuedMessage(
         senderKey: Uint8List(32),
         isChannel: true,
-        channelIdx: channelIdx ?? 0,
+        channelIdx: decoded.channelIdx,
         pathLen: packet.isRouteFlood ? packet.pathLenByte : 0xFF,
         snr: packet.snr,
         rssi: packet.rssi,
@@ -3201,6 +3111,36 @@ class MeshNode extends CompanionBridge {
       ),
       identityGeneration: generation,
     );
+  }
+
+  ({int channelIdx, Uint8List plaintext})? _decryptChannelPayload(
+    Packet packet,
+  ) {
+    final channelHash = packet.payload[0];
+    Channel? channel;
+    var channelIdx = 0;
+    channels.forEach((idx, ch) {
+      if (_channelHash(ch.secret) == channelHash) {
+        channel = ch;
+        channelIdx = idx;
+      }
+    });
+    if (channel == null) return null;
+    final ch = channel!;
+    final secret = Uint8List(32);
+    secret.setRange(0, ch.secret.length.clamp(0, 32), ch.secret);
+    try {
+      return (
+        channelIdx: channelIdx,
+        plaintext: CryptoUtils.macThenDecrypt(
+          secret.sublist(0, 16),
+          secret,
+          packet.payload.sublist(1),
+        ),
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _onRequest(Packet packet, int generation) async {
@@ -3308,7 +3248,7 @@ class MeshNode extends CompanionBridge {
     required int requestPathLen,
     required int generation,
   }) async {
-    if (!_identityCurrent(generation) || _semanticBlocked) return;
+    if (!_identityCurrent(generation)) return;
     if (requestWasFlood) {
       final secret = await identity.sharedSecret(sender.publicKey);
       if (!_identityCurrent(generation)) return;
@@ -3364,8 +3304,7 @@ class MeshNode extends CompanionBridge {
     // Raw custom delivery is direct-route zero-hop only. Flooded/raw-in-transit
     // packets remain available through the full 0x88 raw RX log. A local peer
     // copy is already at its final endpoint even when a direct path remains.
-    if (!packet.isRouteDirect ||
-        (!peerOrigin && packet.pathHashCount != 0)) {
+    if (!packet.isRouteDirect || (!peerOrigin && packet.pathHashCount != 0)) {
       return;
     }
     if (_isDuplicate(packet.calculatePacketHash())) return;
@@ -3445,9 +3384,9 @@ class MeshNode extends CompanionBridge {
     if (idx < 0) return;
     final pending = _pendingAcks.removeAt(idx);
     pending.timer.cancel();
-    final tripTime = (clock.monotonicMilliseconds -
-            pending.sentAtMonotonicMillis)
-        .clamp(0, 0xFFFFFFFF);
+    final tripTime =
+        (clock.monotonicMilliseconds - pending.sentAtMonotonicMillis)
+            .clamp(0, 0xFFFFFFFF);
     pushSink?.pushSendConfirmed(
       crc & 0xFFFFFFFF,
       tripTimeMs: tripTime,
@@ -3489,8 +3428,8 @@ class MeshNode extends CompanionBridge {
       if (!isTransient && _identityCurrent(generation)) {
         try {
           await addUpdateContact(sender, identityGeneration: generation);
-        } on CompanionOperationError catch (e) {
-          _storageDiagnostic = e.message;
+        } on CompanionOperationError {
+          // The route update is still useful even if persistence fails.
         }
         if (!_identityCurrent(generation)) return;
         pushSink?.pushPathUpdated(sender.publicKey);
@@ -3552,7 +3491,7 @@ class MeshNode extends CompanionBridge {
         inPath != null &&
         inPathLen != null &&
         discoveryTarget != null &&
-        _bytesEqual(discoveryTarget, senderPubkey)) {
+        bytesEqual(discoveryTarget, senderPubkey)) {
       _pendingDiscovery.remove(tag);
       pushSink?.pushPathDiscoveryResponse(
         Uint8List.fromList(senderPubkey.sublist(0, 6)),
@@ -3566,7 +3505,7 @@ class MeshNode extends CompanionBridge {
 
     final telemetryTarget = _pendingTelemetry[tag];
     if (telemetryTarget != null &&
-        _bytesEqual(telemetryTarget, senderPubkey) &&
+        bytesEqual(telemetryTarget, senderPubkey) &&
         data.length > 4) {
       _pendingTelemetry.remove(tag);
       pushSink?.pushTelemetryResponse(
@@ -3577,7 +3516,7 @@ class MeshNode extends CompanionBridge {
     }
 
     final binaryTarget = _pendingBinary[tag];
-    if (binaryTarget != null && _bytesEqual(binaryTarget, senderPubkey)) {
+    if (binaryTarget != null && bytesEqual(binaryTarget, senderPubkey)) {
       _pendingBinary.remove(tag);
       pushSink?.pushBinaryResponse(
         tag,
@@ -3586,13 +3525,13 @@ class MeshNode extends CompanionBridge {
       return;
     }
 
-    if (_pendingLogin != null && _bytesEqual(_pendingLogin!, prefix4)) {
+    if (_pendingLogin != null && bytesEqual(_pendingLogin!, prefix4)) {
       _pendingLogin = null;
       _handleLoginResponse(senderPubkey, data);
       return;
     }
 
-    if (_pendingStatus != null && _bytesEqual(_pendingStatus!, prefix4)) {
+    if (_pendingStatus != null && bytesEqual(_pendingStatus!, prefix4)) {
       _pendingStatus = null;
       if (data.length > 4) {
         pushSink?.pushStatusResponse(
@@ -3620,8 +3559,7 @@ class MeshNode extends CompanionBridge {
       return;
     }
     if (data.length > 4 && data[4] == respServerLoginOk) {
-      final tag =
-          data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
+      final tag = data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24);
       final keepAliveSecs = data.length > 5 ? data[5] * 16 : 0;
       if (keepAliveSecs > 0) _startKeepAlive(senderPubkey, keepAliveSecs);
       pushSink?.pushLoginSuccess(
@@ -3675,9 +3613,6 @@ class MeshNode extends CompanionBridge {
 
   /// Current virtual storage usage in the wire's KiB unit.
   int get storageUsedKb => storageKibForBytes(storageUsedBytes);
-
-  /// Last persistence/quota diagnostic (never contains secrets).
-  String? get storageDiagnostic => _storageDiagnostic;
 
   /// Current advert-path cache size (capped at 64).
   int get advertPathCacheLength => _advertPaths.length;
@@ -3736,21 +3671,17 @@ class MeshNode extends CompanionBridge {
     if (s == null) return;
     try {
       await s.save(state);
-      _storageDiagnostic = null;
-    } on NodeStorageQuotaError catch (e) {
-      _storageDiagnostic = e.toString();
+    } on NodeStorageQuotaError {
       throw CompanionOperationError(
         errCodeTableFull,
         message: 'virtual storage quota exceeded',
       );
     } on FileSystemException catch (e) {
-      _storageDiagnostic = e.message;
       throw CompanionOperationError(
         errCodeFileIoError,
         message: 'persistence failed: ${e.message}',
       );
     } catch (e) {
-      _storageDiagnostic = '$e';
       throw CompanionOperationError(
         errCodeFileIoError,
         message: 'persistence failed',
@@ -3776,14 +3707,12 @@ class MeshNode extends CompanionBridge {
         message: 'virtual reset in progress',
       ));
     }
-    return _runState(() async {
-      if (identityGeneration != null &&
-          !_identityCurrent(identityGeneration)) {
+    return _stateQueue.run(() async {
+      if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
         return;
       }
       await _saveState(candidate);
-      if (identityGeneration != null &&
-          !_identityCurrent(identityGeneration)) {
+      if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
         return;
       }
       _publish(candidate);
@@ -3819,18 +3748,13 @@ class MeshNode extends CompanionBridge {
     PhysicalCapabilities? capabilities,
   }) {
     if (params != null) {
-      prefs.frequencyHz = params.frequencyHz;
-      prefs.bandwidthHz = params.bandwidthHz;
-      prefs.spreadingFactor = params.spreadingFactor;
-      prefs.codingRate = params.codingRate;
-      prefs.txPowerDbm = params.txPowerDbm;
+      _applyRadioParams(params);
       _radioCacheUncertain = false;
       _radioCacheVerified = true;
       _needsReconcile = false;
     }
     if (tuning != null) {
-      prefs.rxDelayBaseMs = tuning.rxDelayBaseMs;
-      prefs.airtimeFactorMs = tuning.airtimeFactorMs;
+      _applyTuningParams(tuning);
       _hasTuningCache = true;
       _tuningCacheVerified = true;
     }
@@ -3853,14 +3777,12 @@ class MeshNode extends CompanionBridge {
     int? identityGeneration,
   }) async {
     if (_retired) return;
-    if (identityGeneration != null &&
-        !_identityCurrent(identityGeneration)) {
+    if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
     final newOnly = _snapshot(queue: [message]);
     if (newOnly.storageBytes > storageQuotaBytes) {
       _packetStats['recv_errors'] = (_packetStats['recv_errors'] ?? 0) + 1;
-      _storageDiagnostic = 'incoming message dropped: virtual storage quota';
       return; // the new message alone does not fit; keep older messages
     }
     final candidateQueue = [
@@ -3878,18 +3800,15 @@ class MeshNode extends CompanionBridge {
     }
     if (candidate.storageBytes > storageQuotaBytes) {
       _packetStats['recv_errors'] = (_packetStats['recv_errors'] ?? 0) + 1;
-      _storageDiagnostic = 'incoming message dropped: virtual storage quota';
       return;
     }
     try {
       await _commit(candidate, identityGeneration: identityGeneration);
-    } on CompanionOperationError catch (e) {
+    } on CompanionOperationError {
       _packetStats['recv_errors'] = (_packetStats['recv_errors'] ?? 0) + 1;
-      _storageDiagnostic = e.message;
       return;
     }
-    if (identityGeneration != null &&
-        !_identityCurrent(identityGeneration)) {
+    if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
     pushSink?.pushMsgWaiting();
@@ -3905,11 +3824,11 @@ class MeshNode extends CompanionBridge {
   Future<void> _persistCurrent() async {
     if (_retired) return;
     try {
-      await _runState(() async {
+      await _stateQueue.run(() async {
         await _saveState(_snapshot());
       });
-    } on CompanionOperationError catch (e) {
-      _storageDiagnostic = e.message;
+    } on CompanionOperationError {
+      // Reported through the mutation that triggered persistence.
     }
   }
 
@@ -3927,20 +3846,20 @@ class MeshNode extends CompanionBridge {
       return matches;
     });
     _connections.remove(hex)?.stop();
-    if (_pendingLogin != null && _bytesEqual(_pendingLogin!, _prefix4(pubkey))) {
+    if (_pendingLogin != null && bytesEqual(_pendingLogin!, _prefix4(pubkey))) {
       _pendingLogin = null;
     }
     if (_pendingStatus != null &&
-        _bytesEqual(_pendingStatus!, _prefix4(pubkey))) {
+        bytesEqual(_pendingStatus!, _prefix4(pubkey))) {
       _pendingStatus = null;
     }
-    _pendingTelemetry.removeWhere((_, value) => _bytesEqual(value, pubkey));
-    _pendingDiscovery.removeWhere((_, value) => _bytesEqual(value, pubkey));
-    _pendingBinary.removeWhere((_, value) => _bytesEqual(value, pubkey));
+    _pendingTelemetry.removeWhere((_, value) => bytesEqual(value, pubkey));
+    _pendingDiscovery.removeWhere((_, value) => bytesEqual(value, pubkey));
+    _pendingBinary.removeWhere((_, value) => bytesEqual(value, pubkey));
   }
 
-  static Uint8List _prefix4(Uint8List pubkey) =>
-      Uint8List.fromList(pubkey.sublist(0, pubkey.length < 4 ? pubkey.length : 4));
+  static Uint8List _prefix4(Uint8List pubkey) => Uint8List.fromList(
+      pubkey.sublist(0, pubkey.length < 4 ? pubkey.length : 4));
 
   /// A received advert saved for sharing/export, always normalized to flood so
   /// region transport codes are not persisted.
@@ -3979,8 +3898,7 @@ class MeshNode extends CompanionBridge {
     final prefix = Uint8List.fromList(pubkey.sublist(0, 7));
     final key = bytesToHex(prefix);
     final map = <String, AdvertPath>{
-      for (final entry in _advertPaths.entries)
-        entry.key: entry.value.clone(),
+      for (final entry in _advertPaths.entries) entry.key: entry.value.clone(),
     };
     map[key] = AdvertPath(
       publicKeyPrefix: prefix,
@@ -4003,29 +3921,5 @@ class MeshNode extends CompanionBridge {
       map.remove(oldestKey);
     }
     return map;
-  }
-
-  Uint8List _contactFrameBody(Contact c) {
-    final pathLen = c.outPathLen < 0 ? 0xFF : c.outPathLen.clamp(0, 255);
-    final w = BufferWriter()
-      ..writeBytes(c.publicKey)
-      ..writeByte(c.advType)
-      ..writeByte(c.flags)
-      ..writeByte(pathLen);
-    w.writeBytesPadded(c.outPath, maxPathSize);
-    w.writeCString(c.name, maxNameSize);
-    w.writeUInt32Le(c.lastAdvertTimestamp);
-    w.writeInt32Le((c.gpsLat * 1e6).round());
-    w.writeInt32Le((c.gpsLon * 1e6).round());
-    w.writeUInt32Le(c.lastmod);
-    return w.toBytes();
-  }
-
-  static bool _bytesEqual(List<int> a, List<int> b) {
-    if (a.length != b.length) return false;
-    for (var i = 0; i < a.length; i++) {
-      if (a[i] != b[i]) return false;
-    }
-    return true;
   }
 }

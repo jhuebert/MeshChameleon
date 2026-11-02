@@ -400,18 +400,21 @@ internet.
 
 Simulator/byte-level conformance does not prove hardware behavior. BLE/TCP
 transports, RF immediate-vs-reboot application, WiFi reconfiguration, client
-repeat, independent physical DMs, remote CLI, sensor telemetry, and Android
-background/Doze survival remain a separate **PENDING** hardware matrix. No live
-adverts/TX or firmware flashing is part of the default test gate.
+repeat, independent physical DMs, remote CLI, sensor telemetry, Android
+background/Doze survival, and the `flutter_secure_storage` v9→v10 key migration
+remain a separate **PENDING** hardware matrix. No live adverts/TX or firmware
+flashing is part of the default test gate.
 
 ## Identity storage
 
-Each identity key is kept in its own Android Keystore-backed
-`EncryptedSharedPreferences` slot (`meshcore_identity_v2/<id>`, AES-256-GCM).
-Android backup is disabled (`allowBackup="false"`). Pre-0.1.0 single-identity
-data (`meshcore_identity_v1`, root-level `node_state.json`) is outside the
-migration baseline and is deliberately ignored. See `SECURITY.md` for the full
-model and its caveats.
+Each identity key is kept in its own Android Keystore-backed secure-storage
+slot (`meshcore_identity_v2/<id>`). `flutter_secure_storage` v10 uses AES-256-GCM
+values with RSA-OAEP key wrapping and migrates v9
+`EncryptedSharedPreferences` entries on first access. Android backup is disabled
+(`allowBackup="false"`). Pre-0.1.0 single-identity data
+(`meshcore_identity_v1`, root-level `node_state.json`) is outside the migration
+baseline and is deliberately ignored. See `SECURITY.md` for the full model and
+its caveats.
 
 ## Background execution (Android)
 
@@ -472,8 +475,14 @@ Rules:
 `.github/workflows/ci.yml` runs `scripts/check.sh`, the lockfile and store-asset
 checks, and a debug APK build on every pull request and push to `main`. It pins
 Flutter 3.47.7 and Temurin Java 17; keep the release workflow on the same
-versions. `.github/workflows/release.yml` is the manual signed release; see
-`docs/RELEASE_PLAN.md` for the keystore and secret prerequisites.
+versions. Both workflows use the `ubuntu-latest` runner.
+`.github/workflows/release.yml` is the manual signed release; see the
+workflow header for the keystore and secret prerequisites.
+
+The app uses built-in Kotlin (`android.builtInKotlin=true`). Flutter still warns
+that `flutter_file_dialog` 3.3.3 applies the Kotlin Gradle Plugin because that
+plugin pins an AGP 8 buildscript; no newer release exists. Revisit or replace it
+when upstream ships built-in Kotlin support. The other plugins are warning-free.
 
 ## Release signing
 

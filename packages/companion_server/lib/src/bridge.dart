@@ -178,7 +178,6 @@ class CompanionBridge {
     int txtType = txtTypePlain,
     int attempt = 0,
     int? timestamp,
-    bool waitForAck = false,
   }) async =>
       const SentResult.failure();
 
@@ -224,7 +223,6 @@ class CompanionBridge {
   /// Set the physical radio tuning parameters (`CMD_SET_TUNING_PARAMS`).
   Future<void> setTuningParams(int rxDelayBaseMs, int airtimeFactorMs) async {}
 
-  /// Run a CLI command on the device (`CMD_RUN_CLI_COMMAND`, fw v14+).
   /// Run a CLI command on the device, returning its reply text (fw v14+).
   /// Returns null when unsupported (device firmware < v14).
   Future<String?> runCliCommand(String command) async => null;

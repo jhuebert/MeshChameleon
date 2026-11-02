@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import 'package:mesh_node/mesh_node.dart';
+import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// In-process virtual mesh shared by the live identity runtimes.
 ///
@@ -22,7 +23,7 @@ class LocalMeshRouter implements LocalPeerRouter {
   @override
   bool isBlockedPeer(Uint8List publicKey) {
     final blocked = _blockedPeer?.call();
-    return blocked != null && _bytesEqual(blocked, publicKey);
+    return blocked != null && bytesEqual(blocked, publicKey);
   }
 
   @override
@@ -31,7 +32,7 @@ class LocalMeshRouter implements LocalPeerRouter {
     required Uint8List fromPublicKey,
   }) async {
     for (final node in _liveNodes().toList()) {
-      if (_bytesEqual(node.identity.publicKey, fromPublicKey)) continue;
+      if (bytesEqual(node.identity.publicKey, fromPublicKey)) continue;
       try {
         await node.receiveLocal(packet);
       } catch (e) {
@@ -39,12 +40,4 @@ class LocalMeshRouter implements LocalPeerRouter {
       }
     }
   }
-}
-
-bool _bytesEqual(List<int> a, List<int> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
 }

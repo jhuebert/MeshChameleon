@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'json_file.dart';
+
 /// How the last-used companion device was reached.
 ///
 /// [simulated] is the in-memory fake device used for testing without a radio.
@@ -17,9 +19,10 @@ const int sessionConfigVersion = 1;
 
 /// Persisted description of the last device session.
 ///
-/// This is deliberately small and separate from [NodeStore]: it captures *how
-/// to reach the radio*, not the mesh node's contacts/channels/queue. It lets the
-/// app restore the last session (device link + proxy port) on the next launch.
+/// This is deliberately small and separate from the node state store: it
+/// captures *how to reach the radio*, not the mesh node's
+/// contacts/channels/queue. It lets the app restore the last session (device
+/// link + proxy port) on the next launch.
 class SessionConfig {
   const SessionConfig({
     required this.kind,
@@ -116,17 +119,21 @@ class SessionStore {
   SessionStore({File? file}) : _file = file;
 
   File? _file;
+  JsonFile? _json;
 
-  Future<File> _resolve() async {
+  Future<File> _resolveFile() async {
     final existing = _file;
     if (existing != null) return existing;
     final dir = await getApplicationSupportDirectory();
     return _file = File('${dir.path}/session.json');
   }
 
+  Future<JsonFile> _resolveJson() async =>
+      _json ??= JsonFile(await _resolveFile());
+
   Future<SessionConfig?> load() async {
     try {
-      final file = await _resolve();
+      final file = await _resolveFile();
       if (!await file.exists()) return null;
       final decoded = jsonDecode(await file.readAsString());
       if (decoded is! Map<String, dynamic>) return null;
@@ -138,14 +145,11 @@ class SessionStore {
   }
 
   Future<void> save(SessionConfig config) async {
-    final file = await _resolve();
-    await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(config.toJson()));
+    await (await _resolveJson()).write(config.toJson());
   }
 
   /// Remove the saved session, used when restoring a backup without one.
   Future<void> delete() async {
-    final file = await _resolve();
-    if (await file.exists()) await file.delete();
+    await (await _resolveJson()).delete();
   }
 }

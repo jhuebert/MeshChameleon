@@ -309,7 +309,7 @@ void main() {
         reason: 'readback reflects active, not saved-only, RF');
     expect(node.prefs.spreadingFactor, 10);
     expect(node.physicalRadioRequiresReboot, isTrue);
-    expect(node.radioRequiresReboot, isTrue);
+    expect(node.physicalRadioRequiresReboot, isTrue);
 
     link.cliReply = 'OK';
     expect(await node.runCliCommand('set tx 17'), 'OK');

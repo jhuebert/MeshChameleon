@@ -72,12 +72,7 @@ class BackupService {
     return <String, Object?>{
       'index': index.toJson(),
       'identities': identities,
-      'network_connections': <String, Object?>{
-        'version': networkConnectionHistoryVersion,
-        'connections': [
-          for (final connection in network) connection.toJson(),
-        ],
-      },
+      'network_connections': encodeNetworkConnections(network),
       'session': (await sessionStore.load())?.toJson(),
     };
   }
@@ -348,27 +343,11 @@ class BackupService {
 
   List<SavedNetworkConnection>? _parseNetwork(Object? raw) {
     if (raw == null) return null;
-    if (raw is! Map) {
+    try {
+      return decodeNetworkConnections(raw, strict: true);
+    } on FormatException {
       throw const BackupException('That backup has invalid saved connections');
     }
-    final version = raw['version'];
-    final connections = raw['connections'];
-    if (version is! num ||
-        version.toInt() != networkConnectionHistoryVersion ||
-        connections is! List) {
-      throw const BackupException('That backup has invalid saved connections');
-    }
-    final parsed = <SavedNetworkConnection>[];
-    for (final item in connections) {
-      final connection = SavedNetworkConnection.fromJson(item);
-      if (connection == null) {
-        throw const BackupException(
-          'That backup has invalid saved connections',
-        );
-      }
-      parsed.add(connection);
-    }
-    return parsed;
   }
 
   SessionConfig? _parseSession(Object? raw) {

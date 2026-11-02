@@ -21,16 +21,17 @@ MeshCore key as hex in a `meshcore_identity_v2/<identity-id>` slot in
 `flutter_secure_storage` with:
 
 ```dart
-AndroidOptions(encryptedSharedPreferences: true)
+AndroidOptions(resetOnError: false, migrateWithBackup: true)
 ```
 
-- On Android this is Jetpack Security **`EncryptedSharedPreferences`**:
-  AES-256-GCM for values, with the master key stored in the **Android Keystore**.
-  This is preferred over the plugin's legacy default
-  (`encryptedSharedPreferences: false`), which wraps an AES-CBC key with
-  RSA/ECB/PKCS1Padding. Both are Keystore-backed, but GCM + AES-256 is the
-  modern, non-malleable construction.
-- `EncryptedSharedPreferences` requires API 23+; the app's `minSdk` is 24.
+- On Android, `flutter_secure_storage` v10 encrypts values with
+  **AES-256-GCM** and wraps the data key with **RSA-OAEP-SHA256**; the wrapping
+  key lives in the **Android Keystore**. This replaces the v9 Jetpack Security
+  `EncryptedSharedPreferences` backend, whose entries are migrated on first
+  access with a crash-resistant backup.
+- `resetOnError` is disabled. An unreadable key is surfaced as unavailable and
+  the catalog is preserved; storage failures never silently erase identities.
+- The plugin requires API 23+; the app's `minSdk` is 24.
 - Keys are **never** logged. Diagnostics identify identities by stable record id
   or public-key prefix only.
 - The MeshChameleon UI has no per-identity reveal/import/export/regenerate

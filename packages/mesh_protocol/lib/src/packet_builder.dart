@@ -23,13 +23,23 @@ class PacketBuilder {
     return p;
   }
 
+  static ({Uint8List secret, int hash}) _channelKey(Channel channel) {
+    final secret = Uint8List(32);
+    secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
+    return (
+      secret: secret,
+      hash: CryptoUtils.sha256(secret.sublist(0, 16))[0],
+    );
+  }
+
+  static const int _maxAdvertDataSize = 96;
+
   /// Encode advert application data (`flags | [lat/lon] | name`).
   static Uint8List encodeAdvertData({
     required String name,
     double lat = 0.0,
     double lon = 0.0,
-    int flags = advertFlagIsChatNode,
-    int maxAdvertDataSize = 96,
+    int flags = advTypeChat,
   }) {
     final buf = BufferWriter();
     var finalFlags = flags;
@@ -42,7 +52,7 @@ class PacketBuilder {
       buf.writeInt32Le((lon * 1e6).round());
     }
     if (name.isNotEmpty) {
-      final remaining = maxAdvertDataSize - buf.length;
+      final remaining = _maxAdvertDataSize - buf.length;
       final nameBytes = BufferWriter()..writeString(name);
       buf.writeBytes(nameBytes.toBytes().take(remaining).toList());
     }
@@ -55,13 +65,14 @@ class PacketBuilder {
     required String name,
     double lat = 0.0,
     double lon = 0.0,
-    int flags = advertFlagIsChatNode,
+    int flags = advTypeChat,
     bool flood = true,
     required int timestamp,
   }) async {
     final ts = timestamp;
     final pubkey = identity.publicKey;
-    final appdata = encodeAdvertData(name: name, lat: lat, lon: lon, flags: flags);
+    final appdata =
+        encodeAdvertData(name: name, lat: lat, lon: lon, flags: flags);
     final body = Uint8List.fromList([
       ...pubkey,
       ...(BufferWriter()..writeUInt32Le(ts)).toBytes(),
@@ -75,7 +86,8 @@ class PacketBuilder {
       ...appdata,
     ]);
     return _packet(
-      Packet.createHeader(payloadTypeAdvert, flood ? routeTypeFlood : routeTypeDirect),
+      Packet.createHeader(
+          payloadTypeAdvert, flood ? routeTypeFlood : routeTypeDirect),
       payload,
     );
   }
@@ -95,24 +107,6 @@ class PacketBuilder {
       ..writeBytes(text.where((b) => b != 0).toList());
     return CryptoUtils.sha256([...input.toBytes(), ...senderPubkey])
         .sublist(0, 4);
-  }
-
-  /// Create an ACK hash packet for a received message.
-  static Packet createAck({
-    required Uint8List senderPubkey,
-    required int timestamp,
-    required int attempt,
-    required List<int> text,
-  }) {
-    if (senderPubkey.length != pubKeySize) {
-      throw ArgumentError('pubkey must be 32 bytes');
-    }
-    return createAckPacket(ackHash(
-      timestamp: timestamp,
-      flagsByte: attempt,
-      text: text,
-      senderPubkey: senderPubkey,
-    ));
   }
 
   /// Create a discrete ACK packet from a precomputed ACK payload.
@@ -194,7 +188,8 @@ class PacketBuilder {
 
     final secret = await identity.sharedSecret(contact.publicKey);
     final aesKey = secret.sublist(0, 16);
-    final cipher = CryptoUtils.encryptThenMac(aesKey, secret, plaintext.toBytes());
+    final cipher =
+        CryptoUtils.encryptThenMac(aesKey, secret, plaintext.toBytes());
 
     final destHash = contact.publicKey[0];
     final srcHash = identity.publicKey[0];
@@ -225,18 +220,23 @@ class PacketBuilder {
     required String senderName,
     required int timestamp,
   }) {
-    final secret = Uint8List(32);
-    secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
-    final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
+    final (:secret, :hash) = _channelKey(channel);
     final ts = timestamp;
     final content = '$senderName: $message';
     final plaintext = BufferWriter()
       ..writeUInt32Le(ts)
       ..writeByte(0x00)
       ..writeString(content);
-    final cipher = CryptoUtils.encryptThenMac(secret.sublist(0, 16), secret, plaintext.toBytes());
-    final payload = Uint8List.fromList([channelHash, ...cipher]);
-    return _packet(Packet.createHeader(payloadTypeGrpTxt, routeTypeFlood), payload);
+    final cipher = CryptoUtils.encryptThenMac(
+      secret.sublist(0, 16),
+      secret,
+      plaintext.toBytes(),
+    );
+    final payload = Uint8List.fromList([hash, ...cipher]);
+    return _packet(
+      Packet.createHeader(payloadTypeGrpTxt, routeTypeFlood),
+      payload,
+    );
   }
 
   /// Build a group *data* packet (`PAYLOAD_TYPE_GRP_DATA`) for [channel].
@@ -280,16 +280,17 @@ class PacketBuilder {
             path.length, 'path.length', 'expected $expected path bytes');
       }
     }
-    final secret = Uint8List(32);
-    secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
-    final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
+    final (:secret, :hash) = _channelKey(channel);
     final plaintext = BufferWriter()
       ..writeUInt16Le(dataType)
       ..writeByte(data.length)
       ..writeBytes(data);
     final cipher = CryptoUtils.encryptThenMac(
-        secret.sublist(0, 16), secret, plaintext.toBytes());
-    final payload = Uint8List.fromList([channelHash, ...cipher]);
+      secret.sublist(0, 16),
+      secret,
+      plaintext.toBytes(),
+    );
+    final payload = Uint8List.fromList([hash, ...cipher]);
     final pkt = _packet(
       Packet.createHeader(
           payloadTypeGrpData, flood ? routeTypeFlood : routeTypeDirect),
@@ -357,7 +358,8 @@ class PacketBuilder {
       ..writeBytes(data);
     final secret = await identity.sharedSecret(contact.publicKey);
     final aesKey = secret.sublist(0, 16);
-    final cipher = CryptoUtils.encryptThenMac(aesKey, secret, plaintext.toBytes());
+    final cipher =
+        CryptoUtils.encryptThenMac(aesKey, secret, plaintext.toBytes());
     final payload = Uint8List.fromList([
       contact.publicKey[0],
       identity.publicKey[0],
@@ -428,8 +430,8 @@ class PacketBuilder {
     ]);
     final useFlood = flood ?? !contact.hasDirectRoute;
     final pkt = _packet(
-      Packet.createHeader(payloadTypeAnonReq,
-          useFlood ? routeTypeFlood : routeTypeDirect),
+      Packet.createHeader(
+          payloadTypeAnonReq, useFlood ? routeTypeFlood : routeTypeDirect),
       payload,
     );
     if (!useFlood) pkt.setPath(contact.outPath, contact.outPathLen);
@@ -439,11 +441,12 @@ class PacketBuilder {
   /// Verify an advert packet and extract its encoded appdata.
   static Future<bool> verifyAdvert(Uint8List payload) async {
     // payload = pubkey(32) + timestamp(4) + signature(64) + appdata(...)
-    if (payload.length < pubKeySize + timestampSize + signatureSize) return false;
+    if (payload.length < pubKeySize + timestampSize + signatureSize)
+      return false;
     final pubkey = payload.sublist(0, pubKeySize);
     final ts = payload.sublist(pubKeySize, pubKeySize + timestampSize);
-    final signature = payload.sublist(pubKeySize + timestampSize,
-        pubKeySize + timestampSize + signatureSize);
+    final signature = payload.sublist(
+        pubKeySize + timestampSize, pubKeySize + timestampSize + signatureSize);
     final appdata = payload.sublist(pubKeySize + timestampSize + signatureSize);
     return LocalIdentity.verify(
       Uint8List.fromList([...pubkey, ...ts, ...appdata]),

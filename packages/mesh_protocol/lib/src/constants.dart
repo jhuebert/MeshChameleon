@@ -172,6 +172,7 @@ const int respServerLoginOk = 0x00;
 
 // Telemetry permission bits (`TELEM_PERM_*` in the firmware).
 const int telemPermBase = 0x01;
+
 /// CayenneLPP channel the firmware uses for the local node's own telemetry.
 const int telemChannelSelf = 1;
 const int telemPermLocation = 0x02;
@@ -195,11 +196,7 @@ const int autoAddRepeater = 0x04;
 const int autoAddRoom = 0x08;
 const int autoAddSensor = 0x10;
 
-// Advert flags
-const int advertFlagIsChatNode = 0x01;
-const int advertFlagIsRepeater = 0x02;
-const int advertFlagIsRoomServer = 0x03;
-const int advertFlagIsSensor = 0x04;
+// Advert flags. The low nibble carries an `advType*` value, not a bit field.
 const int advertFlagHasLocation = 0x10;
 const int advertFlagFeature1 = 0x20;
 const int advertFlagFeature2 = 0x40;
@@ -239,6 +236,7 @@ const int phVerMask = 0x03;
 // Sizes
 // ---------------------------------------------------------------------------
 const int pubKeySize = 32;
+
 /// The MeshCore expanded private key `[scalar(32)][prefix(32)]`.
 const int privateKeySize = 64;
 const int signatureSize = 64;
@@ -320,7 +318,8 @@ const String activeDeviceVersion = 'meshchameleon $productVersion';
 const String targetCompatibilityVersion = 'v1.18.0';
 
 /// Virtual CLI version string (product version follows the app release).
-const String virtualCliVersion = 'MeshChameleon $productVersion (MeshCore 1.18.0)';
+const String virtualCliVersion =
+    'MeshChameleon $productVersion (MeshCore 1.18.0)';
 
 /// Persistent virtual contact capacity (SPEC S2, owner-updated to match the
 /// Xiao WIO companion's reported 350). DEVICE_INFO reports /2 (=175).

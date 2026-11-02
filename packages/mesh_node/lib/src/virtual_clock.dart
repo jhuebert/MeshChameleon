@@ -26,11 +26,10 @@ class VirtualClock {
   int get wallSeconds =>
       _hostWallClock().millisecondsSinceEpoch ~/ 1000 + _offsetSeconds;
 
-  /// Virtual wall time truncated to whole seconds.
-  DateTime get wallTime =>
-      DateTime.fromMillisecondsSinceEpoch(wallSeconds * 1000);
-
-  /// Monotonic elapsed milliseconds since this clock was created.
+  /// Monotonic elapsed milliseconds from the injected monotonic source.
+  ///
+  /// The default source is process-wide (it starts on first use); callers must
+  /// not assume it starts at zero when a [VirtualClock] is constructed.
   int get monotonicMilliseconds => _monotonicClock().inMilliseconds;
 
   /// Monotonic elapsed whole seconds.

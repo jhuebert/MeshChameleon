@@ -1,8 +1,9 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
+
+import 'json_file.dart';
 
 /// Current on-disk saved-network-connection schema.
 const int networkConnectionHistoryVersion = 1;
@@ -13,9 +14,11 @@ const int maxSavedNetworkConnections = 20;
 /// Largest timestamp representable by [DateTime] (UTC epoch milliseconds).
 const int _maxTimestampMilliseconds = 8640000000000000;
 
-bool _isValidHost(String host) => host.trim().isNotEmpty;
+/// Whether [host] is a non-empty TCP/IP host name or address.
+bool isValidTcpHost(String host) => host.trim().isNotEmpty;
 
-bool _isValidPort(int port) => port >= 1 && port <= 65535;
+/// Whether [port] is a usable non-zero TCP port.
+bool isValidTcpPort(int port) => port >= 1 && port <= 65535;
 
 bool _isValidTimestamp(int timestamp) =>
     timestamp > 0 && timestamp <= _maxTimestampMilliseconds;
@@ -57,8 +60,8 @@ class SavedNetworkConnection {
     final trimmedHost = host.trim();
     final portValue = port.toInt();
     final connectedAt = lastConnectedAt.toInt();
-    if (!_isValidHost(trimmedHost) ||
-        !_isValidPort(portValue) ||
+    if (!isValidTcpHost(trimmedHost) ||
+        !isValidTcpPort(portValue) ||
         portValue != port ||
         !_isValidTimestamp(connectedAt) ||
         connectedAt != lastConnectedAt) {
@@ -103,8 +106,8 @@ List<SavedNetworkConnection> withRecordedNetworkConnection(
   required int connectedAt,
 }) {
   final trimmedHost = host.trim();
-  if (!_isValidHost(trimmedHost) ||
-      !_isValidPort(port) ||
+  if (!isValidTcpHost(trimmedHost) ||
+      !isValidTcpPort(port) ||
       !_isValidTimestamp(connectedAt)) {
     return List<SavedNetworkConnection>.unmodifiable(current);
   }
@@ -133,8 +136,8 @@ List<SavedNetworkConnection> withRestoredNetworkConnection(
   List<SavedNetworkConnection> current,
   SavedNetworkConnection connection,
 ) {
-  if (!_isValidHost(connection.host) ||
-      !_isValidPort(connection.port) ||
+  if (!isValidTcpHost(connection.host) ||
+      !isValidTcpPort(connection.port) ||
       !_isValidTimestamp(connection.lastConnectedAt)) {
     return _order(current);
   }
@@ -184,6 +187,49 @@ int _compare(SavedNetworkConnection a, SavedNetworkConnection b) {
   return a.port.compareTo(b.port);
 }
 
+/// Encode the persisted `{version, connections}` history shape.
+Map<String, Object?> encodeNetworkConnections(
+  List<SavedNetworkConnection> connections,
+) =>
+    <String, Object?>{
+      'version': networkConnectionHistoryVersion,
+      'connections': [
+        for (final connection in connections) connection.toJson(),
+      ],
+    };
+
+/// Decode a persisted history payload.
+///
+/// With [strict], any invalid record rejects the whole payload; otherwise
+/// invalid records are skipped and the valid ones are returned.
+List<SavedNetworkConnection> decodeNetworkConnections(
+  Object? value, {
+  bool strict = false,
+}) {
+  if (value is! Map) {
+    throw const FormatException('invalid saved connection history');
+  }
+  final version = value['version'];
+  final rawConnections = value['connections'];
+  if (version is! num ||
+      version.toInt() != networkConnectionHistoryVersion ||
+      rawConnections is! List) {
+    throw const FormatException('invalid saved connection history');
+  }
+  final parsed = <SavedNetworkConnection>[];
+  for (final raw in rawConnections) {
+    final connection = SavedNetworkConnection.fromJson(raw);
+    if (connection == null) {
+      if (strict) {
+        throw const FormatException('invalid saved connection');
+      }
+      continue;
+    }
+    parsed.add(connection);
+  }
+  return _order(parsed);
+}
+
 /// Persists successfully reached TCP companion targets.
 ///
 /// Reads are best-effort and never throw: a missing, corrupt, or unreadable
@@ -193,69 +239,38 @@ class NetworkConnectionStore {
   NetworkConnectionStore({File? file}) : _file = file;
 
   File? _file;
-  Future<void> _tail = Future<void>.value();
+  JsonFile? _json;
 
-  Future<File> _resolve() async {
+  Future<File> _resolveFile() async {
     final existing = _file;
     if (existing != null) return existing;
     final dir = await getApplicationSupportDirectory();
     return _file = File('${dir.path}/network_connections.json');
   }
 
+  Future<JsonFile> _resolveJson() async =>
+      _json ??= JsonFile(await _resolveFile());
+
   Future<List<SavedNetworkConnection>> load() async {
     try {
-      final file = await _resolve();
+      final file = await _resolveFile();
       if (!await file.exists()) return const [];
       final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map<String, dynamic>) return const [];
-      final version = decoded['version'];
-      if (version is! num ||
-          version.toInt() != networkConnectionHistoryVersion) {
-        return const [];
-      }
-      final rawConnections = decoded['connections'];
-      if (rawConnections is! List) return const [];
-
-      return _order(
-        rawConnections
-            .map(SavedNetworkConnection.fromJson)
-            .whereType<SavedNetworkConnection>(),
-      );
+      return decodeNetworkConnections(decoded);
     } catch (_) {
       // A corrupt or unreadable file must never block startup.
       return const [];
     }
   }
 
-  Future<void> save(List<SavedNetworkConnection> connections) {
+  Future<void> save(List<SavedNetworkConnection> connections) async {
     final snapshot = _order(connections);
-    // Serialize writes so overlapping saves cannot share the temp file.
-    final write = _tail.then(
-      (_) => _write(snapshot),
-      onError: (Object _) => _write(snapshot),
-    );
-    _tail = write.then((_) {}, onError: (Object _) {});
-    return write;
-  }
-
-  Future<void> _write(List<SavedNetworkConnection> connections) async {
-    final file = await _resolve();
-    await file.parent.create(recursive: true);
-    final encoded = jsonEncode(<String, Object?>{
-      'version': networkConnectionHistoryVersion,
-      'connections': connections
-          .map((connection) => connection.toJson())
-          .toList(growable: false),
-    });
-    final temp = File('${file.path}.tmp');
-    await temp.writeAsString(encoded, flush: true);
-    await temp.rename(file.path);
+    await (await _resolveJson()).write(encodeNetworkConnections(snapshot));
   }
 
   /// Remove the saved connection history, used when restoring a backup
   /// without one.
   Future<void> delete() async {
-    final file = await _resolve();
-    if (await file.exists()) await file.delete();
+    await (await _resolveJson()).delete();
   }
 }

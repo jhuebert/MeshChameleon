@@ -4,7 +4,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'build_info.dart';
 
-/// Cached per-identity packet counters from [MeshNode.sessionStats].
+/// Cached per-identity packet counters from the live node session stats.
 class MeshPacketStats {
   const MeshPacketStats({
     required this.sent,
@@ -161,7 +161,7 @@ class DiagnosticsSnapshot {
     }
 
     line('MeshChameleon diagnostics');
-    line('Generated: ${formatUtc(generatedAt)}');
+    line('Generated: ${formatUtc(generatedAt, includeSeconds: true)}');
     section('Build');
     for (final entry in buildInfo.details) {
       line('${entry.key}: ${entry.value}');
@@ -315,10 +315,3 @@ String formatCount(int value) => value.toString().replaceAllMapped(
       RegExp(r'(\d)(?=(\d{3})+$)'),
       (match) => '${match[1]},',
     );
-
-String formatUtc(DateTime value) {
-  final utc = value.toUtc();
-  String two(int number) => number.toString().padLeft(2, '0');
-  return '${utc.year}-${two(utc.month)}-${two(utc.day)} '
-      '${two(utc.hour)}:${two(utc.minute)}:${two(utc.second)} UTC';
-}

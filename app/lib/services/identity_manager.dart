@@ -170,8 +170,9 @@ class IdentityManager {
     }
     _hub = SharedRadioHub(base);
     _router = LocalMeshRouter(
-      liveNodes: () =>
-          _runtimes.where((runtime) => runtime.node != null).map((r) => r.node!),
+      liveNodes: () => _runtimes
+          .where((runtime) => runtime.node != null)
+          .map((r) => r.node!),
       blockedPeer: () => _devicePublicKey,
       onLog: onLog,
     );
@@ -179,7 +180,7 @@ class IdentityManager {
 
     _index = await repository.loadOrCreate();
     _activeId = _index!.activeId;
-    final seenKeys = <String, String>{};
+    final seenKeys = <String>{};
     for (final record in _index!.identities) {
       if (!record.enabled) continue;
       await _startRuntime(
@@ -201,7 +202,7 @@ class IdentityManager {
     required PhysicalCapabilities physical,
     required RadioParams radioParams,
     required TuningParams? tuning,
-    required Map<String, String> seenKeys,
+    required Set<String> seenKeys,
   }) async {
     if (!record.enabled) return;
     final runtime = IdentityRuntime(record);
@@ -220,15 +221,14 @@ class IdentityManager {
       onLog?.call('Identity ${record.id} conflicts with the attached radio');
       return;
     }
-    if (seenKeys.containsKey(publicHex)) {
+    if (!seenKeys.add(publicHex)) {
       runtime.unavailableReason = 'Duplicate identity key';
       onLog?.call('Identity ${record.id} duplicates another identity key');
       return;
     }
-    seenKeys[publicHex] = record.id;
 
     var effectiveRecord = record;
-    if (!_bytesEqual(record.publicKey, identity.publicKey)) {
+    if (!bytesEqual(record.publicKey, identity.publicKey)) {
       try {
         effectiveRecord = await repository.updatePublicKey(
           record.id,
@@ -441,22 +441,6 @@ class IdentityManager {
     }
   }
 
-  Future<void> mirrorOutbound(
-    Uint8List packet, {
-    required Uint8List fromPublicKey,
-  }) async {
-    for (final runtime in List<IdentityRuntime>.of(_runtimes)) {
-      final node = runtime.node;
-      if (node == null) continue;
-      if (_bytesEqual(node.identity.publicKey, fromPublicKey)) continue;
-      try {
-        await node.receiveLocal(packet);
-      } catch (e) {
-        onLog?.call('Local mirror to one identity failed: $e');
-      }
-    }
-  }
-
   Future<String> suggestName() => repository.suggestName();
 
   Future<IdentityRecord> create({String? name}) async {
@@ -464,11 +448,11 @@ class IdentityManager {
     _index = await repository.loadOrCreate();
     final hub = _hub;
     if (hub != null) {
-      final seenKeys = <String, String>{};
+      final seenKeys = <String>{};
       for (final runtime in _runtimes) {
         final identity = runtime.identity;
         if (identity != null) {
-          seenKeys[bytesToHex(identity.publicKey)] = runtime.record.id;
+          seenKeys.add(bytesToHex(identity.publicKey));
         }
       }
       await _startRuntime(
@@ -514,13 +498,7 @@ class IdentityManager {
   Future<bool> setEnabled(String id, bool enabled) async {
     final index = _index;
     if (index == null) return false;
-    IdentityRecord? record;
-    for (final item in index.identities) {
-      if (item.id == id) {
-        record = item;
-        break;
-      }
-    }
+    var record = index.recordById(id);
     if (record == null) return false;
     if (!enabled && id == _activeId) return false;
     if (record.enabled == enabled) return true;
@@ -547,11 +525,11 @@ class IdentityManager {
           runtime.clear();
         }
       } else if (!_runtimeById.containsKey(id)) {
-        final seenKeys = <String, String>{};
+        final seenKeys = <String>{};
         for (final runtime in _runtimes) {
           final identity = runtime.identity;
           if (identity != null) {
-            seenKeys[bytesToHex(identity.publicKey)] = runtime.record.id;
+            seenKeys.add(bytesToHex(identity.publicKey));
           }
         }
         await _startRuntime(
@@ -599,13 +577,7 @@ class IdentityManager {
     if (_activeId == id) return true;
     final index = _index;
     if (index == null) return false;
-    IdentityRecord? record;
-    for (final item in index.identities) {
-      if (item.id == id) {
-        record = item;
-        break;
-      }
-    }
+    final record = index.recordById(id);
     if (record == null || !record.enabled) return false;
     if (_hub != null) {
       final runtime = _runtimeById[id];
@@ -614,7 +586,7 @@ class IdentityManager {
       final identity = await repository.loadKey(id);
       if (identity == null) return false;
       if (_devicePublicKey != null &&
-          _bytesEqual(identity.publicKey, _devicePublicKey!)) {
+          bytesEqual(identity.publicKey, _devicePublicKey!)) {
         return false;
       }
     }
@@ -646,12 +618,4 @@ class IdentityManager {
     _summaryTimer?.cancel();
     await stopLive(notify: false);
   }
-}
-
-bool _bytesEqual(List<int> a, List<int> b) {
-  if (a.length != b.length) return false;
-  for (var i = 0; i < a.length; i++) {
-    if (a[i] != b[i]) return false;
-  }
-  return true;
 }

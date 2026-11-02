@@ -10,6 +10,7 @@ import '../services/ble_device_link.dart';
 import '../services/device_capabilities.dart';
 import '../services/network_connection_store.dart';
 import '../services/session_store.dart';
+import '../widgets/device_target_icon.dart';
 
 enum _ConnectTab {
   bluetooth('Bluetooth'),
@@ -39,7 +40,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   final _formKey = GlobalKey<FormState>();
   final _hostController = TextEditingController();
   final _portController = TextEditingController();
-  TabController? _tabController;
+  late final TabController _tabController;
   late final Stream<List<ScanResult>> _scanResults;
   bool _scanning = false;
   int _lastTabIndex = 0;
@@ -55,16 +56,13 @@ class _ConnectScreenState extends State<ConnectScreen>
       _ConnectTab.simulated,
     ];
     _setInitialTarget(app);
-    if (_tabs.length > 1) {
-      final controller = TabController(
-        length: _tabs.length,
-        vsync: this,
-        initialIndex: _initialIndex(lastKind),
-      );
-      _lastTabIndex = controller.index;
-      controller.addListener(_handleTabChanged);
-      _tabController = controller;
-    }
+    _tabController = TabController(
+      length: _tabs.length,
+      vsync: this,
+      initialIndex: _initialIndex(lastKind),
+    );
+    _lastTabIndex = _tabController.index;
+    _tabController.addListener(_handleTabChanged);
     // Reading scan results reaches the plugin, which is absent off mobile.
     if (_capabilities.supportsBle) {
       _scanResults = MeshCoreUuids.scanResults;
@@ -73,8 +71,8 @@ class _ConnectScreenState extends State<ConnectScreen>
 
   @override
   void dispose() {
-    _tabController?.removeListener(_handleTabChanged);
-    _tabController?.dispose();
+    _tabController.removeListener(_handleTabChanged);
+    _tabController.dispose();
     if (_scanning) unawaited(_stopScan(updateUi: false));
     _scanning = false;
     _hostController.dispose();
@@ -119,10 +117,9 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   void _handleTabChanged() {
-    final controller = _tabController;
-    if (controller == null || controller.index == _lastTabIndex) return;
-    _lastTabIndex = controller.index;
-    if (_tabs[controller.index] != _ConnectTab.bluetooth && _scanning) {
+    if (_tabController.index == _lastTabIndex) return;
+    _lastTabIndex = _tabController.index;
+    if (_tabs[_tabController.index] != _ConnectTab.bluetooth && _scanning) {
       unawaited(_stopScan());
     }
   }
@@ -147,13 +144,13 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   String? _validateHost(String? value) =>
-      (value ?? '').trim().isEmpty ? 'Enter a host' : null;
+      isValidTcpHost(value ?? '') ? null : 'Enter a host';
 
   String? _validatePort(String? value) {
     final text = (value ?? '').trim();
     if (text.isEmpty) return 'Enter a port';
     final port = int.tryParse(text);
-    if (port == null || port < 1 || port > 65535) {
+    if (port == null || !isValidTcpPort(port)) {
       return 'Enter a port between 1 and 65535';
     }
     return null;
@@ -244,13 +241,9 @@ class _ConnectScreenState extends State<ConnectScreen>
     messenger.showSnackBar(SnackBar(content: Text(message)));
   }
 
-  static String _deviceName(ScanResult result) =>
-      bleCompanionDisplayName(result);
-
   @override
   Widget build(BuildContext context) {
     final app = context.watch<AppState>();
-    final controller = _tabController;
     return PopScope<void>(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) unawaited(app.cancelPendingConnection());
@@ -264,23 +257,20 @@ class _ConnectScreenState extends State<ConnectScreen>
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: _ConnectedDeviceCard(app: app),
               ),
-            if (controller != null)
-              TabBar(
-                controller: controller,
-                tabs: [
-                  for (final tab in _tabs) Tab(text: tab.label),
-                ],
-              ),
+            TabBar(
+              controller: _tabController,
+              tabs: [
+                for (final tab in _tabs) Tab(text: tab.label),
+              ],
+            ),
             if (app.busy) const LinearProgressIndicator(),
             Expanded(
-              child: controller == null
-                  ? _buildTab(app, _tabs.single)
-                  : TabBarView(
-                      controller: controller,
-                      children: [
-                        for (final tab in _tabs) _buildTab(app, tab),
-                      ],
-                    ),
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  for (final tab in _tabs) _buildTab(app, tab),
+                ],
+              ),
             ),
           ],
         ),
@@ -295,7 +285,6 @@ class _ConnectScreenState extends State<ConnectScreen>
       };
 
   Widget _buildBluetoothTab(AppState app) {
-    if (!_capabilities.supportsBle) return const SizedBox.shrink();
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -332,7 +321,7 @@ class _ConnectScreenState extends State<ConnectScreen>
                   for (final result in results)
                     ListTile(
                       leading: const Icon(Icons.bluetooth),
-                      title: Text(_deviceName(result)),
+                      title: Text(bleCompanionDisplayName(result)),
                       subtitle: Text('RSSI ${result.rssi}'),
                       trailing: const Icon(Icons.chevron_right),
                       onTap: app.busy ? null : () => _connectBle(result),
@@ -484,7 +473,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       child: ListTile(
-        leading: Icon(_transportIcon(app.lastSession?.kind)),
+        leading: Icon(deviceTargetIcon(app.lastSession?.kind)),
         title: Text(app.deviceLabel ?? 'Connected device'),
         subtitle: const Text('Connected'),
         trailing: TextButton(
@@ -494,11 +483,4 @@ class _ConnectedDeviceCard extends StatelessWidget {
       ),
     );
   }
-
-  static IconData _transportIcon(DeviceTargetKind? kind) => switch (kind) {
-        DeviceTargetKind.ble => Icons.bluetooth_connected,
-        DeviceTargetKind.tcp => Icons.lan,
-        DeviceTargetKind.simulated => Icons.science_outlined,
-        null => Icons.devices_other,
-      };
 }

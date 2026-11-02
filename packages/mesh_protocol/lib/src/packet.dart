@@ -38,8 +38,7 @@ class Packet {
   int get pathHashCount => PathUtils.getHashCount(pathLenByte);
   int get pathByteLength => PathUtils.getByteLength(pathLenByte);
 
-  static int createHeader(int payloadType, int routeType,
-          [int version = 0]) =>
+  static int createHeader(int payloadType, int routeType, [int version = 0]) =>
       (routeType & phRouteMask) |
       ((payloadType & phTypeMask) << phTypeShift) |
       ((version & phVerMask) << phVerShift);
@@ -65,8 +64,7 @@ class Packet {
     if (scopeKey.length != 16) return;
     if (scopeKey.every((b) => b == 0)) return;
     header = (header & ~phRouteMask) | routeTypeTransportFlood;
-    transportCode0 =
-        CryptoUtils.transportCode(scopeKey, payloadType, payload);
+    transportCode0 = CryptoUtils.transportCode(scopeKey, payloadType, payload);
     transportCode1 = 0;
   }
 
@@ -116,9 +114,4 @@ class Packet {
   /// SHA-256-based packet hash, used for ACKs and dedup.
   Uint8List calculatePacketHash() =>
       CryptoUtils.packetHash(payloadType, pathLenByte, payload);
-
-  int calculateCrc() {
-    final hash = calculatePacketHash();
-    return hash[0] | (hash[1] << 8) | (hash[2] << 16) | (hash[3] << 24);
-  }
 }

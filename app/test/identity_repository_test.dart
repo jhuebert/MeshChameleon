@@ -195,6 +195,32 @@ void main() {
     expect(recovered!.identities, isEmpty);
   });
 
+  test('unsupported_primary_version_recovers_from_last_good_backup', () async {
+    final file = File('${dir.path}/identities/index.json');
+    final store = IdentityIndexStore(file: file);
+    await store.save(IdentityIndex());
+    final key = (await LocalIdentity.generate()).publicKey;
+    await store.save(IdentityIndex(
+      identities: [
+        IdentityRecord(
+          id: 'd' * 32,
+          publicKey: key,
+          name: 'Newer',
+          createdAt: 13,
+        ),
+      ],
+    ));
+
+    await file.writeAsString(jsonEncode({
+      'version': identityIndexVersion + 1,
+      'active_id': null,
+      'identities': [],
+    }));
+    final recovered = await store.load();
+    expect(recovered, isNotNull);
+    expect(recovered!.identities, isEmpty);
+  });
+
   test('corrupt_primary_and_backup_throws_instead_of_replacing', () async {
     final file = File('${dir.path}/index.json');
     final store = IdentityIndexStore(file: file);
