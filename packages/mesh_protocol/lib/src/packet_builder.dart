@@ -8,6 +8,7 @@ import 'crypto.dart';
 import 'identity.dart';
 import 'models.dart';
 import 'packet.dart';
+import 'path_return_codec.dart';
 import 'paths.dart';
 import 'trace_codec.dart';
 
@@ -162,12 +163,14 @@ class PacketBuilder {
     required int extraType,
     required List<int> extra,
   }) {
-    final inner = BufferWriter()..writeByte(pathLenEncoded & 0xFF);
-    inner.writeBytes(path);
-    inner.writeByte(extraType & 0xFF);
-    inner.writeBytes(extra);
+    final inner = encodePathReturnPayload(
+      pathLenEncoded: pathLenEncoded,
+      path: path,
+      extraType: extraType,
+      extra: extra,
+    );
     final aesKey = secret.sublist(0, 16);
-    final cipher = CryptoUtils.encryptThenMac(aesKey, secret, inner.toBytes());
+    final cipher = CryptoUtils.encryptThenMac(aesKey, secret, inner);
     final payload = Uint8List.fromList([destHashByte, srcHashByte, ...cipher]);
     return _packet(
         Packet.createHeader(payloadTypePath, routeTypeFlood), payload);

@@ -15,6 +15,7 @@ export 'src/identity.dart';
 export 'src/models.dart';
 export 'src/packet.dart';
 export 'src/packet_builder.dart';
+export 'src/path_return_codec.dart';
 export 'src/paths.dart';
 export 'src/telemetry_codec.dart';
 export 'src/text.dart';

@@ -961,18 +961,17 @@ class MeshRx {
     );
     if (decrypted == null) return;
     final (sender, plaintext) = decrypted;
-    if (plaintext.isEmpty) return;
-    final pathLenEncoded = plaintext[0];
-    final pathByteLen = PathUtils.getByteLength(pathLenEncoded);
-    final extraStart = 1 + pathByteLen;
-    if (plaintext.length <= extraStart) return;
-    final extraType = plaintext[extraStart];
-    final extra = plaintext.sublist(extraStart + 1);
+    final pathReturn = decodePathReturnPayload(plaintext);
+    if (pathReturn == null) return;
+    final pathLenEncoded = pathReturn.pathLenEncoded;
+    final outPath = pathReturn.path;
+    final extraType = pathReturn.extraType;
+    final extra = pathReturn.extra;
 
-    if (PathUtils.isValidPathLen(pathLenEncoded)) {
+    if (pathReturn.hasValidPath) {
       // A zero-length path is a valid zero-hop direct route. Store it like the
       // firmware does instead of leaving the contact in the flood/unknown state.
-      sender.outPath = Uint8List.fromList(plaintext.sublist(1, extraStart));
+      sender.outPath = Uint8List.fromList(outPath);
       sender.outPathLen = pathLenEncoded;
       sender.lastmod = clock.wallSeconds;
       final isTransient =
@@ -997,7 +996,7 @@ class MeshRx {
       _dispatchResponse(
         sender.publicKey,
         extra,
-        outPath: Uint8List.fromList(plaintext.sublist(1, extraStart)),
+        outPath: outPath,
         outPathLen: pathLenEncoded,
         inPath: packet.path,
         inPathLen: packet.pathLenByte,
