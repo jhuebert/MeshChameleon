@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:companion_server/companion_server.dart';
@@ -64,7 +65,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     VirtualClock? clock,
   })  : prefs = prefs ?? NodePrefs(),
         clock = clock ?? VirtualClock() {
-    channels[0] = defaultPublicChannel();
+    _channels[0] = defaultPublicChannel();
     _customVars.addAll(sensorSettings.initialSettings);
     _startedAtMonotonicMillis = this.clock.monotonicMilliseconds;
     battery = BatteryService(
@@ -283,7 +284,8 @@ class MeshNode extends CompanionBridge implements CliHost {
   late final ContactTable _contactTable;
   List<Contact> get contacts => _contactTable.contacts;
 
-  final Map<int, Channel> channels = {};
+  final Map<int, Channel> _channels = {};
+  Map<int, Channel> get channels => UnmodifiableMapView(_channels);
 
   late final MessageQueue _messageQueue;
   late final AdvertPathCache _advertPathCache;
@@ -312,13 +314,13 @@ class MeshNode extends CompanionBridge implements CliHost {
     _applyState(state);
     // A persisted file may predate the current public-channel defaults or
     // contain provider settings that are no longer supported.
-    channels.putIfAbsent(0, defaultPublicChannel);
+    _channels.putIfAbsent(0, defaultPublicChannel);
     final publicSecret = LocalIdentity.defaultPublicChannelSecret;
-    final publicChannel = channels[0];
+    final publicChannel = _channels[0];
     if (publicChannel != null &&
         bytesEqual(publicChannel.secret, publicSecret) &&
         publicChannel.name.toLowerCase() == 'public') {
-      channels[0] = defaultPublicChannel();
+      _channels[0] = defaultPublicChannel();
     }
     _customVars
       ..clear()
@@ -671,7 +673,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       try {
         final fresh = freshVirtualState(sensorSettings);
         if (preserveName) fresh.prefs.nodeName = prefs.nodeName;
-        await _state.replace(fresh);
+        await _state.replace(fresh, allowResetting: true);
 
         _clearIdentityRuntimeState();
         _transport.resetCounters();
@@ -995,7 +997,7 @@ class MeshNode extends CompanionBridge implements CliHost {
   // -------------------------------------------------------------------------
 
   @override
-  Channel? getChannel(int index) => channels[index];
+  Channel? getChannel(int index) => _channels[index];
 
   @override
   int get maxChannels => virtualMaxChannels;
@@ -1505,7 +1507,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       NodeState(
         prefs: prefs ?? this.prefs,
         contacts: contacts ?? this.contacts,
-        channels: channels ?? this.channels,
+        channels: channels ?? _channels,
         queue: queue ?? _messageQueue.messages,
         advertPaths: advertPaths ?? _advertPaths,
         customSettings: customSettings ?? _customVars,
@@ -1514,7 +1516,7 @@ class MeshNode extends CompanionBridge implements CliHost {
   void _applyState(NodeState state) {
     prefs.copyFrom(state.prefs);
     _contactTable.replacePersistent(state.contacts);
-    channels
+    _channels
       ..clear()
       ..addAll(state.channels);
     _messageQueue.replace(state.queue);
@@ -1533,7 +1535,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       prefs.applyChangesFrom(current.prefs, next.prefs);
     }
     _contactTable.replacePersistent(next.contacts);
-    channels
+    _channels
       ..clear()
       ..addAll(next.channels);
     _messageQueue.replace(next.queue);

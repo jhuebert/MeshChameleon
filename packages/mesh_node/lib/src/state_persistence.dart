@@ -83,7 +83,22 @@ class StatePersistence {
   }
 
   /// Flush pending writes, then durably replace and publish [state].
-  Future<void> replace(NodeState state) async {
+  ///
+  /// A retired node rejects the replacement. A reset in progress rejects it
+  /// too, unless the caller is the reset path itself ([allowResetting]).
+  Future<void> replace(NodeState state, {bool allowResetting = false}) async {
+    if (isRetired()) {
+      throw const CompanionOperationError(
+        errCodeBadState,
+        message: 'mesh node has been retired',
+      );
+    }
+    if (isResetting() && !allowResetting) {
+      throw const CompanionOperationError(
+        errCodeBadState,
+        message: 'virtual reset in progress',
+      );
+    }
     await _queue.run(() async {
       final current = snapshot();
       await store?.flush();

@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
@@ -36,8 +37,8 @@ class ContactTable {
   final List<Contact> _persistent = [];
   final List<Contact> _transient = [];
 
-  /// Persistent contacts in insertion order.
-  List<Contact> get contacts => _persistent;
+  /// Persistent contacts in insertion order (read-only).
+  List<Contact> get contacts => UnmodifiableListView(_persistent);
 
   /// Anonymous request targets. Never persisted or listed.
   List<Contact> get transient => _transient;

@@ -2230,7 +2230,7 @@ void main() {
   test('full_push_order_is_new_advert_then_full', () async {
     bob.prefs.autoaddConfig = autoAddOverwriteOldest;
     for (var i = 0; i < virtualMaxContacts; i++) {
-      bob.contacts.add(Contact(
+      await bob.addUpdateContact(Contact(
         publicKey: _testKey(1000 + i),
         name: 'fav$i',
         flags: 0x01,
@@ -2262,7 +2262,7 @@ void main() {
   test('overwrite_oldest_nonfav_emits_deleted_before_advert', () async {
     bob.prefs.autoaddConfig = autoAddOverwriteOldest;
     for (var i = 0; i < virtualMaxContacts; i++) {
-      bob.contacts.add(Contact(
+      await bob.addUpdateContact(Contact(
         publicKey: _testKey(2000 + i),
         name: 'slot$i',
         flags: 0,
@@ -2302,7 +2302,7 @@ void main() {
   test('new_advert_does_not_destroy_permission_flags_or_outbound_path',
       () async {
     final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 190);
-    bob.contacts.add(Contact(
+    await bob.addUpdateContact(Contact(
       publicKey: id.publicKey,
       name: 'before',
       advType: advTypeChat,
@@ -2352,7 +2352,7 @@ void main() {
   test('stale_equal_timestamp_ignored_and_missing_gps_preserves_old_gps',
       () async {
     final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 200);
-    bob.contacts.add(Contact(
+    await bob.addUpdateContact(Contact(
       publicKey: id.publicKey,
       name: 'old',
       advType: advTypeChat,

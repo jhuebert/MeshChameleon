@@ -1,3 +1,5 @@
+import 'dart:collection';
+
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// FIFO of inbound messages waiting for `CMD_SYNC_NEXT_MESSAGE`.
@@ -7,7 +9,8 @@ class MessageQueue {
   final int maxQueueSize;
   final List<QueuedMessage> _messages = [];
 
-  List<QueuedMessage> get messages => _messages;
+  /// Queued messages in delivery order (read-only).
+  List<QueuedMessage> get messages => UnmodifiableListView(_messages);
 
   int get length => _messages.length;
 

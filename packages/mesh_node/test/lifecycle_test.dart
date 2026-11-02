@@ -45,6 +45,27 @@ Future<(MeshNode, FakeDeviceLink)> _makeNode({
 Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 20));
 
 void main() {
+  test('adoption and sync keep reported limits aligned', () async {
+    final (node, _) = await _makeNode();
+    addTearDown(node.stop);
+
+    node.adoptPhysicalCapabilities(const PhysicalCapabilities(
+      firmwareVerCode: 14,
+      maxTxPower: 28,
+    ));
+    expect(node.physical.maxTxPower, 28);
+    expect(node.prefs.maxTxPower, 28);
+
+    node.syncPhysicalState(
+        capabilities: const PhysicalCapabilities(
+      firmwareVerCode: 14,
+      maxTxPower: 26,
+    ));
+    expect(node.physical.maxTxPower, 26);
+    expect(node.prefs.maxTxPower, 26);
+    expect(node.getDeviceInfo().pathHashMode, node.prefs.pathHashMode);
+  });
+
   test('binary_and_cli_reboot_each_send_exactly_one_device_reboot', () async {
     final (node, link) = await _makeNode();
     addTearDown(node.stop);

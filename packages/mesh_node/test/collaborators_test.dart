@@ -711,6 +711,40 @@ void main() {
       expect((await store.load())?.queue.single.text, 'fresh');
       expect(notified, 1);
     });
+
+    test('replace rejects retired and non-reset callers', () async {
+      var retired = false;
+      var resetting = false;
+      final persistence = StatePersistence(
+        store: InMemoryNodeStore(),
+        storageQuotaBytes: virtualStorageQuotaBytes,
+        snapshot: () => stateWithText(''),
+        publish: (_, __, {bool replace = false}) {},
+        isRetired: () => retired,
+        isResetting: () => resetting,
+        isCurrent: (_) => true,
+        onStateChanged: () {},
+      );
+
+      retired = true;
+      await expectLater(
+        persistence.replace(stateWithText('x')),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeBadState)),
+      );
+
+      retired = false;
+      resetting = true;
+      await expectLater(
+        persistence.replace(stateWithText('x')),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeBadState)),
+      );
+
+      await persistence.replace(stateWithText('reset'), allowResetting: true);
+      resetting = false;
+      await persistence.replace(stateWithText('done'));
+    });
   });
 
   group('PacketTransport', () {
