@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 
 import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
@@ -21,6 +20,7 @@ import 'services/identity_manager.dart';
 import 'services/identity_repository.dart';
 import 'services/identity_runtime.dart';
 import 'services/identity_store.dart';
+import 'services/network_connection_history.dart';
 import 'services/network_connection_store.dart';
 import 'services/notification_content.dart';
 import 'services/proxy_status.dart';
@@ -218,12 +218,16 @@ class AppState extends ChangeNotifier {
   SessionConfig? lastSession;
   bool autoResume = false;
 
-  List<SavedNetworkConnection> _savedNetworkConnections = const [];
-  Future<void>? _networkConnectionMutations;
-
   /// Successful network targets, newest first.
+  late final NetworkConnectionHistory _networkHistory =
+      NetworkConnectionHistory(
+    store: networkConnectionStore,
+    onLog: log,
+    onChanged: notifyListeners,
+  );
+
   List<SavedNetworkConnection> get savedNetworkConnections =>
-      UnmodifiableListView(_savedNetworkConnections);
+      _networkHistory.connections;
 
   /// Whether the OS exempts the app from battery optimizations (null until
   /// queried; always null on non-Android platforms).
@@ -319,7 +323,6 @@ class AppState extends ChangeNotifier {
     final manager = await _ensureManager();
     await manager.load();
     final session = await sessionStore.load();
-    final savedConnections = await networkConnectionStore.load();
     lastSession = session;
     if (session != null) {
       port = session.proxyPort;
@@ -331,7 +334,7 @@ class AppState extends ChangeNotifier {
     }
     // Load the history before auto-resume so a resumed TCP session refreshes
     // its target instead of replacing the saved list.
-    _savedNetworkConnections = savedConnections;
+    await _networkHistory.load();
     notifyListeners();
     if (resume) await _maybeResumeSession();
   }
@@ -634,54 +637,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _recordNetworkConnection(String host, int port) =>
-      _mutateNetworkConnections(() async {
-        _publishNetworkConnections(
-          withRecordedNetworkConnection(
-            _savedNetworkConnections,
-            host: host,
-            port: port,
-            connectedAt: DateTime.now().toUtc().millisecondsSinceEpoch,
-          ),
-        );
-        try {
-          await networkConnectionStore.save(_savedNetworkConnections);
-        } catch (e) {
-          log('Could not save network connection history: $e');
-        }
-      });
-
-  /// Serializes history read-modify-write operations.
-  ///
-  /// The store already serializes file writes; this also prevents a delete,
-  /// Undo, or successful connect from publishing a stale in-memory snapshot.
-  Future<T> _mutateNetworkConnections<T>(Future<T> Function() action) {
-    final previous = _networkConnectionMutations;
-    final run = previous == null
-        ? action()
-        : previous.then(
-            (_) => action(),
-            onError: (Object _) => action(),
-          );
-    _networkConnectionMutations = run.then((_) {}, onError: (Object _) {});
-    return run;
-  }
-
-  void _publishNetworkConnections(List<SavedNetworkConnection> connections) {
-    _savedNetworkConnections = connections;
-    notifyListeners();
-  }
+      _networkHistory.record(host, port);
 
   /// Remove a saved target. The in-memory list changes only after the file
   /// write succeeds, so a failed delete leaves the card visible.
   Future<bool> removeSavedNetworkConnection(
     SavedNetworkConnection connection,
   ) =>
-      _mutateNetworkConnections(
-        () => _saveNetworkConnections(
-          withoutNetworkConnection(_savedNetworkConnections, connection.key),
-          failureLog: 'Could not remove the saved network connection',
-        ),
-      );
+      _networkHistory.remove(connection);
 
   /// Restore a removed target with its original timestamp.
   ///
@@ -689,26 +652,7 @@ class AppState extends ChangeNotifier {
   Future<bool> restoreSavedNetworkConnection(
     SavedNetworkConnection connection,
   ) =>
-      _mutateNetworkConnections(
-        () => _saveNetworkConnections(
-          withRestoredNetworkConnection(_savedNetworkConnections, connection),
-          failureLog: 'Could not restore the saved network connection',
-        ),
-      );
-
-  Future<bool> _saveNetworkConnections(
-    List<SavedNetworkConnection> next, {
-    required String failureLog,
-  }) async {
-    try {
-      await networkConnectionStore.save(next);
-    } catch (e) {
-      log('$failureLog: $e');
-      return false;
-    }
-    _publishNetworkConnections(next);
-    return true;
-  }
+      _networkHistory.restore(connection);
 
   bool _linkReadyForAttach(RadioLink link) =>
       !_connectCancelled && link.currentState == LinkState.connected;
