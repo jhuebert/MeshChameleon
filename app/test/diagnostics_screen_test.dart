@@ -10,6 +10,8 @@ import 'package:meshchameleon/services/build_info.dart';
 import 'package:meshchameleon/services/diagnostics_snapshot.dart';
 import 'package:provider/provider.dart';
 
+import 'support/fake_app_state.dart';
+
 void main() {
   testWidgets('diagnostics page renders every section without a device',
       (tester) async {
@@ -49,8 +51,8 @@ void main() {
   testWidgets('rich diagnostics render every conditional row', (tester) async {
     _setLargeView(tester);
     final now = DateTime.utc(2026, 1, 2, 3, 4, 5);
-    final app = _FakeDiagnosticsAppState(
-      () => _richSnapshot(now),
+    final app = FakeAppState(
+      diagnosticsBuilder: () => _richSnapshot(now),
     );
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
@@ -113,8 +115,9 @@ void main() {
     addTearDown(() => tester.binding.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, null));
 
-    final app = _FakeDiagnosticsAppState(
-      () => _richSnapshot(DateTime.utc(2026, 1, 2, 3, 4, 5)),
+    final app = FakeAppState(
+      diagnosticsBuilder: () =>
+          _richSnapshot(DateTime.utc(2026, 1, 2, 3, 4, 5)),
     );
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
@@ -136,9 +139,9 @@ void main() {
       (tester) async {
     _setLargeView(tester);
     var refreshes = 0;
-    late _FakeDiagnosticsAppState app;
-    app = _FakeDiagnosticsAppState(
-      () {
+    late FakeAppState app;
+    app = FakeAppState(
+      diagnosticsBuilder: () {
         final seconds = refreshes + 1;
         refreshes++;
         return _richSnapshot(
@@ -273,17 +276,4 @@ DiagnosticsSnapshot _richSnapshot(
     ],
     recentLogs: const ['log'],
   );
-}
-
-class _FakeDiagnosticsAppState extends AppState {
-  _FakeDiagnosticsAppState(this.builder);
-
-  final DiagnosticsSnapshot Function() builder;
-  int refreshes = 0;
-
-  @override
-  DiagnosticsSnapshot diagnosticsSnapshot() {
-    refreshes++;
-    return builder();
-  }
 }

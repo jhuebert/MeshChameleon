@@ -7,6 +7,8 @@ import 'package:meshchameleon/main.dart';
 import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:provider/provider.dart';
 
+import 'support/fake_app_state.dart';
+
 void main() {
   _extraHomeTests();
 
@@ -119,37 +121,6 @@ void main() {
 
 // Additional HomeScreen coverage for live/connected states.
 
-class _HomeAppState extends AppState {
-  List<IdentitySummary> summaries = [];
-  IdentitySummary? activeSummary;
-  int disconnectCalls = 0;
-  int batteryRefreshes = 0;
-
-  @override
-  List<IdentitySummary> get identities => summaries;
-
-  @override
-  IdentitySummary? get activeIdentity => activeSummary;
-
-  @override
-  Future<void> stopProxy() async {
-    proxyStatus = ProxyStatus.stopped;
-    notifyListeners();
-  }
-
-  @override
-  Future<void> disconnectDevice() async {
-    disconnectCalls++;
-    deviceConnected = false;
-    notifyListeners();
-  }
-
-  @override
-  Future<void> refreshBatteryOptimizationStatus() async {
-    batteryRefreshes++;
-  }
-}
-
 IdentitySummary _homeSummary({bool live = true}) => IdentitySummary(
       id: 'a' * 32,
       name: 'Home Identity',
@@ -176,7 +147,7 @@ void _extraHomeTests() {
       (tester) async {
     _homeView(tester);
     final summary = _homeSummary();
-    final app = _HomeAppState()
+    final app = FakeAppState()
       ..summaries = [summary]
       ..activeSummary = summary
       ..deviceConnected = true
@@ -214,7 +185,7 @@ void _extraHomeTests() {
   testWidgets('busy state disables controls and shows progress',
       (tester) async {
     _homeView(tester);
-    final app = _HomeAppState()..busy = true;
+    final app = FakeAppState()..busy = true;
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
         value: app,
@@ -236,7 +207,7 @@ void _extraHomeTests() {
   testWidgets('the proxy port validates input and updates the app state',
       (tester) async {
     _homeView(tester);
-    final app = _HomeAppState()..port = 5000;
+    final app = FakeAppState()..port = 5000;
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
         value: app,
@@ -269,7 +240,7 @@ void _extraHomeTests() {
   testWidgets('the battery card refreshes when the app resumes',
       (tester) async {
     _homeView(tester);
-    final app = _HomeAppState()..batteryOptimizationsIgnored = false;
+    final app = FakeAppState()..batteryOptimizationsIgnored = false;
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
         value: app,
@@ -293,7 +264,7 @@ void _extraHomeTests() {
     try {
       await tester.pumpWidget(
         ChangeNotifierProvider<AppState>(
-          create: (_) => _HomeAppState(),
+          create: (_) => FakeAppState(),
           child: const MaterialApp(home: HomeScreen()),
         ),
       );

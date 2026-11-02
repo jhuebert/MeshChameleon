@@ -16,6 +16,8 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
+import 'support/fake_app_state.dart';
+
 const _channel = MethodChannel('flutter_file_dialog');
 
 void main() {
@@ -24,7 +26,7 @@ void main() {
   late Directory temp;
   late BackupService service;
   late BackupPreview preview;
-  late _BackupAppState app;
+  late FakeAppState app;
   String? savePath;
   String? pickPath;
   Object? pickError;
@@ -45,8 +47,7 @@ void main() {
       ),
     );
     preview = await _makePreview(service);
-    previewForTest = preview;
-    app = _BackupAppState();
+    app = FakeAppState()..inspectResult = preview;
     savePath = '/tmp/backup.mcbackup';
     pickPath = null;
     pickError = null;
@@ -382,40 +383,3 @@ Future<BackupPreview> _makePreview(BackupService service) async {
   );
   return service.inspect(bytes: bytes, passphrase: 'correct horse');
 }
-
-class _BackupAppState extends AppState {
-  final createPassphrases = <String>[];
-  final inspectCalls = <(Uint8List, String)>[];
-  Object? createError;
-  Object? inspectError;
-  bool restoreResult = true;
-  int restoreCalls = 0;
-  Completer<void>? createGate;
-
-  @override
-  Future<Uint8List> createBackup(String passphrase) async {
-    createPassphrases.add(passphrase);
-    if (createGate != null) await createGate!.future;
-    if (createError != null) throw createError!;
-    return Uint8List.fromList([1, 2, 3]);
-  }
-
-  @override
-  Future<BackupPreview> inspectBackup(
-    Uint8List bytes,
-    String passphrase,
-  ) async {
-    inspectCalls.add((bytes, passphrase));
-    if (inspectError != null) throw inspectError!;
-    return previewForTest;
-  }
-
-  @override
-  Future<bool> restoreBackup(BackupPreview preview) async {
-    restoreCalls++;
-    return restoreResult;
-  }
-}
-
-/// Assigned in the test setup; the fake state only returns this instance.
-late BackupPreview previewForTest;

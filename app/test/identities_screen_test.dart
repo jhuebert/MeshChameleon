@@ -18,6 +18,8 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
+import 'support/fake_app_state.dart';
+
 const _capabilities = DeviceCapabilities(
   supportsBle: false,
 );
@@ -394,7 +396,7 @@ void main() {
 
   testWidgets('loading, empty, and busy states render their controls',
       (tester) async {
-    final fake = _FakeIdentitiesAppState()..loaded = false;
+    final fake = FakeAppState()..loaded = false;
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
 
@@ -418,7 +420,7 @@ void main() {
   });
 
   testWidgets('the database retry button reloads identities', (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..dbError = 'catalog damaged'
       ..busy = false;
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
@@ -442,7 +444,7 @@ void main() {
 
   testWidgets('activation failures and disabled identities show feedback',
       (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..summaries = [
         _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
         _summary(id: 'b' * 32, name: 'Second'),
@@ -468,7 +470,7 @@ void main() {
   });
 
   testWidgets('toggle failures show feedback', (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..summaries = [
         _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
         _summary(id: 'b' * 32, name: 'Second'),
@@ -485,7 +487,7 @@ void main() {
   });
 
   testWidgets('create failures and cancellation show feedback', (tester) async {
-    final fake = _FakeIdentitiesAppState()..summaries = [];
+    final fake = FakeAppState()..summaries = [];
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
     await tester.pump();
 
@@ -525,7 +527,7 @@ void main() {
 
   testWidgets('clear local data confirms and reports both outcomes',
       (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..summaries = [
         _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
       ];
@@ -561,7 +563,7 @@ void main() {
   });
 
   testWidgets('delete confirms and reports both outcomes', (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..summaries = [
         _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
         _summary(id: 'b' * 32, name: 'Second'),
@@ -597,7 +599,7 @@ void main() {
 
   testWidgets('identity cards show live, inactive, and unavailable reasons',
       (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..summaries = [
         _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
         _summary(id: 'b' * 32, name: 'Live', live: true, enabled: false),
@@ -618,7 +620,7 @@ void main() {
 
   testWidgets('the name dialog accepts Enter and rejects whitespace-only input',
       (tester) async {
-    final fake = _FakeIdentitiesAppState()
+    final fake = FakeAppState()
       ..suggestion = 'Suggested Name'
       ..summaries = [];
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
@@ -688,72 +690,3 @@ IdentitySummary _summary({
       queuedChannel: 0,
       unavailableReason: unavailableReason,
     );
-
-class _FakeIdentitiesAppState extends AppState {
-  List<IdentitySummary> summaries = [];
-  bool loaded = true;
-  String? dbError;
-  Object? suggestError;
-  String suggestion = 'MeshChameleon 2';
-  IdentityRecord? createResult;
-  bool activateResult = true;
-  bool toggleResult = true;
-  bool deleteResult = true;
-  bool clearResult = true;
-  int loadCalls = 0;
-  final activateCalls = <String>[];
-  final toggleCalls = <(String, bool)>[];
-  final deleteCalls = <String>[];
-  final clearCalls = <String>[];
-  final createdNames = <String?>[];
-
-  @override
-  List<IdentitySummary> get identities => summaries;
-
-  @override
-  bool get identitiesLoaded => loaded;
-
-  @override
-  String? get identityDatabaseError => dbError;
-
-  @override
-  Future<void> loadIdentities({bool resume = true}) async {
-    loadCalls++;
-  }
-
-  @override
-  Future<String> suggestIdentityName() async {
-    if (suggestError != null) throw suggestError!;
-    return suggestion;
-  }
-
-  @override
-  Future<IdentityRecord?> createIdentity({String? name}) async {
-    createdNames.add(name);
-    return createResult;
-  }
-
-  @override
-  Future<bool> activateIdentity(String id) async {
-    activateCalls.add(id);
-    return activateResult;
-  }
-
-  @override
-  Future<bool> setIdentityEnabled(String id, bool enabled) async {
-    toggleCalls.add((id, enabled));
-    return toggleResult;
-  }
-
-  @override
-  Future<bool> deleteIdentity(String id) async {
-    deleteCalls.add(id);
-    return deleteResult;
-  }
-
-  @override
-  Future<bool> clearLocalData(String id) async {
-    clearCalls.add(id);
-    return clearResult;
-  }
-}
