@@ -441,8 +441,9 @@ class PacketBuilder {
   /// Verify an advert packet and extract its encoded appdata.
   static Future<bool> verifyAdvert(Uint8List payload) async {
     // payload = pubkey(32) + timestamp(4) + signature(64) + appdata(...)
-    if (payload.length < pubKeySize + timestampSize + signatureSize)
+    if (payload.length < pubKeySize + timestampSize + signatureSize) {
       return false;
+    }
     final pubkey = payload.sublist(0, pubKeySize);
     final ts = payload.sublist(pubKeySize, pubKeySize + timestampSize);
     final signature = payload.sublist(
