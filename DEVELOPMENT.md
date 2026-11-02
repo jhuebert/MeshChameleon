@@ -488,9 +488,11 @@ or tag.
 
 Rules:
 
-- The first Play upload is `1.0.0+1`.
-- Every later upload, including test-track fixes, must increase `+N`; Play
-  rejects a reused version code.
+- Release and test builds reserve the next version code from the shared
+  `BUILD_NUMBER` repository variable. The release workflow writes the reserved
+  value into `X.Y.Z+N`; test builds use it only for the artifact.
+- Every later Play upload, including test-track fixes, must use a higher
+  reserved number; the shared counter guarantees this.
 - Flutter adds `ABI * 1000` to split-APK version codes (`1001` armeabi-v7a,
   `2001` arm64-v8a, `4001` x86_64 for `+1`). The About page and the GitHub APKs
   show these adjusted values; the AAB and universal APK keep `+N`.
@@ -607,8 +609,8 @@ single adb device is attached, otherwise one higher than the pubspec build
 number. `--build-number N` overrides it. Keep the number at least as high as the
 installed version code: release split APKs use Flutter's ABI-adjusted codes (for
 example `2001` for arm64-v8a). Installing a local test build raises the phone's
-version code, so cut the next official release with a higher build number (or
-uninstall the test build) so Android does not reject the official APK as a
+version code, so keep the `BUILD_NUMBER` repository variable above the highest
+version code you install locally; otherwise a CI build can be rejected as a
 downgrade.
 
 ### Building a test APK in GitHub Actions
@@ -632,9 +634,13 @@ install the APK that matches the current install:
 - `...-<base+2000>-arm64-v8a-test.apk` for an arm64-v8a split install;
 - `...-<base+1000>-armeabi-v7a-test.apk` for an armeabi-v7a split install.
 
-The `build_number` input sets the base version code (default: pubspec build +
-1). Artifacts expire after 14 days. The local `scripts/build_test_apk.sh` is the
-offline equivalent.
+The workflow reserves the next value of the `BUILD_NUMBER` repository variable
+before building. Set `BUILD_NUMBER` above the highest version code already
+installed or uploaded; it is never reset automatically. The reservation job
+needs a `BUILD_NUMBER_TOKEN` repository secret with Actions-variable read/write
+permission, because the default `GITHUB_TOKEN` cannot manage repository
+variables. Artifacts expire after 14 days. The local
+`scripts/build_test_apk.sh` is the offline equivalent.
 
 ## Build metadata and session diagnostics
 
