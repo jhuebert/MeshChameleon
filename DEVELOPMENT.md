@@ -637,9 +637,10 @@ install the APK that matches the current install:
 The workflow reserves the next value of the `BUILD_NUMBER` repository variable
 before building. Set `BUILD_NUMBER` above the highest version code already
 installed or uploaded; it is never reset automatically. The reservation job
-needs a `BUILD_NUMBER_TOKEN` repository secret with Actions-variable read/write
-permission, because the default `GITHUB_TOKEN` cannot manage repository
-variables. Artifacts expire after 14 days. The local
+needs a `REPO_AUTOMATION_TOKEN` repository secret with Actions-variable
+read/write permission, because the default `GITHUB_TOKEN` cannot manage
+repository variables. The same token can be reused for other repository
+automation. Artifacts expire after 14 days. The local
 `scripts/build_test_apk.sh` is the offline equivalent.
 
 ## Build metadata and session diagnostics
