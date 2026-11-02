@@ -13,21 +13,13 @@ class TestBridge extends CompanionBridge {
   LocalIdentity identity;
   final contacts = <Contact>[];
   final channels = <int, Channel>{};
-  int? sentChannelIndex;
-  String? sentChannelText;
-
-  @override
-  Future<bool> sendChannelMessage(int channelIndex, String text) async {
-    sentChannelIndex = channelIndex;
-    sentChannelText = text;
-    return true;
-  }
 
   int? sentChannelDataIndex;
   int? sentChannelDataType;
   Uint8List? sentChannelDataPayload;
   Uint8List? sentChannelDataPath;
   int? sentChannelDataPathLen;
+  bool channelDataResult = true;
 
   @override
   Future<bool> sendChannelData(
@@ -42,7 +34,18 @@ class TestBridge extends CompanionBridge {
     sentChannelDataPayload = payload;
     sentChannelDataPath = path == null ? null : Uint8List.fromList(path);
     sentChannelDataPathLen = pathLenEncoded;
-    return true;
+    return channelDataResult;
+  }
+
+  bool channelMessageResult = true;
+  int? sentChannelIndex;
+  String? sentChannelText;
+
+  @override
+  Future<bool> sendChannelMessage(int channelIndex, String text) async {
+    sentChannelIndex = channelIndex;
+    sentChannelText = text;
+    return channelMessageResult;
   }
 
   @override
@@ -70,9 +73,12 @@ class TestBridge extends CompanionBridge {
 
   @override
   Future<void> setAutoAddConfig(int flags, int? maxHops) async {
+    if (autoAddError != null) throw autoAddError!;
     autoAddConfig = flags & 0xFF;
     if (maxHops != null) autoAddMaxHops = maxHops.clamp(0, 64);
   }
+
+  CompanionOperationError? autoAddError;
 
   @override
   Future<void> setOtherParams({
@@ -81,6 +87,7 @@ class TestBridge extends CompanionBridge {
     int? advertLocPolicy,
     int? multiAcks,
   }) async {
+    if (otherParamsError != null) throw otherParamsError!;
     selfInfo.manualAddContacts = manualAddContacts & 0xFF;
     if (telemetryModes != null) {
       final raw = telemetryModes & 0xFF;
@@ -95,15 +102,25 @@ class TestBridge extends CompanionBridge {
     if (multiAcks != null) selfInfo.multiAcks = multiAcks & 0xFF;
   }
 
+  CompanionOperationError? otherParamsError;
+
   @override
-  Future<void> setAdvertName(String name) async => selfInfo.nodeName = name;
+  Future<void> setAdvertName(String name) async {
+    if (advertNameError != null) throw advertNameError!;
+    selfInfo.nodeName = name;
+  }
+
+  CompanionOperationError? advertNameError;
 
   @override
   Future<void> setAdvertLatLon(double lat, double lon) async {
+    if (advertLatLonError != null) throw advertLatLonError!;
     selfInfo
       ..latitude = lat
       ..longitude = lon;
   }
+
+  CompanionOperationError? advertLatLonError;
 
   DeviceInfo deviceInfo = const DeviceInfo(maxContacts: 1000, maxChannels: 8);
 
@@ -162,6 +179,7 @@ class TestBridge extends CompanionBridge {
   Completer<void>? advertiseGate;
   Completer<void>? advertiseEntered;
   bool advertised = false;
+  bool advertiseResult = true;
 
   @override
   Future<bool> advertise({bool flood = false}) async {
@@ -169,23 +187,31 @@ class TestBridge extends CompanionBridge {
     advertiseEntered?.complete();
     if (advertiseGate != null) await advertiseGate!.future;
     advertised = true;
-    return true;
+    return advertiseResult;
   }
 
   /// Reply text for `CMD_RUN_CLI_COMMAND`; null models a pre-v14 device.
   String? cliReply;
+  CompanionOperationError? cliError;
+  Object? cliGenericError;
 
   @override
-  Future<String?> runCliCommand(String command) async => cliReply;
+  Future<String?> runCliCommand(String command) async {
+    if (cliGenericError != null) throw cliGenericError!;
+    if (cliError != null) throw cliError!;
+    return cliReply;
+  }
 
   final customVars = <String, String>{};
   final supportedCustomKeys = <String>{};
+  CompanionOperationError? customVarError;
 
   @override
   Map<String, String> getCustomVars() => customVars;
 
   @override
   Future<void> setCustomVar(String name, String value) async {
+    if (customVarError != null) throw customVarError!;
     if (!supportedCustomKeys.contains(name) ||
         name.isEmpty ||
         name.contains(':') ||
@@ -196,7 +222,45 @@ class TestBridge extends CompanionBridge {
   }
 
   @override
-  List<Contact> getContacts({int since = 0}) => contacts;
+  List<Contact> getContacts({int since = 0}) {
+    if (contactsError != null) throw contactsError!;
+    return contacts;
+  }
+
+  Object? contactsError;
+
+  CompanionOperationError? addContactError;
+  Contact? addedContact;
+  bool? addedContactHasGps;
+
+  @override
+  Future<void> addUpdateContact(Contact contact, {bool hasGps = true}) async {
+    if (addContactError != null) throw addContactError!;
+    addedContact = contact;
+    addedContactHasGps = hasGps;
+    contacts
+      ..removeWhere((c) => c.publicKeyHex == contact.publicKeyHex)
+      ..add(contact);
+  }
+
+  CompanionOperationError? removeContactError;
+  Uint8List? removedContact;
+
+  @override
+  Future<void> removeContact(Uint8List pubkey) async {
+    if (removeContactError != null) throw removeContactError!;
+    removedContact = pubkey;
+    contacts.removeWhere((c) => c.publicKeyHex == bytesToHex(pubkey));
+  }
+
+  CompanionOperationError? resetPathError;
+  Uint8List? resetPathFor;
+
+  @override
+  Future<void> resetPath(Uint8List pubkey) async {
+    if (resetPathError != null) throw resetPathError!;
+    resetPathFor = pubkey;
+  }
 
   @override
   Contact? getContactByKey(Uint8List pubkey) {
@@ -219,10 +283,15 @@ class TestBridge extends CompanionBridge {
   Channel? getChannel(int index) => channels[index];
 
   @override
-  int get maxChannels => 8;
+  int get maxChannels => maxChannelsValue;
+
+  int maxChannelsValue = 8;
+
+  CompanionOperationError? setChannelError;
 
   @override
   Future<void> setChannel(int index, String name, Uint8List secret) async {
+    if (setChannelError != null) throw setChannelError!;
     channels[index] = Channel(name: name, secret: secret);
   }
 
@@ -298,18 +367,23 @@ class TestBridge extends CompanionBridge {
           {bool wantBase = true,
           bool wantLocation = true,
           bool wantEnvironment = true}) async =>
-      const SentResult(
-          success: true, isFlood: false, expectedAck: 0x99, timeoutMs: 10000);
+      telemetryResult;
+
+  SentResult telemetryResult = const SentResult(
+      success: true, isFlood: false, expectedAck: 0x99, timeoutMs: 10000);
 
   @override
   Future<bool> sendTracePathRaw(
           int tag, int authCode, int flags, Uint8List pathBytes) async =>
-      true;
+      traceResult;
+
+  bool traceResult = true;
 
   Uint8List? sentTextPubkey;
   String? sentText;
   int? sentTextAttempt;
   int? sentTextTimestamp;
+  SentResult? sentTextResult;
 
   @override
   Future<SentResult> sendTextMessage(Uint8List pubkey, String text,
@@ -318,32 +392,47 @@ class TestBridge extends CompanionBridge {
     sentText = text;
     sentTextAttempt = attempt;
     sentTextTimestamp = timestamp;
-    return const SentResult(
-        success: true, expectedAck: 0x1234, timeoutMs: 5000);
+    return sentTextResult ??
+        const SentResult(
+            success: true, expectedAck: 0x1234, timeoutMs: 5000);
   }
 
   @override
   Future<SentResult> sendPathDiscoveryReq(Uint8List pubkey) async =>
-      const SentResult(
-          success: true, isFlood: true, expectedAck: 0, timeoutMs: 5000);
+      pathDiscoveryResult;
+
+  SentResult pathDiscoveryResult = const SentResult(
+      success: true, isFlood: true, expectedAck: 0, timeoutMs: 5000);
 
   QueuedMessage? nextMessage;
+  CompanionOperationError? syncNextError;
 
   @override
   Future<QueuedMessage?> syncNextMessage() async {
+    if (syncNextError != null) throw syncNextError!;
     final msg = nextMessage;
     nextMessage = null;
     return msg;
   }
 
   @override
-  Future<Uint8List> sign(Uint8List message) => identity.sign(message);
+  Future<Uint8List> sign(Uint8List message) {
+    if (signError != null) throw signError!;
+    return identity.sign(message);
+  }
+
+  Object? signError;
 
   int identityImports = 0;
   Object? identitySaveError;
+  Uint8List? exportKeyOverride;
+  CompanionOperationError? exportKeyError;
 
   @override
-  Future<Uint8List> exportPrivateKey() async => identity.meshcore64;
+  Future<Uint8List> exportPrivateKey() async {
+    if (exportKeyError != null) throw exportKeyError!;
+    return exportKeyOverride ?? identity.meshcore64;
+  }
 
   @override
   Future<void> importPrivateKey(Uint8List expandedKey) async {
@@ -359,9 +448,32 @@ class TestBridge extends CompanionBridge {
   }
 
   bool connection = false;
+  int logoutCount = 0;
 
   @override
   bool hasConnection(Uint8List pubkey) => connection;
+
+  @override
+  bool logout(Uint8List pubkey) {
+    logoutCount++;
+    return connection;
+  }
+
+  SentResult loginResult = const SentResult(
+      success: true, isFlood: false, expectedAck: 0x7777, timeoutMs: 15000);
+  String? loginPassword;
+
+  @override
+  Future<SentResult> sendLogin(Uint8List pubkey, String password) async {
+    loginPassword = password;
+    return loginResult;
+  }
+
+  SentResult statusResult = const SentResult(
+      success: true, isFlood: true, expectedAck: 0x8888, timeoutMs: 15000);
+
+  @override
+  Future<SentResult> sendStatusReq(Uint8List pubkey) async => statusResult;
 
   Uint8List? floodScopeKey;
   bool floodUnscoped = false;
@@ -380,9 +492,12 @@ class TestBridge extends CompanionBridge {
 
   @override
   Future<void> setDefaultFloodScope(String name, Uint8List? key) async {
+    if (defaultFloodScopeError != null) throw defaultFloodScopeError!;
     defaultScopeName = name;
     defaultScopeKey = key;
   }
+
+  CompanionOperationError? defaultFloodScopeError;
 
   @override
   (String, Uint8List?) getDefaultFloodScope() =>
@@ -398,9 +513,11 @@ class TestBridge extends CompanionBridge {
   Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async {
     anonPubkey = pubkey;
     anonData = data;
-    return const SentResult(
-        success: true, isFlood: false, expectedAck: 0x4242, timeoutMs: 10000);
+    return anonResult;
   }
+
+  SentResult anonResult = const SentResult(
+      success: true, isFlood: false, expectedAck: 0x4242, timeoutMs: 10000);
 
   Uint8List? binPubkey;
   Uint8List? binData;
@@ -409,9 +526,11 @@ class TestBridge extends CompanionBridge {
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async {
     binPubkey = pubkey;
     binData = data;
-    return const SentResult(
-        success: true, isFlood: false, expectedAck: 0x5151, timeoutMs: 10000);
+    return binaryResult;
   }
+
+  SentResult binaryResult = const SentResult(
+      success: true, isFlood: false, expectedAck: 0x5151, timeoutMs: 10000);
 
   Uint8List? contactBlob;
   Uint8List? exportedFor;
@@ -427,19 +546,27 @@ class TestBridge extends CompanionBridge {
   @override
   Future<bool> importContact(Uint8List data) async {
     importedData = data;
-    return true;
+    return importContactResult;
   }
+
+  bool importContactResult = true;
 
   @override
   Future<bool> shareContact(Uint8List pubkey) async {
     sharedPubkey = pubkey;
-    return true;
+    return shareContactResult;
   }
 
+  bool shareContactResult = true;
+
   Uint8List allowedRepeatFreq = Uint8List(0);
+  CompanionOperationError? allowedRepeatFreqError;
 
   @override
-  Future<Uint8List> getAllowedRepeatFreq() async => allowedRepeatFreq;
+  Future<Uint8List> getAllowedRepeatFreq() async {
+    if (allowedRepeatFreqError != null) throw allowedRepeatFreqError!;
+    return allowedRepeatFreq;
+  }
 
   Uint8List? rawPayload;
   Uint8List? rawPath;
@@ -451,18 +578,36 @@ class TestBridge extends CompanionBridge {
     rawPayload = payload;
     rawPath = path;
     rawPathLenByte = pathLenByte;
-    return true;
+    return rawDataResult;
   }
+
+  bool rawDataResult = true;
 
   Packet? rawPacket;
   int? rawPriority;
+  bool rawPacketResult = true;
 
   @override
   Future<bool> sendRawPacket(Packet packet, int priority) async {
     rawPacket = packet;
     rawPriority = priority;
-    return true;
+    return rawPacketResult;
   }
+
+  Uint8List? controlData;
+  bool controlDataResult = true;
+
+  @override
+  Future<bool> sendControlData(Uint8List data) async {
+    controlData = data;
+    return controlDataResult;
+  }
+
+  final advertPaths = <String, AdvertPath>{};
+
+  @override
+  AdvertPath? getAdvertPath(Uint8List prefix) =>
+      advertPaths[bytesToHex(prefix)];
 }
 
 /// Minimal framed client for tests.
@@ -1991,6 +2136,773 @@ void main() {
     expect(sig.length, 65);
   });
 
+  test('GET_CHANNEL returns all channels, one index, or not-found', () async {
+    final psk = Uint8List.fromList(List.generate(32, (i) => i));
+    bridge.channels[0] = Channel(name: 'Public', secret: psk);
+    bridge.channels[2] = Channel(name: 'Extra', secret: Uint8List(2));
+
+    client.send([cmdGetChannel]);
+    for (var i = 0; i < 8; i++) {
+      final frame = await client.frames.next();
+      expect(frame[0], respCodeChannelInfo);
+      expect(frame[1], i);
+      if (i == 0) {
+        expect(frame.sublist(2, 8), utf8Bytes('Public'));
+        // A 32-byte channel secret is clamped to the 16-byte wire field.
+        expect(frame.sublist(34, 50), psk.sublist(0, 16));
+      } else if (i == 2) {
+        expect(frame.sublist(34, 50), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+      } else {
+        expect(frame.sublist(2, 34), everyElement(0));
+        expect(frame.sublist(34, 50), everyElement(0));
+      }
+    }
+
+    bridge.maxChannelsValue = 0;
+    client.send([cmdGetChannel]);
+    final only = await client.frames.next();
+    expect(only[0], respCodeChannelInfo);
+    expect(only[1], 0);
+    bridge.maxChannelsValue = 8;
+
+    client.send([cmdGetChannel, 8]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+  });
+
+  test('SET_CHANNEL accepts 16- and 32-byte secrets and rejects truncation',
+      () async {
+    final psk16 = Uint8List.fromList(List.generate(16, (i) => i + 1));
+    final psk32 = Uint8List.fromList(List.generate(32, (i) => i + 1));
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSetChannel)
+          ..writeByte(4)
+          ..writeCString('short', 32)
+          ..writeBytes(psk16))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.channels[4]!.name, 'short');
+    expect(bridge.channels[4]!.secret, psk16);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSetChannel)
+          ..writeByte(5)
+          ..writeCString('long', 32)
+          ..writeBytes(psk32))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.channels[5]!.secret, psk32);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSetChannel)
+          ..writeByte(6)
+          ..writeCString('bad', 32)
+          ..writeBytes(Uint8List(15)))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSetChannel, 0, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.setChannelError =
+        const CompanionOperationError(errCodeFileIoError);
+    client.send((BufferWriter()
+          ..writeByte(cmdSetChannel)
+          ..writeByte(7)
+          ..writeCString('err', 32)
+          ..writeBytes(psk16))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeFileIoError]);
+  });
+
+  test('SEND_CHANNEL_TXT_MSG validates type, channel, and send result',
+      () async {
+    bridge.channels[0] = Channel(name: 'Public', secret: Uint8List(16));
+
+    client.send([cmdSendChannelTxtMsg, txtTypePlain, 0, 0, 0, 0]);
+    // Too short (only 5 data bytes).
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSendChannelTxtMsg)
+          ..writeByte(txtTypeSigned)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeCString('hi', 3))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSendChannelTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(9)
+          ..writeUInt32Le(0)
+          ..writeCString('hi', 3))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    bridge.channelMessageResult = false;
+    client.send((BufferWriter()
+          ..writeByte(cmdSendChannelTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeCString('hi', 3))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(
+      serverLogs.any((line) => line.contains('channel message send failed')),
+      isTrue,
+    );
+  });
+
+  test('SEND_TXT_MSG validates length and reports contact/send failures',
+      () async {
+    final pubkey = Uint8List(32)..[0] = 7;
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
+
+    client.send([cmdSendTxtMsg, 0, 0, 0, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSendTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeBytes(Uint8List(6)..fillRange(0, 6, 0x55))
+          ..writeCString('hi', 3))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    bridge.sentTextResult = const SentResult.failure();
+    client.send((BufferWriter()
+          ..writeByte(cmdSendTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeBytes(pubkey.sublist(0, 6))
+          ..writeCString('hi', 3))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+
+    // Flood sends with null optional fields fall back to the wire defaults.
+    bridge.sentTextResult = const SentResult(success: true, isFlood: true);
+    client.send((BufferWriter()
+          ..writeByte(cmdSendTxtMsg)
+          ..writeByte(txtTypePlain)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeBytes(pubkey.sublist(0, 6))
+          ..writeCString('hi', 3))
+        .toBytes());
+    final sent = await client.frames.next();
+    expect(sent[0], respCodeSent);
+    expect(sent[1], 1);
+    final r = BufferReader(sent)..skipBytes(2);
+    expect(r.readUInt32Le(), 0);
+    expect(r.readUInt32Le(), 5000);
+  });
+
+  test('SEND_CHANNEL_DATA validates paths, payload size, and send result',
+      () async {
+    final payload = [1, 2, 3, 4];
+
+    client.send([cmdSendChannelData, 0, 0, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // Reserved path hash width.
+    client.send([cmdSendChannelData, 0, 0xC0, 1, 1, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // Declared path bytes are missing.
+    client.send([cmdSendChannelData, 0, 2, 0xAA, 0xBB]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // No data type field left.
+    client.send([cmdSendChannelData, 0, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // Reserved data type.
+    client.send([cmdSendChannelData, 0, 0, 0, 0, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // Payload beyond the group-data limit.
+    client.send([cmdSendChannelData, 0, 0, 1, 0, ...List.filled(158, 1)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.channels[0] = Channel(name: 'Public', secret: Uint8List(16));
+    bridge.channelDataResult = false;
+    client.send([cmdSendChannelData, 0, 0, 1, 0, ...payload]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    bridge.channels.remove(0);
+    client.send([cmdSendChannelData, 0, 0, 1, 0, ...payload]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    bridge.channels[0] = Channel(name: 'Public', secret: Uint8List(16));
+    bridge.channelDataResult = true;
+    client.send([cmdSendChannelData, 0, 2, 0xAA, 0xBB, 1, 0, ...payload]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.sentChannelDataPath, [0xAA, 0xBB]);
+    expect(bridge.sentChannelDataPathLen, 2);
+    expect(bridge.sentChannelDataType, 1);
+    expect(bridge.sentChannelDataPayload, payload);
+  });
+
+  test('SEND_CONTROL_DATA requires the control marker', () async {
+    client.send([cmdSendControlData]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSendControlData, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSendControlData, 0x80, 1, 2]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.controlData, [0x80, 1, 2]);
+
+    bridge.controlDataResult = false;
+    client.send([cmdSendControlData, 0x80]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+  });
+
+  test('SYNC_NEXT_MESSAGE covers V3 data, legacy layouts, and errors',
+      () async {
+    bridge.nextMessage = QueuedMessage(
+      senderKey: Uint8List(32),
+      isChannel: true,
+      channelIdx: 2,
+      pathLen: 300,
+      channelDataType: 0x1234,
+      channelDataPayload: Uint8List.fromList(List.filled(200, 0xAB)),
+    );
+    client.send([cmdSyncNextMessage]);
+    final data = await client.frames.next();
+    expect(data[0], respCodeChannelDataRecv);
+    expect(data.length, channelDataRxHeaderSize + maxChannelDataLength);
+    expect(data[4], 2);
+    expect(data[5], 0xFF); // path length > 255 clamps to 0xFF
+    expect(data.sublist(6, 8), [0x34, 0x12]);
+    expect(data[8], maxChannelDataLength);
+
+    // Legacy (pre-V3) channel text layout.
+    bridge.nextMessage = QueuedMessage(
+      senderKey: Uint8List(32),
+      isChannel: true,
+      channelIdx: 1,
+      pathLen: 2,
+      timestamp: 0x11223344,
+      text: 'hello',
+    );
+    client.send([cmdSyncNextMessage]);
+    final channel = await client.frames.next();
+    expect(channel[0], respCodeChannelMsgRecv);
+    expect(channel.sublist(1, 5), [1, 2, txtTypePlain, 0x44]);
+
+    // Legacy direct text pads a short sender key to six bytes.
+    bridge.nextMessage = QueuedMessage(
+      senderKey: Uint8List.fromList([1, 2, 3]),
+      timestamp: 0x11223344,
+      text: 'hi',
+    );
+    client.send([cmdSyncNextMessage]);
+    final direct = await client.frames.next();
+    expect(direct[0], respCodeContactMsgRecv);
+    expect(direct.sublist(1, 7), [1, 2, 3, 0, 0, 0]);
+    expect(direct[7], 0);
+    expect(direct.sublist(9, 13), [0x44, 0x33, 0x22, 0x11]);
+
+    // V3 direct text with a short sender key.
+    client.send([cmdDeviceQuery, 3]);
+    await client.frames.next();
+    bridge.nextMessage = QueuedMessage(
+      senderKey: Uint8List.fromList([1, 2]),
+      timestamp: 1,
+      text: 'x',
+    );
+    client.send([cmdSyncNextMessage]);
+    final v3 = await client.frames.next();
+    expect(v3[0], respCodeContactMsgRecvV3);
+    expect(v3.sublist(4, 10), [1, 2, 0, 0, 0, 0]);
+
+    bridge.syncNextError =
+        const CompanionOperationError(errCodeTableFull);
+    client.send([cmdSyncNextMessage]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+  });
+
+  test('SIGN_DATA bounds and SIGN_FINISH errors', () async {
+    client.send([cmdSignData]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSignStart]);
+    await client.frames.next();
+    // Fill the 8 KiB signing buffer in frame-sized chunks.
+    var sent = 0;
+    while (sent + 175 <= 8 * 1024) {
+      client.send([cmdSignData, ...List.filled(175, 0x61)]);
+      expect((await client.frames.next())[0], respCodeOk);
+      sent += 175;
+    }
+    final remaining = 8 * 1024 - sent;
+    client.send([cmdSignData, ...List.filled(remaining, 0x61)]);
+    expect((await client.frames.next())[0], respCodeOk);
+    client.send([cmdSignData, 0x61]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    client.send([cmdSignStart]);
+    await client.frames.next();
+    bridge.signError = StateError('signer unavailable');
+    client.send([cmdSignFinish]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+  });
+
+  test('private-key export validates the length and maps bridge errors',
+      () async {
+    bridge.exportKeyOverride = Uint8List(63);
+    client.send([cmdExportPrivateKey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+
+    bridge.exportKeyOverride = null;
+    bridge.exportKeyError =
+        const CompanionOperationError(errCodeFileIoError);
+    client.send([cmdExportPrivateKey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeFileIoError]);
+
+    client.send([cmdImportPrivateKey, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+  });
+
+  test('GET_STATS rejects unknown types and emits packet counters', () async {
+    client.send([cmdGetStats, 99]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdGetStats]);
+    final stats = await client.frames.next();
+    expect(stats[0], respCodeStats);
+    expect(stats[1], statsTypePackets);
+    expect(stats.length, 2 + 7 * 4);
+    expect(stats.sublist(2), everyElement(0));
+  });
+
+  test('GET_ADVERT_PATH validates and frames the cached path', () async {
+    final prefix = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7]);
+
+    client.send([cmdGetAdvertPath, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdGetAdvertPath, 0, ...prefix, ...Uint8List(25)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    bridge.advertPaths[bytesToHex(prefix)] = AdvertPath(
+      publicKeyPrefix: prefix,
+      pathLen: 2,
+      path: Uint8List.fromList([0xAA, 0xBB, 0xCC]),
+      recvTimestamp: 0x11223344,
+    );
+    client.send([cmdGetAdvertPath, 0, ...prefix, ...Uint8List(25)]);
+    final frame = await client.frames.next();
+    expect(frame[0], respCodeAdvertPath);
+    final r = BufferReader(frame)..skipBytes(1);
+    expect(r.readUInt32Le(), 0x11223344);
+    expect(r.readByte(), 2);
+    expect(r.readBytes(2), [0xAA, 0xBB]);
+    expect(r.remaining, 0);
+  });
+
+  test('EXPORT/IMPORT/SHARE_CONTACT cover failure results', () async {
+    client.send([cmdImportContact]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.importContactResult = false;
+    client.send([cmdImportContact, 0x04, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.shareContactResult = false;
+    client.send([cmdShareContact, ...Uint8List(32)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+  });
+
+  test('binary and anonymous requests report not-found on failure', () async {
+    final pubkey = Uint8List(32)..[0] = 7;
+
+    client.send([cmdSendBinaryReq, ...pubkey.sublist(0, 3)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    bridge.binaryResult = const SentResult.failure();
+    client.send([cmdSendBinaryReq, ...pubkey, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    client.send([cmdSendAnonReq, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    bridge.anonResult = const SentResult.failure();
+    client.send([cmdSendAnonReq, ...pubkey, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+  });
+
+  test('telemetry requests validate length and report not-found', () async {
+    client.send([cmdSendTelemetryReq, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    final pubkey = Uint8List(32)..[0] = 7;
+    client.send([cmdSendTelemetryReq, 0, 0, 0, ...pubkey.sublist(0, 31)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.telemetryResult = const SentResult.failure();
+    client.send([cmdSendTelemetryReq, 0, 0, 0, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+  });
+
+  test('path discovery validates the index and reports not-found', () async {
+    final pubkey = Uint8List(32)..[0] = 7;
+
+    client.send([cmdSendPathDiscoveryReq, 0, ...pubkey.sublist(0, 3)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    client.send([cmdSendPathDiscoveryReq, 1, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.pathDiscoveryResult = const SentResult.failure();
+    client.send([cmdSendPathDiscoveryReq, 0, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    bridge.pathDiscoveryResult = const SentResult(success: true);
+    client.send([cmdSendPathDiscoveryReq, 0, ...pubkey]);
+    final sent = await client.frames.next();
+    expect(sent[0], respCodeSent);
+    expect((BufferReader(sent)..skipBytes(2)).readUInt32Le(), 0);
+  });
+
+  test('login, status, and logout validate and forward', () async {
+    final pubkey = Uint8List(32)..[0] = 7;
+
+    client.send([cmdSendLogin, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    client.send([cmdSendStatusReq, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    client.send([cmdLogout, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSendLogin, ...pubkey, ...utf8Bytes('secret'), 0, 9]);
+    final login = await client.frames.next();
+    expect(login[0], respCodeSent);
+    expect((BufferReader(login)..skipBytes(2)).readUInt32Le(), 0x7777);
+    expect(bridge.loginPassword, 'secret');
+
+    client.send([cmdSendStatusReq, ...pubkey]);
+    final status = await client.frames.next();
+    expect(status[0], respCodeSent);
+    expect(status[1], 1);
+    expect((BufferReader(status)..skipBytes(2)).readUInt32Le(), 0x8888);
+
+    bridge.loginResult = const SentResult.failure();
+    client.send([cmdSendLogin, ...pubkey, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+    bridge.statusResult = const SentResult.failure();
+    client.send([cmdSendStatusReq, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    client.send([cmdLogout, ...pubkey]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.logoutCount, 1);
+  });
+
+  test('RUN_CLI_COMMAND maps every bridge error kind', () async {
+    final cases = <(CompanionOperationError, String)>[
+      (const CompanionOperationError(errCodeUnsupportedCmd), 'Error: unsupported'),
+      (const CompanionOperationError(errCodeNotFound), 'Error: unsupported'),
+      (const CompanionOperationError(errCodeTableFull), 'Error: storage failure'),
+      (const CompanionOperationError(errCodeBadState), 'Error: device unavailable'),
+      (const CompanionOperationError(errCodeFileIoError), 'Error: storage failure'),
+      (const CompanionOperationError(errCodeIllegalArg), 'Error: illegal argument'),
+      (const CompanionOperationError(respCodeDisabled, disabled: true),
+          'Error: disabled'),
+    ];
+    for (final (error, expected) in cases) {
+      bridge.cliError = error;
+      bridge.cliGenericError = null;
+      client.send([cmdRunCliCommand, ...utf8Bytes('ver')]);
+      final reply = await client.frames.next();
+      expect(reply[0], respCodeCliReply);
+      expect(utf8.decode(reply.sublist(1)), expected);
+    }
+
+    bridge.cliError = null;
+    bridge.cliGenericError = StateError('exploded');
+    client.send([cmdRunCliCommand, ...utf8Bytes('ver')]);
+    expect(
+      utf8.decode((await client.frames.next()).sublist(1)),
+      'Error: illegal argument',
+    );
+  });
+
+  test('SET_CUSTOM_VAR validates encoding and maps operation errors', () async {
+    client.send([cmdSetCustomVar, 0x61, 0x62]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSetCustomVar, 0xFF, 0xFF, 0xFF]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSetCustomVar, ...utf8Bytes('nocolon')]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSetCustomVar, ...utf8Bytes(':value')]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.customVarError =
+        const CompanionOperationError(errCodeTableFull);
+    client.send([cmdSetCustomVar, ...utf8Bytes('key:value')]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+  });
+
+  test('GET_CUSTOM_VARS truncates the CSV to 140 bytes', () async {
+    bridge.supportedCustomKeys.add('long');
+    bridge.customVars['long'] = 'x' * 200;
+    client.send([cmdGetCustomVars]);
+    final resp = await client.frames.next();
+    expect(resp[0], respCodeCustomVars);
+    expect(resp.length, 1 + 140);
+    expect(String.fromCharCodes(resp.sublist(1)), startsWith('long:xxx'));
+  });
+
+  test('SET_OTHER_PARAMS and SET_AUTO_ADD_CONFIG validate and map errors',
+      () async {
+    client.send([cmdSetOtherParams]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    bridge.otherParamsError =
+        const CompanionOperationError(errCodeBadState);
+    client.send([cmdSetOtherParams, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+
+    client.send([cmdSetAutoAddConfig]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    bridge.autoAddError = const CompanionOperationError(errCodeTableFull);
+    client.send([cmdSetAutoAddConfig, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+  });
+
+  test('SET_RADIO_PARAMS rejects every out-of-range field', () async {
+    Uint8List frame({
+      int freq = 915000,
+      int bw = 250000,
+      int sf = 10,
+      int cr = 5,
+      List<int> suffix = const [],
+    }) =>
+        (BufferWriter()
+              ..writeByte(cmdSetRadioParams)
+              ..writeUInt32Le(freq)
+              ..writeUInt32Le(bw)
+              ..writeByte(sf)
+              ..writeByte(cr)
+              ..writeBytes(suffix))
+            .toBytes();
+
+    client.send([cmdSetRadioParams, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    for (final bad in [
+      frame(freq: 149999),
+      frame(freq: 2500001),
+      frame(bw: 6999),
+      frame(bw: 500001),
+      frame(sf: 4),
+      frame(sf: 13),
+      frame(cr: 4),
+      frame(cr: 9),
+    ]) {
+      client.send(bad);
+      expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    }
+
+    bridge.radioError =
+        const CompanionOperationError(errCodeIllegalArg, message: 'rejected');
+    client.send(frame());
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+  });
+
+  test('SET_RADIO_TX_POWER decodes signed bytes and maps errors', () async {
+    client.send([cmdSetRadioTxPower]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdSetRadioTxPower, 0x80]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.txPower, -128);
+
+    bridge.txError = const CompanionOperationError(errCodeBadState);
+    client.send([cmdSetRadioTxPower, 10]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+  });
+
+  test('SET_TUNING_PARAMS and SET_PATH_HASH_MODE validate and map errors',
+      () async {
+    client.send([cmdSetTuningParams, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    bridge.tuningError = const CompanionOperationError(errCodeBadState);
+    client.send((BufferWriter()
+          ..writeByte(cmdSetTuningParams)
+          ..writeUInt32Le(1)
+          ..writeUInt32Le(2))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+
+    client.send([cmdSetPathHashMode, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+  });
+
+  test('advert setters and the advert send map bridge failures', () async {
+    bridge.advertNameError =
+        const CompanionOperationError(errCodeIllegalArg);
+    client.send([cmdSetAdvertName, ...utf8Bytes('name')]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.advertLatLonError =
+        const CompanionOperationError(errCodeBadState);
+    client.send((BufferWriter()
+          ..writeByte(cmdSetAdvertLatLon)
+          ..writeInt32Le(0)
+          ..writeInt32Le(0))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+
+    bridge.advertiseResult = false;
+    client.send([cmdSendSelfAdvert]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+  });
+
+  test('flood-scope commands validate their arguments', () async {
+    client.send([cmdSetFloodScope]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    client.send([cmdSetFloodScope, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // 31 non-NUL bytes cannot be a valid display name.
+    client.send((BufferWriter()
+          ..writeByte(cmdSetDefaultFloodScope)
+          ..writeBytes(List.filled(31, 0x61))
+          ..writeBytes(Uint8List(16)))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send((BufferWriter()
+          ..writeByte(cmdSetDefaultFloodScope)
+          ..writeBytes(Uint8List(31))
+          ..writeBytes(Uint8List(16)))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.defaultFloodScopeError =
+        const CompanionOperationError(errCodeFileIoError);
+    client.send((BufferWriter()
+          ..writeByte(cmdSetDefaultFloodScope)
+          ..writeCString('Region', 31)
+          ..writeBytes(Uint8List(16)))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeFileIoError]);
+
+    bridge.defaultScopeName = 'Region';
+    bridge.defaultScopeKey = null;
+    client.send([cmdGetDefaultFloodScope]);
+    expect(await client.frames.next(), [respCodeDefaultFloodScope]);
+  });
+
+  test('raw-data and raw-packet send failures map to table-full', () async {
+    bridge.rawDataResult = false;
+    client.send([cmdSendRawData, 0x00, 1, 2, 3, 4]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+    client.send([cmdSendRawData, 0x00, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    final raw = (Packet()
+          ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeDirect)
+          ..payload = Uint8List.fromList([1]))
+        .writeTo();
+    bridge.rawPacketResult = false;
+    client.send([cmdSendRawPacket, 0, ...raw]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+    client.send([cmdSendRawPacket, 0, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+  });
+
+  test('trace send failures map to table-full', () async {
+    final w = BufferWriter()
+      ..writeByte(cmdSendTracePath)
+      ..writeUInt32Le(1)
+      ..writeUInt32Le(2)
+      ..writeByte(0)
+      ..writeBytes([1, 2, 3]);
+    bridge.traceResult = false;
+    client.send(w.toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+  });
+
+  test('GET_ALLOWED_REPEAT_FREQ maps bridge errors', () async {
+    bridge.allowedRepeatFreqError =
+        const CompanionOperationError(errCodeBadState);
+    client.send([cmdGetAllowedRepeatFreq]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+  });
+
+  test('idle timeout disconnects the client', () async {
+    final idleBridge = TestBridge(await LocalIdentity.fromSeed(Uint8List(32)));
+    final logs = <String>[];
+    final idleServer = CompanionServer(
+      bridge: idleBridge,
+      config: const CompanionServerConfig(
+        port: 0,
+        clientIdleTimeout: Duration(milliseconds: 40),
+      ),
+      onLog: logs.add,
+    );
+    await idleServer.start();
+    final idleClient = FramedClient(
+      await Socket.connect('127.0.0.1', idleServer.port!),
+    );
+    addTearDown(() async {
+      await idleClient.close();
+      await idleServer.stop();
+    });
+
+    expect(idleServer.hasClient, isTrue);
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(idleServer.hasClient, isFalse);
+    expect(logs.any((line) => line.contains('idle timeout')), isTrue);
+  });
+
+  test('heartbeat pushes CURR_TIME periodically', () async {
+    final heartbeatBridge =
+        TestBridge(await LocalIdentity.fromSeed(Uint8List(32)..[0] = 5));
+    final heartbeatServer = CompanionServer(
+      bridge: heartbeatBridge,
+      config: const CompanionServerConfig(
+        port: 0,
+        heartbeatInterval: Duration(milliseconds: 30),
+      ),
+    );
+    await heartbeatServer.start();
+    final heartbeatClient = FramedClient(
+      await Socket.connect('127.0.0.1', heartbeatServer.port!),
+    );
+    addTearDown(() async {
+      await heartbeatClient.close();
+      await heartbeatServer.stop();
+    });
+
+    final frame = await heartbeatClient.frames.nextWithin(
+      const Duration(seconds: 2),
+    );
+    expect(frame, isNotNull);
+    expect(frame![0], respCodeCurrTime);
+    expect(frame.length, 5);
+  });
+
+  test('start is idempotent and disconnectClient is safe without a client',
+      () async {
+    final port = server.port;
+    await server.start();
+    expect(server.port, port);
+
+    await server.disconnectClient(reason: 'already stopped');
+    expect(server.hasClient, isFalse);
+  });
+
   test('switchBridge disconnects the client and serves the new identity',
       () async {
     final secondIdentity = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 2);
@@ -2051,6 +2963,196 @@ void main() {
     final info = await appStart(next, appProtocolVersion);
     expect(info[0], respCodeSelfInfo);
   });
+
+  test('remaining push frames match the firmware layouts', () async {
+    final prefix = Uint8List.fromList([1, 2, 3, 4, 5, 6]);
+
+    server.pushMsgWaiting();
+    expect(await client.frames.next(), [pushCodeMsgWaiting]);
+
+    final pubkey = Uint8List(32)..[0] = 9;
+    server.pushAdvert(pubkey);
+    expect(await client.frames.next(), [pushCodeAdvert, ...pubkey]);
+
+    server.pushPathUpdated(pubkey);
+    expect(await client.frames.next(), [pushCodePathUpdated, ...pubkey]);
+
+    server.pushTelemetryResponse(prefix, Uint8List.fromList([7, 8]));
+    expect(await client.frames.next(),
+        [pushCodeTelemetryResponse, 0, ...prefix, 7, 8]);
+
+    server.pushPathDiscoveryResponse(
+      prefix,
+      2,
+      Uint8List.fromList([0xAA, 0xBB]),
+      1,
+      Uint8List.fromList([0xCC]),
+    );
+    expect(await client.frames.next(),
+        [pushCodePathDiscoveryResponse, 0, ...prefix, 2, 0xAA, 0xBB, 1, 0xCC]);
+
+    server.pushLoginSuccess(
+      prefix,
+      permissions: 3,
+      serverTag: 0x11223344,
+      acl: 5,
+      firmwareVer: 14,
+    );
+    expect(await client.frames.next(), [
+      pushCodeLoginSuccess,
+      3,
+      ...prefix,
+      0x44, 0x33, 0x22, 0x11,
+      5,
+      14,
+    ]);
+
+    server.pushLoginSuccess(prefix, legacy: true);
+    expect(await client.frames.next(), [pushCodeLoginSuccess, 0, ...prefix]);
+
+    server.pushLoginFail(prefix);
+    expect(await client.frames.next(), [pushCodeLoginFail, 0, ...prefix]);
+
+    server.pushStatusResponse(prefix, Uint8List.fromList([9]));
+    expect(await client.frames.next(),
+        [pushCodeStatusResponse, 0, ...prefix, 9]);
+
+    server.pushControlData(-1.0, -70, 2, Uint8List.fromList([1, 2]));
+    expect(await client.frames.next(), [pushCodeControlData, 252, 186, 2, 1, 2]);
+  });
+
+  test('empty commands and unexpected bridge errors answer ERR illegal arg',
+      () async {
+    client.send(const []);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    bridge.contactsError = StateError('backend exploded');
+    client.send([cmdGetContacts, 0, 0, 0, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(
+      serverLogs.any((line) => line.contains('backend exploded')),
+      isTrue,
+    );
+  });
+
+  test('operation errors preserve codes and disabled/uncertain flags', () async {
+    final pubkey = Uint8List(32)..[0] = 9;
+    bridge.addContactError =
+        const CompanionOperationError(errCodeTableFull);
+    client.send([cmdAddUpdateContact, ..._contactBody(pubkey)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    bridge.removeContactError = const CompanionOperationError(
+      errCodeBadState,
+      message: 'uncertain write',
+      uncertain: true,
+    );
+    client.send([cmdRemoveContact, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+    expect(
+      serverLogs.any((line) => line.contains('no automatic retry')),
+      isTrue,
+    );
+
+    bridge.resetPathError =
+        const CompanionOperationError(errCodeIllegalArg, disabled: true);
+    client.send([cmdResetPath, ...pubkey]);
+    expect(await client.frames.next(), [respCodeDisabled]);
+  });
+
+  test('GET_CONTACT_BY_KEY validates, looks up, and frames the contact',
+      () async {
+    final pubkey = Uint8List(32)..[0] = 9;
+
+    client.send([cmdGetContactByKey, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdGetContactByKey, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+
+    final contact = Contact(publicKey: pubkey, name: 'peer', lastmod: 42);
+    bridge.contacts.add(contact);
+    client.send([cmdGetContactByKey, ...pubkey]);
+    final frame = await client.frames.next();
+    expect(frame[0], respCodeContact);
+    expect(frame.sublist(1, 33), pubkey);
+    expect(frame.sublist(35, 39), [0xFF, 0, 0, 0]);
+    expect(frame.sublist(100, 104), [0x70, 0x65, 0x65, 0x72]);
+  });
+
+  test('ADD_UPDATE_CONTACT accepts unknown routes and partial records',
+      () async {
+    final pubkey = Uint8List(32)..[0] = 9;
+
+    client.send([cmdAddUpdateContact, ..._contactBody(pubkey, pathLen: 0xFF)]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.addedContact!.outPathLen, -1);
+    expect(bridge.addedContact!.outPath, isEmpty);
+    expect(bridge.addedContactHasGps, isFalse);
+
+    // A truncated name field is padded rather than rejected.
+    final partial = _contactBody(pubkey, name: 'peer').sublist(0, 99 + 4);
+    client.send([cmdAddUpdateContact, ...partial]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.addedContact!.name, 'peer');
+    expect(bridge.addedContact!.lastmod, bridge.currentTime);
+
+    // The name field may be omitted entirely when the path field ends early.
+    client.send([cmdAddUpdateContact, ..._contactBody(pubkey).sublist(0, 99)]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.addedContact!.name, '');
+
+    // Timestamp, GPS, and lastmod fields are all optional but decoded when
+    // present.
+    final full = (BufferWriter()
+          ..writeBytes(_contactBody(pubkey, name: 'peer'))
+          ..writeUInt32Le(0x11223344)
+          ..writeInt32Le(40500000)
+          ..writeInt32Le(-96250000)
+          ..writeUInt32Le(0x55667788))
+        .toBytes();
+    client.send([cmdAddUpdateContact, ...full]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.addedContact!.lastAdvertTimestamp, 0x11223344);
+    expect(bridge.addedContact!.gpsLat, closeTo(40.5, 1e-9));
+    expect(bridge.addedContact!.gpsLon, closeTo(-96.25, 1e-9));
+    expect(bridge.addedContact!.lastmod, 0x55667788);
+    expect(bridge.addedContactHasGps, isTrue);
+  });
+
+  test('ADD_UPDATE_CONTACT rejects truncated paths and short records',
+      () async {
+    final pubkey = Uint8List(32)..[0] = 9;
+
+    client.send([cmdAddUpdateContact, ..._contactBody(pubkey).sublist(0, 35)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg],
+        reason: 'records shorter than 36 bytes are rejected');
+
+    final twoHop = _contactBody(pubkey, pathLen: 2);
+    client.send([cmdAddUpdateContact, ...twoHop.sublist(0, 36)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    client.send([cmdAddUpdateContact, ...const <int>[]]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+  });
+
+  test('REMOVE_CONTACT and RESET_PATH validate and forward the key', () async {
+    final pubkey = Uint8List(32)..[0] = 9;
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
+
+    client.send([cmdRemoveContact, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    client.send([cmdRemoveContact, ...pubkey]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.removedContact, pubkey);
+    expect(bridge.contacts, isEmpty);
+
+    client.send([cmdResetPath, 1, 2]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    client.send([cmdResetPath, ...pubkey]);
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.resetPathFor, pubkey);
+  });
 }
 
 Future<Uint8List> appStart(
@@ -2065,6 +3167,23 @@ Future<Uint8List> appStart(
     ..writeByte(0);
   client.send(w.toBytes());
   return client.frames.next();
+}
+
+/// Build an `ADD_UPDATE_CONTACT` body with the fixed path/name fields.
+Uint8List _contactBody(
+  Uint8List publicKey, {
+  int pathLen = 0,
+  String name = '',
+  int advType = advTypeChat,
+}) {
+  return (BufferWriter()
+        ..writeBytes(publicKey)
+        ..writeByte(advType)
+        ..writeByte(0)
+        ..writeByte(pathLen)
+        ..writeBytes(Uint8List(64))
+        ..writeCString(name, 32))
+      .toBytes();
 }
 
 List<int> utf8Bytes(String s) => utf8.encode(s);

@@ -10,6 +10,8 @@ import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/main.dart';
 import 'package:meshchameleon/screens/identities_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
+import 'package:meshchameleon/services/identity_index.dart';
+import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/network_connection_store.dart';
@@ -385,4 +387,367 @@ void main() {
     expect(find.text('Identity database unavailable'), findsOneWidget);
     expect(find.text('Retry'), findsOneWidget);
   });
+
+  testWidgets('loading, empty, and busy states render their controls',
+      (tester) async {
+    final fake = _FakeIdentitiesAppState()..loaded = false;
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    fake
+      ..loaded = true
+      ..summaries = [];
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+    expect(find.text('No identities yet'), findsOneWidget);
+    expect(find.widgetWithText(FilledButton, 'Create identity'),
+        findsOneWidget);
+
+    fake.busy = true;
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    final fab = tester.widget<FloatingActionButton>(
+      find.byType(FloatingActionButton),
+    );
+    expect(fab.onPressed, isNull);
+  });
+
+  testWidgets('the database retry button reloads identities', (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..dbError = 'catalog damaged'
+      ..busy = false;
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    expect(find.text('catalog damaged'), findsOneWidget);
+    await tester.tap(find.text('Retry'));
+    await tester.pump();
+    expect(fake.loadCalls, 1);
+
+    fake.busy = true;
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+    expect(
+      tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Retry')).onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('activation failures and disabled identities show feedback',
+      (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..summaries = [
+        _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
+        _summary(id: 'b' * 32, name: 'Second'),
+        _summary(
+          id: 'c' * 32,
+          name: 'Disabled',
+          enabled: false,
+        ),
+      ]
+      ..activateResult = false;
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    await tester.tap(find.text('Second'));
+    await tester.pumpAndSettle();
+    expect(fake.activateCalls, ['b' * 32]);
+    expect(find.text('Could not activate Second'), findsOneWidget);
+
+    // A disabled identity cannot be activated.
+    await tester.tap(find.text('Disabled'));
+    await tester.pumpAndSettle();
+    expect(fake.activateCalls, hasLength(1));
+  });
+
+  testWidgets('toggle failures show feedback', (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..summaries = [
+        _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
+        _summary(id: 'b' * 32, name: 'Second'),
+      ]
+      ..toggleResult = false;
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    await _openMenu(tester, 'Second');
+    await tester.tap(find.text('Disable identity'));
+    await tester.pumpAndSettle();
+    expect(fake.toggleCalls, [('b' * 32, false)]);
+    expect(find.text('Could not disable Second'), findsOneWidget);
+  });
+
+  testWidgets('create failures and cancellation show feedback', (tester) async {
+    final fake = _FakeIdentitiesAppState()..summaries = [];
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    fake.suggestError = StateError('database');
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not read the identity database'), findsOneWidget);
+    _clearSnackBars(tester);
+
+    fake.suggestError = null;
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(fake.createdNames, isEmpty);
+
+    fake.createResult = null;
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not create the identity'), findsOneWidget);
+    _clearSnackBars(tester);
+
+    fake.createResult = IdentityRecord(
+      id: 'd' * 32,
+      publicKey: Uint8List(32),
+      name: 'Made',
+      createdAt: 1,
+    );
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(find.text('Created Made (inactive)'), findsOneWidget);
+  });
+
+  testWidgets('clear local data confirms and reports both outcomes',
+      (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..summaries = [
+        _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
+      ];
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    await _openMenu(tester, 'Active');
+    await tester.tap(find.text('Clear local data'));
+    await tester.pumpAndSettle();
+    expect(find.text('Clear local data?'), findsOneWidget);
+    expect(find.textContaining('The MeshCore app will reconnect'),
+        findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(fake.clearCalls, isEmpty);
+
+    await _openMenu(tester, 'Active');
+    await tester.tap(find.text('Clear local data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear'));
+    await tester.pumpAndSettle();
+    expect(fake.clearCalls, ['a' * 32]);
+    expect(find.text('Cleared local data for Active'), findsOneWidget);
+    _clearSnackBars(tester);
+
+    fake.clearResult = false;
+    await _openMenu(tester, 'Active');
+    await tester.tap(find.text('Clear local data'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Clear'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not clear local data'), findsOneWidget);
+  });
+
+  testWidgets('delete confirms and reports both outcomes', (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..summaries = [
+        _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
+        _summary(id: 'b' * 32, name: 'Second'),
+      ];
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    await _openMenu(tester, 'Second');
+    await tester.tap(find.text('Delete identity'));
+    await tester.pumpAndSettle();
+    expect(find.text('Delete identity?'), findsOneWidget);
+    await tester.tap(find.text('Cancel'));
+    await tester.pumpAndSettle();
+    expect(fake.deleteCalls, isEmpty);
+
+    await _openMenu(tester, 'Second');
+    await tester.tap(find.text('Delete identity'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(fake.deleteCalls, ['b' * 32]);
+    expect(find.text('Deleted Second'), findsOneWidget);
+    _clearSnackBars(tester);
+
+    fake.deleteResult = false;
+    await _openMenu(tester, 'Second');
+    await tester.tap(find.text('Delete identity'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Could not delete Second'), findsOneWidget);
+  });
+
+  testWidgets('identity cards show live, inactive, and unavailable reasons',
+      (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..summaries = [
+        _summary(id: 'a' * 32, name: 'Active', active: true, live: true),
+        _summary(id: 'b' * 32, name: 'Live', live: true, enabled: false),
+        _summary(
+          id: 'c' * 32,
+          name: 'Unavailable',
+          unavailableReason: 'startup failed',
+        ),
+      ];
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    expect(find.textContaining('· Live'), findsOneWidget);
+    expect(find.textContaining('· Disabled'), findsOneWidget);
+    expect(find.text('startup failed'), findsOneWidget);
+    expect(find.text('Key unavailable'), findsNothing);
+  });
+
+  testWidgets('the name dialog accepts Enter and rejects whitespace-only input',
+      (tester) async {
+    final fake = _FakeIdentitiesAppState()
+      ..suggestion = 'Suggested Name'
+      ..summaries = [];
+    await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
+    await tester.pump();
+
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    expect(find.text('14/31 bytes'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), '   ');
+    await tester.pump();
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(fake.createdNames, ['Suggested Name']);
+
+    fake.createResult = null;
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), '');
+    await tester.pump();
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(fake.createdNames, ['Suggested Name', 'Suggested Name']);
+  });
+}
+
+void _clearSnackBars(WidgetTester tester) {
+  final context = tester.element(find.byType(IdentitiesScreen));
+  ScaffoldMessenger.of(context).clearSnackBars();
+}
+
+Widget _wrapFake(AppState app, Widget child) =>
+    ChangeNotifierProvider<AppState>.value(
+      value: app,
+      child: MaterialApp(home: child),
+    );
+
+Future<void> _openMenu(WidgetTester tester, String name) async {
+  final menu = find.descendant(
+    of: find.ancestor(of: find.text(name), matching: find.byType(Card)),
+    matching: find.byType(PopupMenuButton<String>),
+  );
+  await tester.tap(menu);
+  await tester.pumpAndSettle();
+}
+
+IdentitySummary _summary({
+  required String id,
+  required String name,
+  bool active = false,
+  bool live = false,
+  bool enabled = true,
+  String? unavailableReason,
+}) =>
+    IdentitySummary(
+      id: id,
+      name: name,
+      publicKey: Uint8List(32),
+      createdAt: 1,
+      active: active,
+      live: live,
+      enabled: enabled,
+      keyAvailable: true,
+      channelCount: 0,
+      contactCount: 0,
+      queuedDirect: 0,
+      queuedChannel: 0,
+      unavailableReason: unavailableReason,
+    );
+
+class _FakeIdentitiesAppState extends AppState {
+  List<IdentitySummary> summaries = [];
+  bool loaded = true;
+  String? dbError;
+  Object? suggestError;
+  String suggestion = 'MeshChameleon 2';
+  IdentityRecord? createResult;
+  bool activateResult = true;
+  bool toggleResult = true;
+  bool deleteResult = true;
+  bool clearResult = true;
+  int loadCalls = 0;
+  final activateCalls = <String>[];
+  final toggleCalls = <(String, bool)>[];
+  final deleteCalls = <String>[];
+  final clearCalls = <String>[];
+  final createdNames = <String?>[];
+
+  @override
+  List<IdentitySummary> get identities => summaries;
+
+  @override
+  bool get identitiesLoaded => loaded;
+
+  @override
+  String? get identityDatabaseError => dbError;
+
+  @override
+  Future<void> loadIdentities({bool resume = true}) async {
+    loadCalls++;
+  }
+
+  @override
+  Future<String> suggestIdentityName() async {
+    if (suggestError != null) throw suggestError!;
+    return suggestion;
+  }
+
+  @override
+  Future<IdentityRecord?> createIdentity({String? name}) async {
+    createdNames.add(name);
+    return createResult;
+  }
+
+  @override
+  Future<bool> activateIdentity(String id) async {
+    activateCalls.add(id);
+    return activateResult;
+  }
+
+  @override
+  Future<bool> setIdentityEnabled(String id, bool enabled) async {
+    toggleCalls.add((id, enabled));
+    return toggleResult;
+  }
+
+  @override
+  Future<bool> deleteIdentity(String id) async {
+    deleteCalls.add(id);
+    return deleteResult;
+  }
+
+  @override
+  Future<bool> clearLocalData(String id) async {
+    clearCalls.add(id);
+    return clearResult;
+  }
 }

@@ -12,6 +12,8 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
 void main() {
+  _extraBackupServiceTests();
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory dir;
@@ -223,6 +225,210 @@ void main() {
 
     await expectLater(
       service.inspect(bytes: tampered, passphrase: passphrase),
+      throwsA(isA<BackupException>()),
+    );
+  });
+}
+
+// Additional restore/validation coverage.
+
+class _FailingNetworkStore extends NetworkConnectionStore {
+  _FailingNetworkStore({super.file});
+
+  @override
+  Future<void> save(List<SavedNetworkConnection> connections) async {
+    throw StateError('network write failed');
+  }
+}
+
+void _extraBackupServiceTests() {
+  late Directory dir;
+  late IdentityStore store;
+  late IdentityRepository repository;
+  late SessionStore sessions;
+  late NetworkConnectionStore networks;
+  late BackupService service;
+  late List<String> logs;
+  const passphrase = 'backup passphrase';
+
+  setUp(() async {
+    dir = await Directory.systemTemp.createTemp('mesh_backup_service_extra_');
+    FlutterSecureStorage.setMockInitialValues(<String, String>{});
+    store = IdentityStore();
+    repository = IdentityRepository(supportDirectory: dir, secureStore: store);
+    sessions = SessionStore(file: File('${dir.path}/session.json'));
+    networks = NetworkConnectionStore(
+      file: File('${dir.path}/network_connections.json'),
+    );
+    logs = [];
+    service = BackupService(
+      repository: repository,
+      identityStore: store,
+      sessionStore: sessions,
+      networkConnectionStore: networks,
+      onLog: logs.add,
+    );
+  });
+
+  tearDown(() async {
+    await dir.delete(recursive: true);
+  });
+
+  Future<Uint8List> makeBackup() async {
+    final payload = await service.capture();
+    return BackupCodec.seal(
+      payload: payload,
+      passphrase: passphrase,
+      appVersion: '0.1.0',
+    );
+  }
+
+  Future<Uint8List> tampered(
+    void Function(Map<String, Object?> payload) mutate,
+  ) async {
+    final opened = await BackupCodec.open(
+      bytes: await makeBackup(),
+      passphrase: passphrase,
+    );
+    mutate(opened);
+    return BackupCodec.seal(
+      payload: opened,
+      passphrase: passphrase,
+      appVersion: '0.1.0',
+    );
+  }
+
+  test('restore clears a session and saved connections that were absent',
+      () async {
+    await repository.loadOrCreate();
+    final bytes = await tampered((payload) {
+      payload['session'] = null;
+      payload['network_connections'] = null;
+    });
+    final preview = await service.inspect(bytes: bytes, passphrase: passphrase);
+    await sessions.save(const SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: 'old.example',
+      proxyPort: 5000,
+    ));
+    await networks.save([
+      const SavedNetworkConnection(
+        host: '10.0.0.9',
+        port: 5000,
+        lastConnectedAt: 1000,
+      ),
+    ]);
+
+    await service.restore(preview);
+
+    expect(await sessions.load(), isNull);
+    expect(await networks.load(), isEmpty);
+  });
+
+  test('restore prunes older recovery copies', () async {
+    await repository.loadOrCreate();
+    final preview = await service.inspect(
+      bytes: await makeBackup(),
+      passphrase: passphrase,
+    );
+    final older = Directory('${dir.path}/identities.recovery-old')
+      ..createSync(recursive: true);
+    expect(older.existsSync(), isTrue);
+
+    await service.restore(preview);
+
+    expect(older.existsSync(), isFalse);
+    expect(logs, anyElement(contains('Restored 1 identities')));
+  });
+
+  test('a failed settings write rolls back keys, session, and logs', () async {
+    final index = await repository.loadOrCreate();
+    final record = index.activeRecord!;
+    final originalKey = await store.loadById(record.id);
+    await sessions.save(const SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: 'before.example',
+      proxyPort: 5000,
+    ));
+    final preview = await service.inspect(
+      bytes: await makeBackup(),
+      passphrase: passphrase,
+    );
+
+    final failing = _FailingNetworkStore(
+      file: File('${dir.path}/failing_networks.json'),
+    );
+    final failingService = BackupService(
+      repository: repository,
+      identityStore: store,
+      sessionStore: sessions,
+      networkConnectionStore: failing,
+      onLog: logs.add,
+    );
+
+    await expectLater(failingService.restore(preview), throwsStateError);
+
+    final restoredKey = await store.loadById(record.id);
+    expect(bytesToHex(restoredKey!.meshcore64),
+        bytesToHex(originalKey!.meshcore64));
+    expect((await sessions.load())!.host, 'before.example');
+    expect(logs, anyElement(contains('rolling back')));
+  });
+
+  test('inspect rejects malformed identity entries and state', () async {
+    await repository.loadOrCreate();
+
+    Future<void> rejects(
+      void Function(Map<String, Object?> payload) mutate,
+    ) async {
+      await expectLater(
+        service.inspect(bytes: await tampered(mutate), passphrase: passphrase),
+        throwsA(isA<BackupException>()),
+      );
+    }
+
+    await rejects((payload) {
+      final identities =
+          (payload['identities']! as Map).cast<String, Object?>();
+      final id = identities.keys.single;
+      identities[id] = 'not a map';
+      payload['identities'] = identities;
+    });
+
+    await rejects((payload) {
+      final identities =
+          (payload['identities']! as Map).cast<String, Object?>();
+      final id = identities.keys.single;
+      (identities[id]! as Map).remove('key');
+      payload['identities'] = identities;
+    });
+
+    await rejects((payload) {
+      final identities =
+          (payload['identities']! as Map).cast<String, Object?>();
+      final id = identities.keys.single;
+      (identities[id]! as Map)['key'] = '00';
+      payload['identities'] = identities;
+    });
+
+    await rejects((payload) {
+      final identities =
+          (payload['identities']! as Map).cast<String, Object?>();
+      final id = identities.keys.single;
+      (identities[id]! as Map)['state'] = 'bad state';
+      payload['identities'] = identities;
+    });
+  });
+
+  test('inspect rejects malformed saved connections', () async {
+    await repository.loadOrCreate();
+    await expectLater(
+      service.inspect(
+        bytes: await tampered(
+          (payload) => payload['network_connections'] = 'not connections',
+        ),
+        passphrase: passphrase,
+      ),
       throwsA(isA<BackupException>()),
     );
   });

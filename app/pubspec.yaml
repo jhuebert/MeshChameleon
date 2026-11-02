@@ -37,6 +37,8 @@ dev_dependencies:
   integration_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # Platform-interface fake used by the BLE unit tests.
+  flutter_blue_plus_platform_interface: ^7.0.0
   # Icon / splash generation from assets/branding (see the yaml configs).
   flutter_launcher_icons: ^0.14.4
   flutter_native_splash: ^2.4.6

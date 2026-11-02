@@ -188,6 +188,21 @@ void main() {
     expect(link.currentState, LinkState.disconnected);
   });
 
+  test('connectWithBackoff disconnects if cancelled after connecting',
+      () async {
+    final link = FakeDeviceLink();
+    var checks = 0;
+    await expectLater(
+      connectWithBackoff(
+        link,
+        shouldCancel: () => checks++ > 0,
+      ),
+      throwsStateError,
+    );
+    expect(link.currentState, LinkState.disconnected);
+    expect(link.calls, containsAllInOrder(['connect', 'disconnect']));
+  });
+
   test('connectWithBackoff gives up after maxAttempts', () async {
     final link = FakeDeviceLink(connectFailures: 5);
     await expectLater(

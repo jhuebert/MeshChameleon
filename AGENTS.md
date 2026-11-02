@@ -140,6 +140,11 @@ package checks, then the full script before finishing.
   the reference repos or upgrade dependencies as drive-by work.
 - Add regression tests for protocol behavior and keep the simulator tests
   hardware-free. Update `ATTRIBUTION.md` when adapting additional external code.
+- Every change must update or add tests so the touched code stays reasonably
+  covered (aim for at least 80% line coverage per source file, and do not lower
+  an existing file's coverage). New behavior needs tests before handoff.
+- Every bug fix must include a test that reproduces the bug and passes with the
+  fix, so the regression cannot silently return.
 - Do not create a GitHub issue, PR, release, or publish artifacts without
   Jason's explicit request. Pushing code to the personal repo is allowed when
   Jason explicitly requests it.

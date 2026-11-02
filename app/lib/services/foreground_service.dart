@@ -1,5 +1,4 @@
-import 'dart:io' show Platform;
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 /// Keeps the proxy process alive while the app is backgrounded (M0 shape A).
@@ -11,7 +10,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 class ForegroundService {
   bool _initialized = false;
 
-  bool get _isAndroid => Platform.isAndroid;
+  bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
 
   Future<void> initialize() async {
     if (!_isAndroid || _initialized) return;

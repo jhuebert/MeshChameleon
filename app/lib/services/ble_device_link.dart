@@ -228,9 +228,15 @@ class BleDeviceLink implements RadioLink {
       final completer = Completer<Uint8List>();
       _pending = completer;
       _expected = expected;
+      final response = completer.future;
+      // A fast device reply can complete while the write is still in flight.
+      // Keep an error listener attached from creation so that early failure is
+      // not reported as an unhandled asynchronous error before the caller
+      // awaits the request.
+      unawaited(response.then<void>((_) {}, onError: (_, __) {}));
       try {
         await _writeFrame(rx, frame);
-        return await completer.future.timeout(requestTimeout);
+        return await response.timeout(requestTimeout);
       } on TimeoutException {
         throw DeviceCommandError.timeout(
           message: 'BLE reply timed out after '
