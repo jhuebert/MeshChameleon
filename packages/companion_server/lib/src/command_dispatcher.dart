@@ -837,11 +837,7 @@ class CompanionCommandDispatcher {
     // excludes the command byte, so that is a 3-byte payload.
     if (data.length == 3) {
       final batt = await host.bridge.getBatteryAndStorage();
-      final lpp = (BufferWriter()
-            ..writeByte(telemChannelSelf)
-            ..writeByte(0x74) // CayenneLPP voltage (0.01 V)
-            ..writeUInt16Be((batt.millivolts / 10).round()))
-          .toBytes();
+      final lpp = encodeSelfVoltageTelemetry(batt.millivolts);
       host.sendFrame(Uint8List.fromList([
         pushCodeTelemetryResponse,
         0,

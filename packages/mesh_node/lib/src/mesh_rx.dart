@@ -795,9 +795,7 @@ class MeshRx {
     required bool includeLocation,
   }) {
     final w = BufferWriter()
-      ..writeByte(telemChannelSelf)
-      ..writeByte(0x74) // CayenneLPP voltage, 0.01 V
-      ..writeUInt16Be((millivolts / 10).round().clamp(0, 0xFFFF));
+      ..writeBytes(encodeSelfVoltageTelemetry(millivolts));
     if (includeLocation) {
       w
         ..writeByte(telemChannelSelf)
