@@ -207,17 +207,14 @@ class MeshRx {
   }
 
   Future<void> _onAdvert(Packet packet, int generation) async {
-    if (packet.payload.length <
-        pubKeySize + timestampSize + signatureSize + 1) {
-      return;
-    }
-    if (!await PacketBuilder.verifyAdvert(packet.payload)) return;
+    final advert = PacketBuilder.decodeAdvertPacket(packet.payload);
+    if (advert == null || advert.appData.isEmpty) return;
+    if (!await advert.verify()) return;
     if (!deps.isCurrent(generation)) return;
-    final pubkey = Uint8List.fromList(packet.payload.sublist(0, pubKeySize));
+    final pubkey = Uint8List.fromList(advert.publicKey);
     if (bytesEqual(pubkey, identity.publicKey)) return;
-    final ts = BufferReader(packet.payload.sublist(pubKeySize)).readUInt32Le();
-    final appdata =
-        packet.payload.sublist(pubKeySize + timestampSize + signatureSize);
+    final ts = advert.timestamp;
+    final appdata = advert.appData;
     final decoded = PacketBuilder.decodeAdvertData(appdata);
     if (!decoded.valid || !decoded.hasName) return;
     final name = validateAdvertName(decoded.name);

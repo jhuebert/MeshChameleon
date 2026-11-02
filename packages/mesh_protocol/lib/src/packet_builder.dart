@@ -10,6 +10,32 @@ import 'models.dart';
 import 'packet.dart';
 import 'paths.dart';
 
+/// A decoded advert packet: public key, timestamp, signature, and appdata.
+class AdvertPacket {
+  const AdvertPacket({
+    required this.publicKey,
+    required this.timestamp,
+    required this.signature,
+    required this.appData,
+  });
+
+  final Uint8List publicKey;
+  final int timestamp;
+  final Uint8List signature;
+  final Uint8List appData;
+
+  /// Verify the signature over `pubkey | timestamp | appdata`.
+  Future<bool> verify() => LocalIdentity.verify(
+        Uint8List.fromList([
+          ...publicKey,
+          ...(BufferWriter()..writeUInt32Le(timestamp)).toBytes(),
+          ...appData,
+        ]),
+        signature,
+        publicKey,
+      );
+}
+
 /// Builds MeshCore on-air packets. Ported from `openhop_core` `PacketBuilder`.
 class PacketBuilder {
   const PacketBuilder._();
@@ -433,22 +459,29 @@ class PacketBuilder {
     return pkt;
   }
 
+  /// Decode the fixed advert envelope.
+  ///
+  /// Returns null when the payload is too short for a public key, timestamp,
+  /// and signature.
+  static AdvertPacket? decodeAdvertPacket(Uint8List payload) {
+    if (payload.length < pubKeySize + timestampSize + signatureSize) {
+      return null;
+    }
+    return AdvertPacket(
+      publicKey: payload.sublist(0, pubKeySize),
+      timestamp: BufferReader(payload.sublist(pubKeySize)).readUInt32Le(),
+      signature: payload.sublist(
+        pubKeySize + timestampSize,
+        pubKeySize + timestampSize + signatureSize,
+      ),
+      appData: payload.sublist(pubKeySize + timestampSize + signatureSize),
+    );
+  }
+
   /// Verify an advert packet and extract its encoded appdata.
   static Future<bool> verifyAdvert(Uint8List payload) async {
-    // payload = pubkey(32) + timestamp(4) + signature(64) + appdata(...)
-    if (payload.length < pubKeySize + timestampSize + signatureSize) {
-      return false;
-    }
-    final pubkey = payload.sublist(0, pubKeySize);
-    final ts = payload.sublist(pubKeySize, pubKeySize + timestampSize);
-    final signature = payload.sublist(
-        pubKeySize + timestampSize, pubKeySize + timestampSize + signatureSize);
-    final appdata = payload.sublist(pubKeySize + timestampSize + signatureSize);
-    return LocalIdentity.verify(
-      Uint8List.fromList([...pubkey, ...ts, ...appdata]),
-      signature,
-      pubkey,
-    );
+    final advert = decodeAdvertPacket(payload);
+    return advert != null && await advert.verify();
   }
 
   /// Decode advert appdata into flag/location/name.
