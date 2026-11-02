@@ -1,10 +1,9 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
-import 'json_file.dart';
+import 'json_document_store.dart';
 
 /// How the last-used companion device was reached.
 ///
@@ -147,7 +146,13 @@ class SessionStore {
   SessionStore({File? file}) : _file = file;
 
   File? _file;
-  JsonFile? _json;
+
+  late final JsonDocumentStore<SessionConfig> _store = JsonDocumentStore(
+    resolveFile: _resolveFile,
+    decode: (json) =>
+        json is Map<String, dynamic> ? SessionConfig.fromJson(json) : null,
+    encode: (config) => config.toJson(),
+  );
 
   Future<File> _resolveFile() async {
     final existing = _file;
@@ -156,28 +161,10 @@ class SessionStore {
     return _file = File('${dir.path}/session.json');
   }
 
-  Future<JsonFile> _resolveJson() async =>
-      _json ??= JsonFile(await _resolveFile());
+  Future<SessionConfig?> load() => _store.load();
 
-  Future<SessionConfig?> load() async {
-    try {
-      final file = await _resolveFile();
-      if (!await file.exists()) return null;
-      final decoded = jsonDecode(await file.readAsString());
-      if (decoded is! Map<String, dynamic>) return null;
-      return SessionConfig.fromJson(decoded);
-    } catch (_) {
-      // A corrupt or unreadable file should never block startup.
-      return null;
-    }
-  }
-
-  Future<void> save(SessionConfig config) async {
-    await (await _resolveJson()).write(config.toJson());
-  }
+  Future<void> save(SessionConfig config) => _store.save(config);
 
   /// Remove the saved session, used when restoring a backup without one.
-  Future<void> delete() async {
-    await (await _resolveJson()).delete();
-  }
+  Future<void> delete() => _store.delete();
 }

@@ -1,9 +1,8 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:path_provider/path_provider.dart';
 
-import 'json_file.dart';
+import 'json_document_store.dart';
 
 /// Current on-disk saved-network-connection schema.
 const int networkConnectionHistoryVersion = 1;
@@ -240,7 +239,13 @@ class NetworkConnectionStore {
   NetworkConnectionStore({File? file}) : _file = file;
 
   File? _file;
-  JsonFile? _json;
+
+  late final JsonDocumentStore<List<SavedNetworkConnection>> _store =
+      JsonDocumentStore(
+    resolveFile: _resolveFile,
+    decode: (json) => json is Map ? decodeNetworkConnections(json) : null,
+    encode: encodeNetworkConnections,
+  );
 
   Future<File> _resolveFile() async {
     final existing = _file;
@@ -249,29 +254,14 @@ class NetworkConnectionStore {
     return _file = File('${dir.path}/network_connections.json');
   }
 
-  Future<JsonFile> _resolveJson() async =>
-      _json ??= JsonFile(await _resolveFile());
-
-  Future<List<SavedNetworkConnection>> load() async {
-    try {
-      final file = await _resolveFile();
-      if (!await file.exists()) return const [];
-      final decoded = jsonDecode(await file.readAsString());
-      return decodeNetworkConnections(decoded);
-    } catch (_) {
-      // A corrupt or unreadable file must never block startup.
-      return const [];
-    }
-  }
+  Future<List<SavedNetworkConnection>> load() async =>
+      (await _store.load()) ?? const [];
 
   Future<void> save(List<SavedNetworkConnection> connections) async {
-    final snapshot = _order(connections);
-    await (await _resolveJson()).write(encodeNetworkConnections(snapshot));
+    await _store.save(_order(connections));
   }
 
   /// Remove the saved connection history, used when restoring a backup
   /// without one.
-  Future<void> delete() async {
-    await (await _resolveJson()).delete();
-  }
+  Future<void> delete() => _store.delete();
 }
