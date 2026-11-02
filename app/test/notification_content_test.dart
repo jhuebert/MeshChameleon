@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:meshchameleon/app_state.dart';
+import 'package:meshchameleon/services/notification_content.dart';
+import 'package:meshchameleon/services/proxy_status.dart';
 
 void main() {
   test(
