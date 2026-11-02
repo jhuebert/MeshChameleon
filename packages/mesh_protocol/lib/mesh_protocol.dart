@@ -6,6 +6,7 @@ library;
 
 export 'src/airtime.dart';
 export 'src/buffer.dart';
+export 'src/channel_codec.dart';
 export 'src/constants.dart';
 export 'src/crypto.dart';
 export 'src/frame_codec.dart';

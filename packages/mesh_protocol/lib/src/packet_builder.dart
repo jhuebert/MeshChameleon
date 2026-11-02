@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'buffer.dart';
+import 'channel_codec.dart';
 import 'constants.dart';
 import 'crypto.dart';
 import 'identity.dart';
@@ -23,14 +24,8 @@ class PacketBuilder {
     return p;
   }
 
-  static ({Uint8List secret, int hash}) _channelKey(Channel channel) {
-    final secret = Uint8List(32);
-    secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
-    return (
-      secret: secret,
-      hash: CryptoUtils.sha256(secret.sublist(0, 16))[0],
-    );
-  }
+  static ({Uint8List secret, int hash}) _channelKey(Channel channel) =>
+      channelKey(channel.secret);
 
   static const int _maxAdvertDataSize = 96;
 

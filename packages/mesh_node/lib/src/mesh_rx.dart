@@ -695,19 +695,18 @@ class MeshRx {
   ({int channelIdx, Uint8List plaintext})? _decryptChannelPayload(
     Packet packet,
   ) {
-    final channelHash = packet.payload[0];
+    final channelHashByte = packet.payload[0];
     Channel? channel;
     var channelIdx = 0;
     channels.forEach((idx, ch) {
-      if (_channelHash(ch.secret) == channelHash) {
+      if (channelHash(ch.secret) == channelHashByte) {
         channel = ch;
         channelIdx = idx;
       }
     });
     if (channel == null) return null;
     final ch = channel!;
-    final secret = Uint8List(32);
-    secret.setRange(0, ch.secret.length.clamp(0, 32), ch.secret);
+    final secret = channelSecret32(ch.secret);
     try {
       return (
         channelIdx: channelIdx,
@@ -1141,10 +1140,4 @@ Uint8List _normalizedAdvertBlob(Packet packet) {
     ..path = Uint8List.fromList(packet.path)
     ..payload = Uint8List.fromList(packet.payload);
   return saved.writeTo();
-}
-
-int _channelHash(Uint8List secret) {
-  final key16 = Uint8List(16);
-  key16.setRange(0, secret.length.clamp(0, 16), secret);
-  return CryptoUtils.sha256(key16)[0];
 }
