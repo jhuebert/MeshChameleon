@@ -1,0 +1,189 @@
+{
+  "format": 1,
+  "files": {
+    "packages/companion_server/lib/src/bridge.dart": {
+      "covered": 83,
+      "total": 83
+    },
+    "packages/companion_server/lib/src/metrics.dart": {
+      "covered": 35,
+      "total": 36
+    },
+    "packages/companion_server/lib/src/server.dart": {
+      "covered": 1011,
+      "total": 1030
+    },
+    "packages/device_link/lib/src/backoff.dart": {
+      "covered": 15,
+      "total": 15
+    },
+    "packages/device_link/lib/src/errors.dart": {
+      "covered": 27,
+      "total": 27
+    },
+    "packages/device_link/lib/src/fake_device_link.dart": {
+      "covered": 129,
+      "total": 129
+    },
+    "packages/device_link/lib/src/link_metrics.dart": {
+      "covered": 104,
+      "total": 105
+    },
+    "packages/device_link/lib/src/radio_link.dart": {
+      "covered": 69,
+      "total": 70
+    },
+    "packages/device_link/lib/src/shared_radio_link.dart": {
+      "covered": 93,
+      "total": 95
+    },
+    "packages/device_link/lib/src/tcp_device_link.dart": {
+      "covered": 164,
+      "total": 178
+    },
+    "packages/mesh_node/lib/src/ack_tracker.dart": {
+      "covered": 38,
+      "total": 40
+    },
+    "packages/mesh_node/lib/src/advert_path_cache.dart": {
+      "covered": 21,
+      "total": 21
+    },
+    "packages/mesh_node/lib/src/battery_service.dart": {
+      "covered": 56,
+      "total": 60
+    },
+    "packages/mesh_node/lib/src/cli.dart": {
+      "covered": 193,
+      "total": 201
+    },
+    "packages/mesh_node/lib/src/cli_runtime.dart": {
+      "covered": 98,
+      "total": 98
+    },
+    "packages/mesh_node/lib/src/connection_sessions.dart": {
+      "covered": 41,
+      "total": 44
+    },
+    "packages/mesh_node/lib/src/contact_table.dart": {
+      "covered": 107,
+      "total": 109
+    },
+    "packages/mesh_node/lib/src/flood_scope.dart": {
+      "covered": 16,
+      "total": 16
+    },
+    "packages/mesh_node/lib/src/identity_persistence.dart": {
+      "covered": 29,
+      "total": 33
+    },
+    "packages/mesh_node/lib/src/mesh_errors.dart": {
+      "covered": 10,
+      "total": 10
+    },
+    "packages/mesh_node/lib/src/mesh_node.dart": {
+      "covered": 594,
+      "total": 610
+    },
+    "packages/mesh_node/lib/src/mesh_rx.dart": {
+      "covered": 491,
+      "total": 513
+    },
+    "packages/mesh_node/lib/src/message_queue.dart": {
+      "covered": 18,
+      "total": 20
+    },
+    "packages/mesh_node/lib/src/message_sender.dart": {
+      "covered": 184,
+      "total": 201
+    },
+    "packages/mesh_node/lib/src/node_store.dart": {
+      "covered": 241,
+      "total": 246
+    },
+    "packages/mesh_node/lib/src/packet_deduper.dart": {
+      "covered": 25,
+      "total": 27
+    },
+    "packages/mesh_node/lib/src/packet_transport.dart": {
+      "covered": 75,
+      "total": 79
+    },
+    "packages/mesh_node/lib/src/physical_radio.dart": {
+      "covered": 209,
+      "total": 211
+    },
+    "packages/mesh_node/lib/src/request_tracker.dart": {
+      "covered": 64,
+      "total": 73
+    },
+    "packages/mesh_node/lib/src/reset.dart": {
+      "covered": 10,
+      "total": 10
+    },
+    "packages/mesh_node/lib/src/scheduler.dart": {
+      "covered": 4,
+      "total": 4
+    },
+    "packages/mesh_node/lib/src/sensor_settings.dart": {
+      "covered": 5,
+      "total": 5
+    },
+    "packages/mesh_node/lib/src/serial_queue.dart": {
+      "covered": 7,
+      "total": 7
+    },
+    "packages/mesh_node/lib/src/state_persistence.dart": {
+      "covered": 42,
+      "total": 45
+    },
+    "packages/mesh_node/lib/src/virtual_clock.dart": {
+      "covered": 11,
+      "total": 11
+    },
+    "packages/mesh_protocol/lib/src/airtime.dart": {
+      "covered": 14,
+      "total": 14
+    },
+    "packages/mesh_protocol/lib/src/buffer.dart": {
+      "covered": 81,
+      "total": 81
+    },
+    "packages/mesh_protocol/lib/src/constants.dart": {
+      "covered": 11,
+      "total": 11
+    },
+    "packages/mesh_protocol/lib/src/crypto.dart": {
+      "covered": 150,
+      "total": 151
+    },
+    "packages/mesh_protocol/lib/src/frame_codec.dart": {
+      "covered": 56,
+      "total": 56
+    },
+    "packages/mesh_protocol/lib/src/identity.dart": {
+      "covered": 69,
+      "total": 73
+    },
+    "packages/mesh_protocol/lib/src/models.dart": {
+      "covered": 129,
+      "total": 129
+    },
+    "packages/mesh_protocol/lib/src/packet.dart": {
+      "covered": 62,
+      "total": 62
+    },
+    "packages/mesh_protocol/lib/src/packet_builder.dart": {
+      "covered": 224,
+      "total": 226
+    },
+    "packages/mesh_protocol/lib/src/paths.dart": {
+      "covered": 11,
+      "total": 13
+    },
+    "packages/mesh_protocol/lib/src/text.dart": {
+      "covered": 26,
+      "total": 26
+    }
+  }
+}

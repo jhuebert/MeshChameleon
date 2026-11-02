@@ -65,7 +65,20 @@ Run everything:
 ```
 
 The script uses `dart` and `flutter` from `PATH`; set `DART` / `FLUTTER` to
-override them.
+override them. It enforces `dart format` and runs the analysis/tests for every
+package and the app.
+
+Coverage is a separate gate so local iteration stays fast:
+
+```sh
+./scripts/coverage.sh
+```
+
+It runs the same tests with coverage instrumentation and compares per-file line
+coverage against `coverage_baseline.json`. Files that are new to the baseline
+must be at least 80% covered. After an intentional coverage change, refresh the
+baseline with `./scripts/coverage.sh --write-baseline` (and review the JSON diff
+before committing it).
 
 The same simulator is also reachable without writing a test: from the Linux
 desktop app's **Simulated** tab, or from the headless CLI below.
@@ -193,6 +206,12 @@ Rules for any change after 0.1.0:
   and written back as v2 on the first load.
 - Add fixtures for each released on-disk layout and test the migration, not only
   the new format.
+- Node state with no `version` field is read as v1. A state file declaring a
+  newer version raises `NodeStateVersionException`; the file is kept in place
+  and the affected identity is surfaced as unavailable instead of being reset.
+- Node state v2 no longer writes the unused `client_repeat` preference. An
+  existing file that contains it still loads; the field is ignored because the
+  live repeat byte comes from the physical device capabilities.
 - Never discard a user's identity catalog or node state because the version is
   unknown. Surface a recovery error instead of silently creating a fresh
   identity.
