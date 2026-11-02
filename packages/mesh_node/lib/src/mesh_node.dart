@@ -1337,7 +1337,7 @@ class MeshNode extends CompanionBridge implements CliHost {
   Future<void> setPathHashMode(int mode) async {
     await _commit((current) {
       final prefsCopy = NodePrefs()..copyFrom(current.prefs);
-      prefsCopy.pathHashMode = mode.clamp(0, 2);
+      prefsCopy.pathHashMode = clampPathHashMode(mode);
       return current.copyWith(prefs: prefsCopy);
     });
   }

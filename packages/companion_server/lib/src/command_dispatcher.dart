@@ -353,7 +353,7 @@ class CompanionCommandDispatcher {
     // [cmd][reserved=0][mode]
     if (data[0] != 0) return host.sendErr(errCodeIllegalArg);
     final mode = data[1];
-    if (mode >= 3) return host.sendErr(errCodeIllegalArg);
+    if (!isValidPathHashMode(mode)) return host.sendErr(errCodeIllegalArg);
     await host.bridge.setPathHashMode(mode);
     host.sendOk();
   }

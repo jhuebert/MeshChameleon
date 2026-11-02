@@ -127,7 +127,7 @@ class CliRuntime {
     }
     if (command.startsWith('set path.hash.mode ')) {
       final mode = _strictInt(command.substring(19));
-      if (mode == null || mode < 0 || mode > 2) {
+      if (mode == null || !isValidPathHashMode(mode)) {
         return 'Error, must be 0,1, or 2';
       }
       await host.setPathHashMode(mode);

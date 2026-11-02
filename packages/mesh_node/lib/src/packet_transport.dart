@@ -83,7 +83,7 @@ class PacketTransport {
     if (flood && !preservePath) {
       packet.path = Uint8List(0);
       packet.pathLenByte = PathUtils.encodePathLen(
-        prefs.pathHashMode.clamp(0, 2) + 1,
+        clampPathHashMode(prefs.pathHashMode) + 1,
         0,
       );
     }
