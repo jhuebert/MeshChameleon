@@ -9,6 +9,7 @@ import 'contact_table.dart';
 import 'packet_deduper.dart';
 import 'packet_transport.dart';
 import 'request_tracker.dart';
+import 'runtime_guard.dart';
 import 'virtual_clock.dart';
 
 /// Shared state for outbound companion operations.
@@ -24,9 +25,7 @@ class MessageSenderDeps {
     required this.transport,
     required this.deduper,
     required this.ackTimeout,
-    required this.isBlocked,
-    required this.isCurrent,
-    required this.identityGeneration,
+    required this.guard,
     required this.ensureNotBlockedPeer,
     required this.transmit,
   });
@@ -41,9 +40,14 @@ class MessageSenderDeps {
   final PacketTransport transport;
   final PacketDeduper deduper;
   final Duration ackTimeout;
-  final bool Function() isBlocked;
-  final bool Function(int generation) isCurrent;
-  final int Function() identityGeneration;
+  final RuntimeGuard guard;
+
+  bool isBlocked() => guard.blocked;
+
+  int identityGeneration() => guard.generation;
+
+  bool isCurrent(int generation) => guard.isCurrent(generation);
+
   final void Function(Uint8List pubkey) ensureNotBlockedPeer;
   final Future<void> Function(
     Packet packet, {

@@ -131,9 +131,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       battery: battery,
       cli: _cli,
       pushSink: () => pushSink,
-      isCurrent: _identityCurrent,
-      isBlocked: () => _semanticBlocked,
-      identityGeneration: () => _guard.generation,
+      guard: _guard,
       commit: _commit,
       transmit: (
         Packet packet, {
@@ -177,9 +175,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       transport: _transport,
       deduper: _deduper,
       ackTimeout: ackTimeout,
-      isBlocked: () => _semanticBlocked,
-      isCurrent: _identityCurrent,
-      identityGeneration: () => _guard.generation,
+      guard: _guard,
       ensureNotBlockedPeer: _ensureNotBlockedPeer,
       transmit: (
         Packet packet, {

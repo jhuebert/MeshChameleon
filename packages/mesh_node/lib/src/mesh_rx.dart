@@ -18,6 +18,7 @@ import 'node_store.dart';
 import 'packet_deduper.dart';
 import 'packet_transport.dart';
 import 'request_tracker.dart';
+import 'runtime_guard.dart';
 import 'virtual_clock.dart';
 
 /// Outcome of an advert commit, captured inside the persistence queue.
@@ -41,9 +42,7 @@ class MeshRxDeps {
     required this.battery,
     required this.cli,
     required this.pushSink,
-    required this.isCurrent,
-    required this.isBlocked,
-    required this.identityGeneration,
+    required this.guard,
     required this.commit,
     required this.transmit,
     required this.enqueueMessage,
@@ -67,9 +66,13 @@ class MeshRxDeps {
   final BatteryService battery;
   final CliRuntime cli;
   final CompanionPushSink? Function() pushSink;
-  final bool Function(int generation) isCurrent;
-  final bool Function() isBlocked;
-  final int Function() identityGeneration;
+  final RuntimeGuard guard;
+
+  bool isBlocked() => guard.blocked;
+
+  int identityGeneration() => guard.generation;
+
+  bool isCurrent(int generation) => guard.isCurrent(generation);
   final Future<void> Function(
     NodeState? Function(NodeState current) mutate, {
     int? identityGeneration,
