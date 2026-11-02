@@ -10,7 +10,8 @@ name: Release
 # The AAB is signed with the upload key (it is the Play upload artifact). The
 # APKs are re-signed with the app signing key so GitHub installs can later
 # update in place from Play, which uses the same app signing key.
-# Play upload stays manual for 1.0.
+# Play upload stays manual for 1.0. The build number is reserved from the shared
+# BUILD_NUMBER repository variable before the release starts.
 #
 # If `main` is protected, allow this workflow (or its actor) to bypass the
 # protection, or switch to a release pull request; otherwise the push fails.
@@ -20,10 +21,6 @@ on:
     inputs:
       version:
         description: 'Version without the v prefix (for example 1.0.0)'
-        required: true
-        type: string
-      build_number:
-        description: 'Integer version code; must be higher than the last Play upload'
         required: true
         type: string
       release_notes:
@@ -54,7 +51,40 @@ env:
   BUNDLETOOL_SHA256: a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29
 
 jobs:
+  reserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    concurrency:
+      group: build-number
+      cancel-in-progress: false
+    outputs:
+      build_number: ${{ steps.reserve.outputs.build_number }}
+    steps:
+      - name: Check workflow ref
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run the release workflow from main."
+            exit 1
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reserve build number
+        id: reserve
+        env:
+          GH_TOKEN: ${{ secrets.BUILD_NUMBER_TOKEN }}
+        run: ./scripts/reserve_build_number.sh
+
   release:
+    needs: reserve
     runs-on: ubuntu-latest
     timeout-minutes: 90
     environment: release
@@ -68,15 +98,10 @@ jobs:
       - name: Validate inputs
         env:
           VERSION: ${{ inputs.version }}
-          BUILD_NUMBER: ${{ inputs.build_number }}
         run: |
           set -euo pipefail
           if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::version must be X.Y.Z"
-            exit 1
-          fi
-          if [[ ! "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::build_number must be a positive integer"
             exit 1
           fi
           if git rev-parse --verify --quiet "refs/tags/v$VERSION" >/dev/null; then
@@ -149,7 +174,7 @@ jobs:
       - name: Bump version and changelog
         env:
           VERSION: ${{ inputs.version }}
-          BUILD_NUMBER: ${{ inputs.build_number }}
+          BUILD_NUMBER: ${{ needs.reserve.outputs.build_number }}
           RELEASE_NOTES: ${{ inputs.release_notes }}
         run: |
           set -euo pipefail
@@ -214,7 +239,7 @@ jobs:
       - name: Verify signatures and versions
         env:
           VERSION: ${{ inputs.version }}
-          BUILD_NUMBER: ${{ inputs.build_number }}
+          BUILD_NUMBER: ${{ needs.reserve.outputs.build_number }}
           UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
@@ -309,7 +334,7 @@ jobs:
       - name: Collect release files
         env:
           VERSION: ${{ inputs.version }}
-          BUILD_NUMBER: ${{ inputs.build_number }}
+          BUILD_NUMBER: ${{ needs.reserve.outputs.build_number }}
           UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
           UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
           APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}

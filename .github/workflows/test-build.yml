@@ -8,7 +8,8 @@ name: Test build
 # signing secrets. The sign job uses the `release` environment and waits for its
 # required reviewer before the app signing key is decoded.
 #
-# The result is a workflow artifact, not a GitHub Release.
+# The result is a workflow artifact, not a GitHub Release. The build number is
+# reserved from the shared BUILD_NUMBER repository variable before the build.
 
 on:
   workflow_dispatch:
@@ -17,17 +18,13 @@ on:
         description: 'Branch, tag, or commit to build'
         required: true
         type: string
-      build_number:
-        description: 'Android version code base (empty: pubspec build + 1)'
-        required: false
-        type: string
       run_checks:
         description: 'Run analysis and tests before building'
         required: false
         type: boolean
         default: true
 
-run-name: Test build ${{ inputs.ref }} (${{ inputs.build_number || 'auto' }})
+run-name: Test build ${{ inputs.ref }}
 
 permissions:
   contents: read
@@ -41,7 +38,40 @@ env:
   EXPECTED_APP_SIGNING_SHA256: 47f300e48206ea4bb8e3857670c06fe17b4d1a962c747940000948846767d55e
 
 jobs:
+  reserve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    concurrency:
+      group: build-number
+      cancel-in-progress: false
+    outputs:
+      build_number: ${{ steps.reserve.outputs.build_number }}
+    steps:
+      - name: Check workflow ref
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run this workflow from main; put the branch to build in the ref input."
+            exit 1
+          fi
+
+      - name: Check out main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Reserve build number
+        id: reserve
+        env:
+          GH_TOKEN: ${{ secrets.BUILD_NUMBER_TOKEN }}
+        run: ./scripts/reserve_build_number.sh
+
   build:
+    needs: reserve
     runs-on: ubuntu-latest
     timeout-minutes: 90
     outputs:
@@ -68,30 +98,21 @@ jobs:
       - name: Read build metadata
         id: meta
         env:
-          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
+          RESERVED_BUILD_NUMBER: ${{ needs.reserve.outputs.build_number }}
           INPUT_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
           version_line="$(sed -n 's/^version:[[:space:]]*//p' app/pubspec.yaml | head -n1)"
           version_name="${version_line%%+*}"
-          pubspec_build="${version_line##*+}"
           if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::could not parse the version name from app/pubspec.yaml"
             exit 1
           fi
-          if [[ ! "$pubspec_build" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::could not parse the build number from app/pubspec.yaml"
+          if [[ ! "$RESERVED_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::reserve job did not produce a valid build number"
             exit 1
           fi
-          if [[ -n "$INPUT_BUILD_NUMBER" ]]; then
-            if [[ ! "$INPUT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-              echo "::error::build_number must be a positive integer"
-              exit 1
-            fi
-            build_number="$INPUT_BUILD_NUMBER"
-          else
-            build_number=$((pubspec_build + 1))
-          fi
+          build_number="$RESERVED_BUILD_NUMBER"
           commit="$(git rev-parse HEAD)"
           short_commit="$(git rev-parse --short=7 HEAD)"
           {
