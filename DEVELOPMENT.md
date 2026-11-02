@@ -61,8 +61,11 @@ the same simulated bus.
 Run everything:
 
 ```sh
-DART=~/dev/flutter/bin/dart FLUTTER=~/dev/flutter/bin/flutter ./scripts/check.sh
+./scripts/check.sh
 ```
+
+The script uses `dart` and `flutter` from `PATH`; set `DART` / `FLUTTER` to
+override them.
 
 The same simulator is also reachable without writing a test: from the Linux
 desktop app's **Simulated** tab, or from the headless CLI below.
@@ -261,15 +264,15 @@ Run the desktop app:
 
 ```sh
 cd app
-~/dev/flutter/bin/flutter run -d linux
+flutter run -d linux
 ```
 
 Run the headless proxy:
 
 ```sh
 cd packages/mesh_node
-~/dev/flutter/bin/dart run tool/proxy_cli.dart --simulated
-~/dev/flutter/bin/dart run tool/proxy_cli.dart --device <companion-host>:5000
+dart run tool/proxy_cli.dart --simulated
+dart run tool/proxy_cli.dart --device <companion-host>:5000
 ```
 
 Other options: `--proxy-port` (default 5000, `0` picks a free port),
@@ -517,7 +520,12 @@ Two keys are used:
 The release workflow re-signs the universal and per-ABI APKs with the app
 signing key after Gradle builds them. Local `flutter build` commands only use
 the upload key in `app/android/key.properties`; without that file, release
-builds fall back to the debug key.
+builds fall back to the debug key. To install a local build over a GitHub release
+install, use `scripts/build_test_apk.sh` (see
+[Testing a branch over a release install](#testing-a-branch-over-a-release-install)).
+APK re-signing and verification is implemented once in
+`scripts/sign_apks.sh` and shared by the release workflow, the test-build
+workflow, and `scripts/build_test_apk.sh`.
 
 GitHub Releases are the pre-Play tester channel. Publish the signed release
 APKs, never debug APKs: debug builds use a machine-local certificate and cannot
@@ -573,6 +581,60 @@ pass `MESHCHAMELEON_GIT_COMMIT`, `MESHCHAMELEON_GIT_DIRTY`, and
 build time as unavailable instead of showing stale values. `MESHCHAMELEON_*`
 environment overrides and `SOURCE_DATE_EPOCH` are honoured for CI or
 reproducible builds.
+
+### Testing a branch over a release install
+
+Gradle's local release builds are signed with the upload key (or the debug key
+when `app/android/key.properties` is absent), so they cannot update an install
+from the GitHub release. Build a release APK and re-sign it with the app signing
+key instead:
+
+```sh
+scripts/build_test_apk.sh --keystore <app-signing-keystore> --install
+```
+
+The script builds a universal release APK, re-signs it with the app signing
+keystore, verifies the certificate and version code, and writes it to
+`build/test-apk/`. Pass `--keystore` or set
+`MESHCHAMELEON_APP_SIGNING_KEYSTORE`; the script prompts for the keystore
+password unless `MESHCHAMELEON_APP_SIGNING_STORE_PASSWORD` is set.
+`MESHCHAMELEON_APP_SIGNING_KEY_PASSWORD` overrides a different key password.
+`--alias` selects another key alias, and `MESHCHAMELEON_APP_SIGNING_SHA256`
+overrides the expected certificate fingerprint.
+
+The build number defaults to one higher than the installed version code when a
+single adb device is attached, otherwise one higher than the pubspec build
+number. `--build-number N` overrides it. Keep the number at least as high as the
+installed version code: release split APKs use Flutter's ABI-adjusted codes (for
+example `2001` for arm64-v8a). Installing a local test build raises the phone's
+version code, so cut the next official release with a higher build number (or
+uninstall the test build) so Android does not reject the official APK as a
+downgrade.
+
+### Building a test APK in GitHub Actions
+
+`.github/workflows/test-build.yml` builds a branch, tag, or commit and uploads
+signed APKs as a workflow artifact. It is for phone testing; it does not push,
+tag, or create a GitHub Release.
+
+Run it from **Actions → Test build → Run workflow** while the workflow is
+selected on `main`, and put the branch to build in **ref**. The workflow file
+must be on `main`: the `release` environment only allows deployments from
+`main`, and the `ref` input selects the code to build. The build job runs
+analysis/tests and builds the APKs without signing secrets. The sign job then
+requests the `release` environment and waits for the required reviewer before
+decoding the app signing key.
+
+Download the `MeshChameleon-test-...` artifact from the run, unzip it, and
+install the APK that matches the current install:
+
+- `...-<base>-universal-test.apk` for a universal install;
+- `...-<base+2000>-arm64-v8a-test.apk` for an arm64-v8a split install;
+- `...-<base+1000>-armeabi-v7a-test.apk` for an armeabi-v7a split install.
+
+The `build_number` input sets the base version code (default: pubspec build +
+1). Artifacts expire after 14 days. The local `scripts/build_test_apk.sh` is the
+offline equivalent.
 
 ## Build metadata and session diagnostics
 
@@ -645,6 +707,6 @@ rsvg-convert -w 1024 -h 1024 assets/branding/source/monochrome.svg -o assets/bra
 rsvg-convert -w 620 -h 408 assets/branding/source/mark.svg -o /tmp/mark.png
 magick -size 1152x1152 xc:none /tmp/mark.png -gravity center -composite assets/branding/splash_logo.png
 
-~/dev/flutter/bin/dart run flutter_launcher_icons -f flutter_launcher_icons.yaml
-~/dev/flutter/bin/dart run flutter_native_splash:create --path=flutter_native_splash.yaml
+dart run flutter_launcher_icons -f flutter_launcher_icons.yaml
+dart run flutter_native_splash:create --path=flutter_native_splash.yaml
 ```

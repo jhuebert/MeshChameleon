@@ -81,14 +81,15 @@ hardware-validated.
 
 ## Development and verification
 
-Flutter stable / Dart are expected. In this environment the SDK is at
-`~/dev/flutter`; add `~/dev/flutter/bin` to `PATH` if needed.
+Flutter stable / Dart are expected on `PATH`.
 
 Run all checks from the repo root:
 
 ```sh
-DART=~/dev/flutter/bin/dart FLUTTER=~/dev/flutter/bin/flutter ./scripts/check.sh
+./scripts/check.sh
 ```
+
+`DART` / `FLUTTER` override the executables if needed.
 
 This runs `dart analyze` and `dart test` for each pure-Dart package, then
 `flutter analyze` and `flutter test` for the app. Run this before handing off
