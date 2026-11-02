@@ -163,6 +163,9 @@ Rules worth preserving:
   raw-RX push and add no RF airtime; they are deduplicated like RF duplicates.
 - The attached radio's own public key is kept internal and rejects direct sends.
   It is never exposed as a contact or virtual identity.
+- State directories not referenced by the loaded catalog are logged and kept,
+  never auto-deleted: after recovery from a stale backup they can be the only
+  remaining copy of a newer identity's contacts, channels, and messages.
 - `--identity-file` headless proxy runs remain single-identity; the feature
   targets the app.
 
@@ -205,7 +208,11 @@ the saved session, and saved network connections as a passphrase-encrypted
 `backupFormatVersion` only for incompatible layout changes, and keep refusing
 unknown future versions. Restores stage the new catalog, rename the current
 identity directory to `identities.recovery-<stamp>`, and roll back on failure.
-Do not log passphrases, keys, or decrypted payloads.
+Before the swap, restore writes `restore-in-progress.json` and snapshots the old
+keys in `meshcore_identity_restore_v1/<id>` secure slots. If the process dies
+mid-restore, the next launch rolls the directory and keys back; a completed
+marker is cleaned up without rolling back. Do not log passphrases, keys, or
+decrypted payloads.
 
 ## Co-client and raw-modem limitations
 
@@ -214,6 +221,11 @@ modem. A second app/BLE/TCP client talking to the same stock companion can
 receive or consume replies concurrently, and the firmware broadcasts CLI replies
 to every enabled interface. The proxy cannot serialize an external client. Do not
 run another configuration client against the same radio during a session.
+
+The device link correlates replies only by response code, not by a request id.
+A request timeout therefore drops the link instead of leaving it open, so a late
+`OK`/`DEVICE_INFO`/`CLI_REPLY` cannot be mistaken for the next request's reply;
+the app reconnects through its normal link watcher.
 
 Direct-route semantic delivery requires a consumed zero-hop route; flooded or
 still-in-transit packets are raw-logged but not executed locally. This is not a

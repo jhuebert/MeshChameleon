@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -116,9 +117,104 @@ void main() {
     );
   });
 
+  test('an interrupted restore rolls back catalog and keys at startup',
+      () async {
+    final index = await repository.loadOrCreate();
+    final record = index.activeRecord!;
+    final oldKey = (await store.loadById(record.id))!;
+    const stamp = '2026-01-02T03-04-05-000Z';
+    final current = repository.identitiesDirectory;
+    final recovery = Directory('${dir.path}/identities.recovery-$stamp');
+    await current.rename(recovery.path);
+
+    // Simulate the partially installed catalog left by a crash.
+    await current.create(recursive: true);
+    await File('${current.path}/index.json').writeAsString('{}');
+
+    await store.saveRestoreBackup(record.id, oldKey);
+    await File('${dir.path}/restore-in-progress.json').writeAsString(
+      jsonEncode(<String, Object?>{
+        'version': 1,
+        'complete': false,
+        'stamp': stamp,
+        'had_current': true,
+        'old_ids': [record.id],
+        'old_key_ids': [record.id],
+      }),
+    );
+
+    await service.recoverInterruptedRestore();
+
+    final restored = await repository.loadOrCreate();
+    expect(restored.activeId, record.id);
+    expect(
+      bytesToHex((await store.loadById(record.id))!.meshcore64),
+      bytesToHex(oldKey.meshcore64),
+    );
+    expect(
+        await File('${dir.path}/restore-in-progress.json').exists(), isFalse);
+    expect(await recovery.exists(), isFalse);
+    expect(await store.loadRestoreBackup(record.id), isNull);
+  });
+
+  test('a completed restore marker only cleans up rollback snapshots',
+      () async {
+    final index = await repository.loadOrCreate();
+    final record = index.activeRecord!;
+    final oldKey = (await store.loadById(record.id))!;
+    final indexFile = File('${dir.path}/identities/index.json');
+    final before = await indexFile.readAsString();
+    await store.saveRestoreBackup(record.id, oldKey);
+    await File('${dir.path}/restore-in-progress.json').writeAsString(
+      jsonEncode(<String, Object?>{
+        'version': 1,
+        'complete': true,
+        'stamp': '2026-01-02T03-04-05-000Z',
+        'had_current': true,
+        'old_ids': [record.id],
+        'old_key_ids': [record.id],
+      }),
+    );
+
+    await service.recoverInterruptedRestore();
+
+    expect(await indexFile.readAsString(), before);
+    expect(
+        await File('${dir.path}/restore-in-progress.json').exists(), isFalse);
+    expect(await store.loadRestoreBackup(record.id), isNull);
+  });
+
+  test('restore removes keys for identities that are not in the backup',
+      () async {
+    await repository.loadOrCreate();
+    final preview = await service.inspect(
+      bytes: await makeBackup(),
+      passphrase: passphrase,
+    );
+
+    final added = await repository.create(name: 'After Backup');
+    expect(await store.hasById(added.id), isTrue);
+
+    await service.restore(preview);
+
+    final restoredCatalog = await repository.loadOrCreate();
+    expect(restoredCatalog.identities, hasLength(1));
+    expect(restoredCatalog.identities.single.id, isNot(added.id));
+    expect(await store.hasById(added.id), isFalse,
+        reason: 'restore must replace the whole key store');
+  });
+
   test('capture fails when an identity key is missing', () async {
     final index = await repository.loadOrCreate();
     await store.deleteById(index.activeRecord!.id);
+
+    await expectLater(service.capture(), throwsA(isA<BackupException>()));
+  });
+
+  test('capture rejects a key that no longer matches the catalog', () async {
+    final index = await repository.loadOrCreate();
+    final record = index.activeRecord!;
+    await store.saveById(record.id, await LocalIdentity.generate());
 
     await expectLater(service.capture(), throwsA(isA<BackupException>()));
   });

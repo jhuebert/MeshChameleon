@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -10,9 +11,34 @@ import 'package:meshchameleon/services/identity_index.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 
+class _GateIndexStore extends IdentityIndexStore {
+  _GateIndexStore({required super.file, required this.gate});
+
+  final Completer<void> gate;
+  bool block = false;
+
+  @override
+  Future<void> save(IdentityIndex index) async {
+    if (block) await gate.future;
+    return super.save(index);
+  }
+}
+
+class _GatedRepository extends IdentityRepository {
+  _GatedRepository({
+    required super.supportDirectory,
+    required super.secureStore,
+    required this.gateStore,
+  });
+
+  final IdentityIndexStore gateStore;
+
+  @override
+  IdentityIndexStore get indexStore => gateStore;
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
   late Directory dir;
   late Map<String, String> values;
 
@@ -153,6 +179,17 @@ void main() {
     );
   });
 
+  test('index rejects fractional schema versions', () {
+    expect(
+      () => IdentityIndex.fromJson({
+        'version': 1.5,
+        'active_id': null,
+        'identities': const <Object?>[],
+      }),
+      throwsA(isA<IdentityIndexException>()),
+    );
+  });
+
   test('index_rejects_non_hex_identity_ids', () async {
     final key = (await LocalIdentity.generate()).publicKey;
     for (final id in ['../escape', '', 'A' * 32, 'a' * 31]) {
@@ -193,6 +230,15 @@ void main() {
     final recovered = await store.load();
     expect(recovered, isNotNull);
     expect(recovered!.identities, isEmpty);
+    expect(await file.exists(), isFalse,
+        reason: 'the unreadable primary must be preserved, not overwritten');
+    expect(
+      await file.parent
+          .list()
+          .where((entity) => entity.path.contains('index.json.corrupt-'))
+          .length,
+      1,
+    );
   });
 
   test('unsupported_primary_version_recovers_from_last_good_backup', () async {
@@ -341,6 +387,37 @@ void main() {
     expect(unchanged.publicKey, isNot(secondKey));
   });
 
+  test('overlapping mutations do not lose a newly created identity', () async {
+    final gate = Completer<void>();
+    final gateStore = _GateIndexStore(
+      file: File('${dir.path}/identities/index.json'),
+      gate: gate,
+    );
+    final repo = _GatedRepository(
+      supportDirectory: dir,
+      secureStore: IdentityStore(),
+      gateStore: gateStore,
+    );
+    final first = await repo.loadOrCreate();
+    gateStore.block = true;
+
+    final create = repo.create(name: 'Second');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final rename = repo.updateName(first.activeId!, 'Renamed');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    gate.complete();
+    await Future.wait([create, rename]);
+    gateStore.block = false;
+
+    final loaded = await repo.loadOrCreate();
+    expect(
+      loaded.identities.map((record) => record.name),
+      containsAll(['Renamed', 'Second']),
+    );
+    expect(loaded.activeRecord!.name, 'Renamed');
+  });
+
   test('delete_rejects_active_and_last_identity', () async {
     final repo = repository();
     final first = await repo.loadOrCreate();
@@ -417,7 +494,7 @@ void main() {
     expect(stateText, isNot(contains(publicHex)));
   });
 
-  test('cleanup removes orphan state but preserves another catalog key',
+  test('cleanup keeps orphan state and preserves another catalog key',
       () async {
     final repo = repository();
     await repo.loadOrCreate();
@@ -428,9 +505,11 @@ void main() {
     final otherDir =
         await Directory.systemTemp.createTemp('mesh_identity_other_');
     addTearDown(() => otherDir.delete(recursive: true));
+    final logs = <String>[];
     final other = IdentityRepository(
       supportDirectory: otherDir,
       secureStore: IdentityStore(),
+      onLog: logs.add,
     );
     await other.loadOrCreate();
     final orphan = Directory('${other.identitiesDirectory.path}/orphan');
@@ -439,12 +518,39 @@ void main() {
 
     await other.cleanupOrphans();
 
-    expect(await orphan.exists(), isFalse);
+    expect(await orphan.exists(), isTrue,
+        reason: 'an unknown directory may be the only copy of user data');
+    expect(logs.join('\n'), contains('kept'));
     final kept = await other.loadKey(firstRecord.id);
     expect(kept, isNotNull,
         reason: 'the shared Linux keyring must not be pruned by a second '
             'support directory');
     expect(kept!.publicKey, firstKey!.publicKey);
+  });
+
+  test('stale backup recovery does not delete a newer identity state',
+      () async {
+    final logs = <String>[];
+    final repo = IdentityRepository(
+      supportDirectory: dir,
+      secureStore: IdentityStore(),
+      onLog: logs.add,
+    );
+    await repo.loadOrCreate();
+    final second = await repo.create(name: 'Second');
+    expect(await repo.stateFile(second.id).exists(), isTrue);
+
+    // The primary now has A+B and the backup still has only A.
+    await File('${dir.path}/identities/index.json').writeAsString('{broken');
+
+    final recovered = await repo.loadOrCreate();
+    expect(recovered.identities.map((record) => record.id),
+        isNot(contains(second.id)));
+
+    await repo.cleanupOrphans();
+    expect(await repo.stateFile(second.id).exists(), isTrue,
+        reason: 'a stale catalog must not prune a newer identity directory');
+    expect(logs.join('\n'), contains('kept'));
   });
 
   test('first_run_key_write_failure_does_not_create_a_catalog', () async {

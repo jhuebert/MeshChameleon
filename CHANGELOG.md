@@ -6,6 +6,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Serialized identity-catalog mutations so concurrent create/rename/activate
+  operations cannot drop a newer identity.
+- Kept unreferenced identity state directories for recovery instead of deleting
+  them when the catalog was loaded from a stale backup.
+- Quarantined an unreadable primary catalog and recovered interrupted backup
+  restores, including old key snapshots, on the next launch.
+- Serialized connect, disconnect, reconnect, and proxy start/stop transitions;
+  cancelling during startup no longer leaves a ghost connected session.
+- Dropped the device link after a request timeout so a late reply cannot satisfy
+  the next command.
+- Validated saved-session ports and kept a successful connection when the
+  session or connection-history write fails.
+- Isolated unreadable secure-storage slots to one unavailable identity.
+
 ### Changed
 
 - The simulated companion is available in release builds.

@@ -26,14 +26,18 @@ class IdentityStore {
       );
 
   static const _prefix = 'meshcore_identity_v2/';
+  static const _restorePrefix = 'meshcore_identity_restore_v1/';
   final FlutterSecureStorage _storage;
 
   static String _storageKey(String id) => '$_prefix$id';
+  static String _restoreKey(String id) => '$_restorePrefix$id';
 
-  Future<LocalIdentity?> loadById(String id) async {
-    final hex = await _storage.read(key: _storageKey(id));
-    if (hex == null || hex.isEmpty) return null;
+  Future<LocalIdentity?> loadById(String id) => _read(_storageKey(id));
+
+  Future<LocalIdentity?> _read(String key) async {
     try {
+      final hex = await _storage.read(key: key);
+      if (hex == null || hex.isEmpty) return null;
       final bytes = hexToBytes(hex);
       if (bytes.length != 64 ||
           !await LocalIdentity.validateMeshcore64(bytes)) {
@@ -41,9 +45,24 @@ class IdentityStore {
       }
       return await LocalIdentity.import(bytes);
     } catch (_) {
+      // One unreadable slot is reported as unavailable; it must not prevent
+      // the remaining identities from starting.
       return null;
     }
   }
+
+  /// Temporary pre-restore key snapshot used to roll back an interrupted
+  /// backup restore. These slots are deleted as soon as the restore settles.
+  Future<LocalIdentity?> loadRestoreBackup(String id) => _read(_restoreKey(id));
+
+  Future<void> saveRestoreBackup(String id, LocalIdentity identity) =>
+      _storage.write(
+        key: _restoreKey(id),
+        value: bytesToHex(identity.meshcore64),
+      );
+
+  Future<void> deleteRestoreBackup(String id) =>
+      _storage.delete(key: _restoreKey(id));
 
   /// Whether a non-empty key slot exists, without validating the key material.
   ///

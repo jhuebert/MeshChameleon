@@ -56,6 +56,39 @@ class _GateStore extends NetworkConnectionStore {
   }
 }
 
+class _FailingSessionStore extends SessionStore {
+  @override
+  Future<void> save(SessionConfig config) async {
+    throw StateError('session write failed');
+  }
+}
+
+class _SlowDisconnectLink extends FakeDeviceLink {
+  _SlowDisconnectLink({super.deviceInfo_});
+
+  final Completer<void> gate = Completer<void>();
+
+  @override
+  Future<void> disconnect() async {
+    await gate.future;
+    return super.disconnect();
+  }
+}
+
+class _GateInfoLink extends FakeDeviceLink {
+  _GateInfoLink({super.deviceInfo_});
+
+  final Completer<void> infoGate = Completer<void>();
+  final Completer<void> infoStarted = Completer<void>();
+
+  @override
+  Future<DeviceInfo> deviceInfo() async {
+    if (!infoStarted.isCompleted) infoStarted.complete();
+    await infoGate.future;
+    return super.deviceInfo();
+  }
+}
+
 class StreamQueue<T> {
   StreamQueue(Stream<T> stream) {
     stream.listen(_add);
@@ -187,6 +220,50 @@ void main() {
         reason: 'stopping the proxy must not stop live identities');
   });
 
+  test('rapid proxy start and stop transitions leave no listener behind',
+      () async {
+    await app.connectSimulated(
+      simulatedLink: FakeDeviceLink(
+        deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+      ),
+    );
+    addTearDown(app.disconnectDevice);
+
+    Future<bool> portOpen(int port) async {
+      try {
+        final socket = await Socket.connect(
+          '127.0.0.1',
+          port,
+          timeout: const Duration(milliseconds: 300),
+        );
+        await socket.close();
+        return true;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    final start = app.startProxy(serverPort: 0);
+    final stop = app.stopProxy();
+    await Future.wait([start, stop]);
+
+    expect(app.proxyStatus, ProxyStatus.stopped);
+    expect(app.server, isNull);
+    expect(app.port, greaterThan(0));
+    expect(await portOpen(app.port), isFalse,
+        reason: 'a queued stop must close the just-started listener');
+
+    final stopFirst = app.stopProxy();
+    final startAgain = app.startProxy(serverPort: 0);
+    await Future.wait([stopFirst, startAgain]);
+
+    expect(app.proxyStatus, ProxyStatus.running);
+    expect(app.server, isNotNull);
+    expect(await portOpen(app.port), isTrue,
+        reason: 'a queued start must leave the new listener running');
+    await app.stopProxy();
+  });
+
   test('diagnostics snapshot reflects proxy and physical traffic', () async {
     final link = FakeDeviceLink(
       deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
@@ -304,6 +381,64 @@ void main() {
     expect(app.node!.identity.publicKey, keyBefore);
     expect(app.node!.prefs.nodeName, 'Keep Me');
     expect(app.node!.contacts, isEmpty);
+  });
+
+  test('cancelling during startup does not leave a connected ghost session',
+      () async {
+    final gated = _GateInfoLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final cancelApp = buildApp(
+      tcpLinkFactory: (host, port, onLog) => gated,
+    );
+    await cancelApp.loadIdentities();
+    addTearDown(cancelApp.disconnectDevice);
+
+    final connect = cancelApp.connectTcp(host: 'slow.example', tcpPort: 5000);
+    await gated.infoStarted.future.timeout(const Duration(seconds: 5));
+    await cancelApp.cancelPendingConnection();
+    gated.infoGate.complete();
+
+    expect(await connect, isFalse, reason: cancelApp.logs.join('\n'));
+    expect(cancelApp.deviceConnected, isFalse);
+    expect(cancelApp.link, isNull);
+    expect(cancelApp.lastSession, isNull);
+    expect(cancelApp.savedNetworkConnections, isEmpty);
+  });
+
+  test('a connect queued behind a slow disconnect keeps the new session',
+      () async {
+    final slow = _SlowDisconnectLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final replacement = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final queuedApp = buildApp(
+      tcpLinkFactory: (host, port, onLog) => replacement,
+    );
+    await queuedApp.loadIdentities();
+    addTearDown(queuedApp.disconnectDevice);
+    await queuedApp.connectSimulated(simulatedLink: slow);
+    expect(queuedApp.deviceConnected, isTrue);
+
+    final disconnect = queuedApp.disconnectDevice();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(queuedApp.busy, isTrue);
+    final connect = queuedApp.connectTcp(
+      host: 'replacement.example',
+      tcpPort: 5000,
+    );
+    slow.gate.complete();
+
+    await disconnect;
+    expect(await connect, isTrue, reason: queuedApp.logs.join('\n'));
+    expect(queuedApp.deviceConnected, isTrue);
+    expect(queuedApp.link, isNotNull);
+    expect(queuedApp.link!.currentState, LinkState.connected);
+    expect(queuedApp.lastSession!.host, 'replacement.example');
+    expect(replacement.calls, contains('connect'));
+    await queuedApp.disconnectDevice();
   });
 
   test('disconnect stops every runtime but keeps the catalog', () async {
@@ -499,6 +634,30 @@ void main() {
     expect(
       history.map((connection) => connection.key),
       containsAll([second.key, 'connected.example:7000']),
+    );
+  });
+
+  test('a session write failure keeps a successful TCP connection', () async {
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final tcpApp = buildApp(
+      session: _FailingSessionStore(),
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    await tcpApp.loadIdentities();
+    addTearDown(tcpApp.disconnectDevice);
+
+    expect(
+      await tcpApp.connectTcp(host: 'host.example', tcpPort: 5000),
+      isTrue,
+      reason: tcpApp.logs.join('\n'),
+    );
+
+    expect(tcpApp.deviceConnected, isTrue);
+    expect(
+      tcpApp.logs.join('\n'),
+      contains('Could not save the last session'),
     );
   });
 

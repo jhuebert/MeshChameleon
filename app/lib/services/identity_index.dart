@@ -152,6 +152,7 @@ class IdentityIndex {
   static IdentityIndex fromJson(Map<String, Object?> json) {
     final version = json['version'];
     if (version is! num ||
+        version != version.toInt() ||
         version.toInt() < 1 ||
         version.toInt() > identityIndexVersion) {
       throw const IdentityIndexException('unsupported identity index version');
@@ -208,16 +209,31 @@ class IdentityIndexStore {
   Future<IdentityIndex?> load() async {
     final primary = await _readOrNull(file);
     if (primary != null) return primary;
+    final primaryExists = await file.exists();
     if (await _backupFile.exists()) {
       final backup = await _readOrNull(_backupFile);
-      if (backup != null) return backup;
+      if (backup != null) {
+        // Preserve the unreadable primary for manual recovery instead of
+        // letting the next save overwrite the only copy of a newer catalog.
+        if (primaryExists) await _quarantinePrimary();
+        return backup;
+      }
     }
-    if (await file.exists() || await _backupFile.exists()) {
+    if (primaryExists || await _backupFile.exists()) {
       throw const IdentityIndexException(
         'identity database is unreadable; restore or clear app data',
       );
     }
     return null;
+  }
+
+  Future<void> _quarantinePrimary() async {
+    final stamp = DateTime.now().toUtc().toIso8601String().replaceAll(':', '-');
+    try {
+      await file.rename('${file.path}.corrupt-$stamp');
+    } catch (_) {
+      // A quarantine failure must not hide the usable backup.
+    }
   }
 
   Future<IdentityIndex?> _readOrNull(File source) async {

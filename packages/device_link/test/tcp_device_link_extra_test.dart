@@ -227,6 +227,30 @@ void main() {
     );
   });
 
+  test('a timeout drops the link so a late reply cannot satisfy the next call',
+      () async {
+    device = await _ScriptedDevice.start((frame, socket) {
+      if (frame[0] != cmdDeviceQuery) return;
+      Future<void>.delayed(const Duration(milliseconds: 80), () {
+        _reply(socket, _deviceInfo());
+      });
+    });
+    await newLink(requestTimeout: const Duration(milliseconds: 20));
+
+    await expectLater(
+      link.deviceInfo(),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    expect(link.currentState, LinkState.disconnected);
+
+    await expectLater(
+      link.deviceInfo(),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.disconnected)),
+    );
+  });
+
   test('a closed device link fails the pending request', () async {
     device = await _ScriptedDevice.start((frame, socket) {
       if (frame[0] == cmdDeviceQuery) socket.destroy();

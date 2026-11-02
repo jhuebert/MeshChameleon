@@ -212,6 +212,7 @@ List<SavedNetworkConnection> decodeNetworkConnections(
   final version = value['version'];
   final rawConnections = value['connections'];
   if (version is! num ||
+      version != version.toInt() ||
       version.toInt() != networkConnectionHistoryVersion ||
       rawConnections is! List) {
     throw const FormatException('invalid saved connection history');

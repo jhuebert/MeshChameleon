@@ -55,6 +55,38 @@ void main() {
     );
   });
 
+  test('SessionConfig.fromJson rejects invalid and fractional ports', () {
+    for (final json in <Map<String, dynamic>>[
+      {'kind': 'tcp', 'host': '10.0.0.5', 'devicePort': 0},
+      {'kind': 'tcp', 'host': '10.0.0.5', 'devicePort': 70000},
+      {'kind': 'tcp', 'host': '10.0.0.5', 'devicePort': 5000.5},
+      {'kind': 'tcp', 'host': '10.0.0.5', 'proxyPort': -1},
+      {'kind': 'tcp', 'host': '10.0.0.5', 'proxyPort': 70000},
+      {'kind': 'tcp', 'host': '10.0.0.5', 'proxyPort': 5000.5},
+    ]) {
+      expect(SessionConfig.fromJson(json), isNull, reason: '$json');
+    }
+    expect(
+      SessionConfig.fromJson(
+        {'kind': 'tcp', 'host': '10.0.0.5', 'proxyPort': 0},
+      )?.proxyPort,
+      0,
+      reason: 'zero is valid and selects an ephemeral proxy port',
+    );
+  });
+
+  test('SessionConfig.fromJson rejects wrong field types without throwing', () {
+    for (final json in <Map<String, dynamic>>[
+      {'kind': 'tcp', 'host': 42},
+      {'kind': 'ble', 'bleRemoteId': 42},
+      {'kind': 'ble', 'bleName': 42},
+      {'kind': 'tcp', 'autoResume': 'yes'},
+      {'kind': 'tcp', 'intentionallyOff': 1},
+    ]) {
+      expect(SessionConfig.fromJson(json), isNull, reason: '$json');
+    }
+  });
+
   test('SessionStore round-trips through a file', () async {
     final dir = await Directory.systemTemp.createTemp('meshchameleon_session');
     addTearDown(() => dir.delete(recursive: true));

@@ -43,6 +43,7 @@ class IdentityManager {
   TuningParams? _tuning;
   List<IdentitySummary> _summaries = const [];
   Timer? _summaryTimer;
+  Future<void>? _pendingSummary;
 
   static const RadioParams _fallbackRadioParams = RadioParams(
     frequencyHz: 915000000,
@@ -395,16 +396,24 @@ class IdentityManager {
   void _handleStateChanged() {
     _summaryTimer?.cancel();
     late final Timer timer;
-    timer = Timer(notifyDebounce, () async {
-      if (!identical(_summaryTimer, timer)) return;
-      _summaryTimer = null;
+    timer = Timer(notifyDebounce, () {
+      _pendingSummary = _applyStateChange(timer);
+    });
+    _summaryTimer = timer;
+  }
+
+  Future<void> _applyStateChange(Timer timer) async {
+    if (!identical(_summaryTimer, timer)) return;
+    _summaryTimer = null;
+    try {
       for (final runtime in List<IdentityRuntime>.of(_runtimes)) {
         await _reconcileName(runtime);
       }
       if (_loaded) await refreshSummaries();
       _emitChanged();
-    });
-    _summaryTimer = timer;
+    } catch (e) {
+      onLog?.call('Could not refresh identity summaries: $e');
+    }
   }
 
   void _handlePhysicalConfigChanged(IdentityRuntime runtime) {
@@ -614,8 +623,19 @@ class IdentityManager {
     } catch (_) {}
   }
 
+  Future<void> _awaitPendingSummary() async {
+    final pending = _pendingSummary;
+    if (pending != null) await pending;
+  }
+
   Future<void> dispose() async {
     _summaryTimer?.cancel();
+    _summaryTimer = null;
+    await _awaitPendingSummary();
     await stopLive(notify: false);
+    _summaryTimer?.cancel();
+    _summaryTimer = null;
+    await _awaitPendingSummary();
+    await repository.idle;
   }
 }

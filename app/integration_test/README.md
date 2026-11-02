@@ -38,7 +38,9 @@ a `proxy_cli` instance).
 | Test | Required defines | Notes |
 |---|---|---|
 | `tcp_lifecycle_test.dart` | `DEVICE_HOST`, optional `DEVICE_PORT` (5000) | Five attach/detach cycles, then **reboots the radio** with a client attached. |
+| `live_ui_test.dart` | `DEVICE_HOST`, optional `DEVICE_PORT` (5000) | Drives the real Linux Home/Connect/Identities/Diagnostics screens against a live companion, starts the proxy, switches identities, backs up/restores, and checks auto-resume. No RF transmission. |
 | `multi_identity_live_test.dart` | `DEVICE_HOST`, `PEER_HOST`, `PEER_PUBKEY_HEX`, optional `DEVICE_PORT` (5000), `PEER_PORT` (9505) | Three live identities, inactive queueing, activation, and local mirroring. **Transmits RF** direct messages. |
+| `secure_storage_smoke_test.dart` | none | Round-trips one identity key through the host platform's real secure storage (Linux/libsecret). |
 
 Example:
 

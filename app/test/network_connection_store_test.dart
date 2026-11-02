@@ -34,6 +34,16 @@ void main() {
     expect(await store.load(), isEmpty);
   });
 
+  test('fractional schema versions are rejected', () {
+    expect(
+      () => decodeNetworkConnections({
+        'version': networkConnectionHistoryVersion + 0.5,
+        'connections': const <Object?>[],
+      }),
+      throwsFormatException,
+    );
+  });
+
   test('save and load round trip preserves the newest-first order', () async {
     await store.save([
       _connection('older.example', 5000, 100),

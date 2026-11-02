@@ -101,15 +101,43 @@ class SessionConfig {
       }
     }
     if (kind == null) return null;
+    final rawDevicePort = json['devicePort'];
+    final rawProxyPort = json['proxyPort'];
+    final host = json['host'];
+    final bleRemoteId = json['bleRemoteId'];
+    final bleName = json['bleName'];
+    final autoResume = json['autoResume'];
+    final intentionallyOff = json['intentionallyOff'];
+    if ((rawDevicePort != null &&
+            (rawDevicePort is! num ||
+                rawDevicePort != rawDevicePort.toInt())) ||
+        (rawProxyPort != null &&
+            (rawProxyPort is! num || rawProxyPort != rawProxyPort.toInt())) ||
+        (host != null && host is! String) ||
+        (bleRemoteId != null && bleRemoteId is! String) ||
+        (bleName != null && bleName is! String) ||
+        (autoResume != null && autoResume is! bool) ||
+        (intentionallyOff != null && intentionallyOff is! bool)) {
+      return null;
+    }
+    final devicePort = (rawDevicePort as num?)?.toInt() ?? defaultCompanionPort;
+    // The proxy port may be zero: that asks the OS for a free port.
+    final proxyPort = (rawProxyPort as num?)?.toInt() ?? defaultCompanionPort;
+    if (devicePort < 1 ||
+        devicePort > 65535 ||
+        proxyPort < 0 ||
+        proxyPort > 65535) {
+      return null;
+    }
     return SessionConfig(
       kind: kind,
-      host: json['host'] as String?,
-      devicePort: (json['devicePort'] as num?)?.toInt() ?? defaultCompanionPort,
-      bleRemoteId: json['bleRemoteId'] as String?,
-      bleName: json['bleName'] as String?,
-      proxyPort: (json['proxyPort'] as num?)?.toInt() ?? defaultCompanionPort,
-      autoResume: json['autoResume'] as bool? ?? false,
-      intentionallyOff: json['intentionallyOff'] as bool? ?? false,
+      host: host as String?,
+      devicePort: devicePort,
+      bleRemoteId: bleRemoteId as String?,
+      bleName: bleName as String?,
+      proxyPort: proxyPort,
+      autoResume: autoResume as bool? ?? false,
+      intentionallyOff: intentionallyOff as bool? ?? false,
     );
   }
 }

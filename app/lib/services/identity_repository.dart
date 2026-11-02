@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -73,9 +74,30 @@ class IdentityRepository {
 
   NodeStore openNodeStore(String id) => _nodeStoreFactory(stateFile(id));
 
+  /// Serializes catalog reads and writes so two mutations cannot load the same
+  /// snapshot and then overwrite one another.
+  Future<void>? _mutationTail;
+
+  Future<T> _mutate<T>(Future<T> Function() action) {
+    final previous = _mutationTail;
+    final run = previous == null
+        ? action()
+        : previous.then(
+            (_) => action(),
+            onError: (Object _) => action(),
+          );
+    _mutationTail = run.then((_) {}, onError: (Object _) {});
+    return run;
+  }
+
+  /// Waits for all queued catalog mutations to settle.
+  Future<void> get idle => _mutationTail ?? Future<void>.value();
+
   /// Load the catalog, auto-creating and activating the first identity on a
   /// fresh install. A corrupt catalog throws [IdentityIndexException].
-  Future<IdentityIndex> loadOrCreate() async {
+  Future<IdentityIndex> loadOrCreate() => _mutate(_loadOrCreate);
+
+  Future<IdentityIndex> _loadOrCreate() async {
     var index = await indexStore.load();
     if (index == null) {
       return _createFirst();
@@ -185,18 +207,18 @@ class IdentityRepository {
       openNodeStore(id).save(state);
 
   /// Create an additional identity. It is persisted but not activated.
-  Future<IdentityRecord> create({String? name}) async {
-    final selected = (name == null || name.trim().isEmpty)
-        ? await suggestName()
-        : name.trim();
-    final valid = validateAdvertName(selected);
-    if (valid == null) {
-      throw const IdentityNameException('invalid identity name');
-    }
-    final index = await loadOrCreate();
-    final result = await _create(valid, existing: index, activate: false);
-    return result.record;
-  }
+  Future<IdentityRecord> create({String? name}) => _mutate(() async {
+        final selected = (name == null || name.trim().isEmpty)
+            ? await suggestName()
+            : name.trim();
+        final valid = validateAdvertName(selected);
+        if (valid == null) {
+          throw const IdentityNameException('invalid identity name');
+        }
+        final index = await _loadOrCreate();
+        final result = await _create(valid, existing: index, activate: false);
+        return result.record;
+      });
 
   Future<({IdentityIndex index, IdentityRecord record})> _create(
     String name, {
@@ -278,69 +300,73 @@ class IdentityRepository {
   /// Delete an identity. Only inactive records may be removed and at least one
   /// record must remain. The catalog update is the user-visible delete; key and
   /// state cleanup failures are logged because the record is already gone.
-  Future<void> delete(String id) async {
-    final index = await loadOrCreate();
-    final record = index.recordById(id);
-    if (record == null) {
-      throw const IdentityDeleteException('identity not found');
-    }
-    if (index.activeId == id) {
-      throw const IdentityDeleteException(
-        'activate another identity before deleting this one',
-      );
-    }
-    if (index.identities.length <= 1) {
-      throw const IdentityDeleteException(
-        'at least one identity must remain',
-      );
-    }
-    final remaining = [
-      for (final item in index.identities)
-        if (item.id != id) item,
-    ];
-    await indexStore.save(index.copyWith(identities: remaining));
-    try {
-      await _secureStore.deleteById(id);
-    } catch (e) {
-      onLog?.call('Could not delete identity key for $id: $e');
-    }
-    try {
-      final dir = Directory('${identitiesDirectory.path}/$id');
-      if (await dir.exists()) await dir.delete(recursive: true);
-    } catch (e) {
-      onLog?.call('Could not delete identity state for $id: $e');
-    }
-  }
+  Future<void> delete(String id) => _mutate(() async {
+        final index = await _loadOrCreate();
+        final record = index.recordById(id);
+        if (record == null) {
+          throw const IdentityDeleteException('identity not found');
+        }
+        if (index.activeId == id) {
+          throw const IdentityDeleteException(
+            'activate another identity before deleting this one',
+          );
+        }
+        if (index.identities.length <= 1) {
+          throw const IdentityDeleteException(
+            'at least one identity must remain',
+          );
+        }
+        final remaining = [
+          for (final item in index.identities)
+            if (item.id != id) item,
+        ];
+        await indexStore.save(index.copyWith(identities: remaining));
+        try {
+          await _secureStore.deleteById(id);
+        } catch (e) {
+          onLog?.call('Could not delete identity key for $id: $e');
+        }
+        try {
+          final dir = Directory('${identitiesDirectory.path}/$id');
+          if (await dir.exists()) await dir.delete(recursive: true);
+        } catch (e) {
+          onLog?.call('Could not delete identity state for $id: $e');
+        }
+      });
 
-  Future<IdentityRecord> updateName(String id, String name) async {
+  Future<IdentityRecord> updateName(String id, String name) {
     final valid = validateAdvertName(name);
     if (valid == null) {
       throw const IdentityNameException('invalid identity name');
     }
-    return _updateRecord(id, (record) => record.copyWith(name: valid));
+    return _mutate(
+      () => _updateRecord(id, (record) => record.copyWith(name: valid)),
+    );
   }
 
   Future<IdentityRecord> updatePublicKey(
     String id,
     Uint8List publicKey, {
     String? attachedDeviceKeyHex,
-  }) async {
+  }) {
     if (publicKey.length != pubKeySize) {
       throw const IdentityNameException('invalid identity public key');
     }
-    final index = await loadOrCreate();
-    await _ensureUniqueKey(index, publicKey, exceptId: id);
-    if (attachedDeviceKeyHex != null &&
-        bytesToHex(publicKey) == attachedDeviceKeyHex) {
-      throw const IdentityNameException(
-        'the attached companion identity cannot be used as a virtual identity',
+    return _mutate(() async {
+      final index = await _loadOrCreate();
+      await _ensureUniqueKey(index, publicKey, exceptId: id);
+      if (attachedDeviceKeyHex != null &&
+          bytesToHex(publicKey) == attachedDeviceKeyHex) {
+        throw const IdentityNameException(
+          'the attached companion identity cannot be used as a virtual identity',
+        );
+      }
+      return _updateRecord(
+        id,
+        (record) => record.copyWith(publicKey: publicKey),
+        existing: index,
       );
-    }
-    return _updateRecord(
-      id,
-      (record) => record.copyWith(publicKey: publicKey),
-      existing: index,
-    );
+    });
   }
 
   Future<IdentityRecord> _updateRecord(
@@ -348,7 +374,7 @@ class IdentityRepository {
     IdentityRecord Function(IdentityRecord record) update, {
     IdentityIndex? existing,
   }) async {
-    final index = existing ?? await loadOrCreate();
+    final index = existing ?? await _loadOrCreate();
     final records = <IdentityRecord>[];
     IdentityRecord? updated;
     for (final record in index.identities) {
@@ -370,58 +396,61 @@ class IdentityRepository {
   ///
   /// The active identity must stay enabled because it is the one served over
   /// the companion endpoint; activate another identity first.
-  Future<IdentityRecord> setEnabled(String id, bool enabled) async {
-    final index = await loadOrCreate();
-    final record = index.recordById(id);
-    if (record == null) {
-      throw const IdentityStateException('identity not found');
-    }
-    if (!enabled && index.activeId == id) {
-      throw const IdentityStateException(
-        'activate another identity before disabling this one',
-      );
-    }
-    return _updateRecord(
-      id,
-      (item) => item.copyWith(enabled: enabled),
-      existing: index,
-    );
-  }
+  Future<IdentityRecord> setEnabled(String id, bool enabled) =>
+      _mutate(() async {
+        final index = await _loadOrCreate();
+        final record = index.recordById(id);
+        if (record == null) {
+          throw const IdentityStateException('identity not found');
+        }
+        if (!enabled && index.activeId == id) {
+          throw const IdentityStateException(
+            'activate another identity before disabling this one',
+          );
+        }
+        return _updateRecord(
+          id,
+          (item) => item.copyWith(enabled: enabled),
+          existing: index,
+        );
+      });
 
-  Future<void> setActive(String id) async {
-    final index = await loadOrCreate();
-    final record = index.recordById(id);
-    if (record == null) {
-      throw const IdentityDeleteException('identity not found');
-    }
-    if (!record.enabled) {
-      throw const IdentityStateException(
-        'enable the identity before activating it',
-      );
-    }
-    if (index.activeId == id) return;
-    await indexStore.save(index.copyWith(activeId: id));
-  }
+  Future<void> setActive(String id) => _mutate(() async {
+        final index = await _loadOrCreate();
+        final record = index.recordById(id);
+        if (record == null) {
+          throw const IdentityDeleteException('identity not found');
+        }
+        if (!record.enabled) {
+          throw const IdentityStateException(
+            'enable the identity before activating it',
+          );
+        }
+        if (index.activeId == id) return;
+        await indexStore.save(index.copyWith(activeId: id));
+      });
 
   /// Clear everything virtual except the identity key and current name.
-  Future<void> clearLocalData(String id) async {
-    final index = await loadOrCreate();
-    final record = index.recordById(id);
-    if (record == null) {
-      throw const IdentityDeleteException('identity not found');
-    }
-    final state = await loadState(id);
-    final name = state?.prefs.nodeName ?? record.name;
-    final fresh = defaultNodeState(name);
-    await saveState(id, fresh);
-  }
+  Future<void> clearLocalData(String id) => _mutate(() async {
+        final index = await _loadOrCreate();
+        final record = index.recordById(id);
+        if (record == null) {
+          throw const IdentityDeleteException('identity not found');
+        }
+        final state = await loadState(id);
+        final name = state?.prefs.nodeName ?? record.name;
+        final fresh = defaultNodeState(name);
+        await saveState(id, fresh);
+      });
 
-  /// Remove per-identity state directories that no catalog record references.
+  /// Report per-identity state directories that no catalog record references.
   ///
-  /// Secure key slots are deliberately never removed here. On Linux,
-  /// `flutter_secure_storage` keeps every key in one slot keyed by application
-  /// id, so a catalog from one support directory must not be allowed to prune
-  /// another catalog's keys.
+  /// Unknown directories are deliberately kept: a recovered or stale catalog
+  /// may not know about a newer identity, and that directory can be the only
+  /// remaining copy of its contacts, channels, and messages. Explicit identity
+  /// deletion removes its own directory; secure key slots are never pruned
+  /// here. On Linux, `flutter_secure_storage` keeps every key in one slot keyed
+  /// by application id, so one catalog must not prune another catalog's keys.
   Future<void> cleanupOrphans() async {
     final index = await indexStore.load();
     if (index == null) return;
@@ -433,12 +462,7 @@ class IdentityRepository {
           if (entity is! Directory) continue;
           final name = entity.path.split(Platform.pathSeparator).last;
           if (known.contains(name)) continue;
-          try {
-            await entity.delete(recursive: true);
-            onLog?.call('Removed orphaned identity state directory');
-          } catch (e) {
-            onLog?.call('Could not remove orphaned identity state: $e');
-          }
+          onLog?.call('Found orphaned identity state directory $name (kept)');
         }
       }
     } on FileSystemException catch (e) {

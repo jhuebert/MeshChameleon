@@ -171,6 +171,11 @@ class TcpDeviceLink implements RadioLink {
       try {
         return await completer.future.timeout(requestTimeout);
       } on TimeoutException {
+        // A reply that arrives after the timeout cannot be matched to this
+        // request. Drop the connection so it cannot satisfy the next request
+        // with the same expected response code.
+        _pending = null;
+        await disconnect();
         throw DeviceCommandError.timeout(
           message: 'device reply timed out after '
               '${requestTimeout.inMilliseconds}ms',

@@ -177,6 +177,27 @@ void main() {
     expect(info.firmwareVerCode, targetFirmwareVerCode);
   });
 
+  test('a reply that arrives while the write is pending is not lost', () async {
+    final link = newLink();
+    await link.connect();
+    platform.writeGate = Completer<void>();
+    platform.errReply = [respCodeErr, errCodeTableFull];
+
+    final request = link.deviceInfo();
+    await _flush();
+    expect(platform.writes, isNotEmpty,
+        reason: 'the reply should be emitted while the write is still pending');
+    platform.writeGate!.complete();
+    platform.writeGate = null;
+
+    await expectLater(
+      request,
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.device)
+          .having((e) => e.code, 'code', errCodeTableFull)),
+    );
+  });
+
   test('request timeouts surface as timeout errors', () async {
     final link = newLink(requestTimeout: const Duration(milliseconds: 30));
     await link.connect();
@@ -186,6 +207,12 @@ void main() {
       link.deviceInfo(),
       throwsA(isA<DeviceCommandError>()
           .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    expect(link.currentState, LinkState.disconnected);
+    await expectLater(
+      link.deviceInfo(),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.disconnected)),
     );
   });
 
@@ -375,6 +402,7 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
   bool silent = false;
   List<int>? errReply;
   List<int>? extraReply;
+  Completer<void>? writeGate;
   DeviceIdentifier? activeRemoteId;
 
   void reset() {
@@ -384,6 +412,7 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
     silent = false;
     errReply = null;
     extraReply = null;
+    writeGate = null;
   }
 
   @override
@@ -521,6 +550,8 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
       final reply = errReply ?? _replyFor(request.value);
       if (reply != null) _emitReply(request.remoteId, reply);
     });
+    final gate = writeGate;
+    if (gate != null) await gate.future;
     return true;
   }
 

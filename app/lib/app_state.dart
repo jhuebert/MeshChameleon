@@ -238,13 +238,29 @@ class AppState extends ChangeNotifier {
   RadioLink? _connectingLink;
   bool _connectCancelled = false;
 
+  /// Serializes connect, disconnect, reconnect, and power-off transitions.
+  /// Their asynchronous cleanup must never race a newer session.
+  Future<void>? _connectionTail;
+
+  Future<T> _runConnectionTransition<T>(Future<T> Function() action) {
+    final previous = _connectionTail;
+    final run = previous == null
+        ? action()
+        : previous.then(
+            (_) => action(),
+            onError: (Object _) => action(),
+          );
+    _connectionTail = run.then((_) {}, onError: (Object _) {});
+    return run;
+  }
+
   /// Last device session (device link + proxy port), restored on launch when
   /// [autoResume] is on.
   SessionConfig? lastSession;
   bool autoResume = false;
 
   List<SavedNetworkConnection> _savedNetworkConnections = const [];
-  Future<void> _networkConnectionMutations = Future<void>.value();
+  Future<void>? _networkConnectionMutations;
 
   /// Successful network targets, newest first.
   List<SavedNetworkConnection> get savedNetworkConnections =>
@@ -309,7 +325,7 @@ class AppState extends ChangeNotifier {
       repository: await _ensureRepository(),
       onChanged: _onManagerChanged,
       onLog: log,
-      onPoweredOff: _onNodePoweredOff,
+      onPoweredOff: _queueNodePoweredOff,
     );
     _manager = created;
     return created;
@@ -320,6 +336,12 @@ class AppState extends ChangeNotifier {
   /// A fresh install auto-creates and activates one identity. A corrupt
   /// catalog is surfaced through [identityDatabaseError] rather than replaced.
   Future<void> loadIdentities({bool resume = true}) async {
+    try {
+      final backup = await _ensureBackupService();
+      await backup.recoverInterruptedRestore();
+    } catch (e) {
+      log('Could not recover an interrupted backup restore: $e');
+    }
     final manager = await _ensureManager();
     await manager.load();
     final session = await sessionStore.load();
@@ -545,7 +567,10 @@ class AppState extends ChangeNotifier {
   ///
   /// Returns true only when the link attached and the session was recorded.
   /// Failed history writes are logged without failing the connection.
-  Future<bool> connectTcp({required String host, int? tcpPort}) async {
+  Future<bool> connectTcp({required String host, int? tcpPort}) =>
+      _runConnectionTransition(() => _connectTcp(host: host, tcpPort: tcpPort));
+
+  Future<bool> _connectTcp({required String host, int? tcpPort}) async {
     final normalizedHost = host.trim();
     final devicePort = tcpPort ?? defaultCompanionPort;
     if (!isValidTcpHost(normalizedHost) || !isValidTcpPort(devicePort)) {
@@ -572,7 +597,13 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
-  Future<bool> connectBle(BluetoothDevice device, {String? displayName}) async {
+  Future<bool> connectBle(BluetoothDevice device, {String? displayName}) =>
+      _runConnectionTransition(
+        () => _connectBle(device, displayName: displayName),
+      );
+
+  Future<bool> _connectBle(BluetoothDevice device,
+      {String? displayName}) async {
     if (!capabilities.supportsBle) {
       log('BLE is not available in this build');
       return false;
@@ -608,7 +639,12 @@ class AppState extends ChangeNotifier {
   /// Exercises every live identity, the companion server, and the UI without
   /// any radio: [FakeDeviceLink] answers device queries and radio-parameter
   /// requests, and its transmissions never leave the process.
-  Future<bool> connectSimulated({RadioLink? simulatedLink}) async {
+  Future<bool> connectSimulated({RadioLink? simulatedLink}) =>
+      _runConnectionTransition(
+        () => _connectSimulated(simulatedLink: simulatedLink),
+      );
+
+  Future<bool> _connectSimulated({RadioLink? simulatedLink}) async {
     final link = MeteredRadioLink(
       simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion'),
       metrics: linkMetrics,
@@ -645,15 +681,15 @@ class AppState extends ChangeNotifier {
   /// The store already serializes file writes; this also prevents a delete,
   /// Undo, or successful connect from publishing a stale in-memory snapshot.
   Future<T> _mutateNetworkConnections<T>(Future<T> Function() action) {
-    final completer = Completer<T>();
-    _networkConnectionMutations = _networkConnectionMutations.then((_) async {
-      try {
-        completer.complete(await action());
-      } catch (e, stack) {
-        completer.completeError(e, stack);
-      }
-    });
-    return completer.future;
+    final previous = _networkConnectionMutations;
+    final run = previous == null
+        ? action()
+        : previous.then(
+            (_) => action(),
+            onError: (Object _) => action(),
+          );
+    _networkConnectionMutations = run.then((_) {}, onError: (Object _) {});
+    return run;
   }
 
   void _publishNetworkConnections(List<SavedNetworkConnection> connections) {
@@ -700,13 +736,16 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  bool _linkReadyForAttach(RadioLink link) =>
+      !_connectCancelled && link.currentState == LinkState.connected;
+
   Future<bool> _attachLink(RadioLink link, String label) async {
     busy = true;
     _connectingLink = link;
     _connectCancelled = false;
     notifyListeners();
     try {
-      await disconnectDevice();
+      await _disconnectDevice();
       if (_connectCancelled) return false;
       final manager = await _ensureManager();
       if (!manager.loaded) {
@@ -719,13 +758,20 @@ class AppState extends ChangeNotifier {
         onLog: log,
         shouldCancel: () => _connectCancelled,
       );
-      if (_connectCancelled) return false;
+      if (!_linkReadyForAttach(link)) {
+        await link.disconnect();
+        return false;
+      }
       this.link = link;
       deviceLabel = label;
       deviceConnected = true;
 
       final deviceInfo = await link.deviceInfo();
       final selfInfo = await link.selfInfo();
+      if (!_linkReadyForAttach(link)) {
+        await _disconnectDevice();
+        return false;
+      }
       final physical = PhysicalCapabilities.fromDeviceInfo(
         deviceInfo,
         maxTxPower: selfInfo.maxTxPower,
@@ -738,6 +784,10 @@ class AppState extends ChangeNotifier {
         radioParams: selfInfo.radioParams,
         devicePublicKey: selfInfo.publicKey,
       );
+      if (!_linkReadyForAttach(link)) {
+        await _disconnectDevice();
+        return false;
+      }
       this.deviceInfo = deviceInfo;
       deviceConnectedAt = DateTime.now();
       final liveCount =
@@ -749,12 +799,20 @@ class AppState extends ChangeNotifier {
       }
       _watchLink(link);
       await _startForegroundService();
+      if (_connectCancelled) {
+        await _disconnectDevice();
+        return false;
+      }
       await _updateNotification();
+      if (_connectCancelled) {
+        await _disconnectDevice();
+        return false;
+      }
       return true;
     } catch (e) {
       if (!_connectCancelled) log('Device connection failed: $e');
       if (identical(this.link, link)) {
-        await disconnectDevice();
+        await _disconnectDevice();
       } else {
         await link.disconnect();
       }
@@ -787,17 +845,29 @@ class AppState extends ChangeNotifier {
     if (current != null) {
       final updated = current.copyWith(proxyPort: value);
       lastSession = updated;
-      await sessionStore.save(updated);
+      try {
+        await sessionStore.save(updated);
+      } catch (e) {
+        log('Could not save the proxy port: $e');
+      }
     }
     notifyListeners();
     return true;
   }
 
   /// Persist the last session so it can be restored on the next launch.
+  ///
+  /// A failed write must not turn an already-attached radio into a failed
+  /// connection; auto-resume is simply unavailable until the next successful
+  /// save.
   Future<void> _recordSession(SessionConfig session) async {
     lastSession = session;
     _intentionalOff = false;
-    await sessionStore.save(session);
+    try {
+      await sessionStore.save(session);
+    } catch (e) {
+      log('Could not save the last session: $e');
+    }
     notifyListeners();
   }
 
@@ -809,7 +879,11 @@ class AppState extends ChangeNotifier {
     if (current != null) {
       final updated = current.copyWith(autoResume: value);
       lastSession = updated;
-      await sessionStore.save(updated);
+      try {
+        await sessionStore.save(updated);
+      } catch (e) {
+        log('Could not save the resume setting: $e');
+      }
     }
     notifyListeners();
   }
@@ -894,24 +968,34 @@ class AppState extends ChangeNotifier {
   /// Watch [link] for unexpected drops so the session can be restored.
   void _watchLink(RadioLink link) {
     _linkStateSub?.cancel();
-    _linkStateSub = link.state.listen((state) {
-      if (state == LinkState.disconnected &&
-          !_disconnecting &&
-          !_intentionalOff &&
-          deviceConnected) {
-        linkMetrics.disconnected(unexpected: true);
-        deviceConnectedAt = null;
-        log('Device link dropped; scheduling reconnect');
-        _scheduleReconnect();
+    void handle(LinkState state) {
+      if (state != LinkState.disconnected ||
+          _disconnecting ||
+          _intentionalOff ||
+          _connectCancelled ||
+          !deviceConnected ||
+          _reconnectTimer != null) {
+        return;
       }
-    });
+      linkMetrics.disconnected(unexpected: true);
+      deviceConnectedAt = null;
+      log('Device link dropped; scheduling reconnect');
+      _scheduleReconnect();
+    }
+
+    _linkStateSub = link.state.listen(handle);
+    // A drop can happen before the stream subscription is attached (for
+    // example while startup awaits the foreground service).
+    if (link.currentState == LinkState.disconnected) {
+      handle(LinkState.disconnected);
+    }
   }
 
   void _scheduleReconnect() {
     if (_intentionalOff) return;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(reconnectDelay, () {
-      unawaited(_reconnect());
+      unawaited(_runConnectionTransition(_reconnect));
     });
   }
 
@@ -930,6 +1014,12 @@ class AppState extends ChangeNotifier {
     try {
       log('Reconnecting device ...');
       await connectWithBackoff(curLink, onLog: log);
+      if (!identical(curLink, link) ||
+          _disconnecting ||
+          _intentionalOff ||
+          curLink.currentState != LinkState.connected) {
+        return;
+      }
       final deviceInfo = await curLink.deviceInfo();
       final selfInfo = await curLink.selfInfo();
       final physical = PhysicalCapabilities.fromDeviceInfo(
@@ -973,11 +1063,7 @@ class AppState extends ChangeNotifier {
         log('Could not persist intentional shutdown: $e');
       }
     }
-    try {
-      await server?.stop();
-      server = null;
-      proxyStatus = ProxyStatus.stopped;
-    } catch (_) {}
+    await stopProxy();
     try {
       await _foreground.stop();
     } catch (_) {
@@ -988,7 +1074,18 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> disconnectDevice() async {
+  Future<void> _queueNodePoweredOff() =>
+      _runConnectionTransition(_onNodePoweredOff);
+
+  Future<void> disconnectDevice() =>
+      _runConnectionTransition(_disconnectDevice);
+
+  Future<void> _disconnectDevice() async {
+    final wasBusy = busy;
+    if (!wasBusy) {
+      busy = true;
+      notifyListeners();
+    }
     // Mark the disconnect before awaiting anything so a link drop during
     // proxy shutdown cannot schedule an unexpected reconnect.
     _disconnecting = true;
@@ -1001,7 +1098,11 @@ class AppState extends ChangeNotifier {
         await stopProxy();
       }
       await _manager?.stopLive();
-      await link?.disconnect();
+      try {
+        await link?.disconnect();
+      } catch (e) {
+        log('Could not disconnect the device link cleanly: $e');
+      }
     } finally {
       link = null;
       deviceConnected = false;
@@ -1016,6 +1117,7 @@ class AppState extends ChangeNotifier {
       _foregroundStarted = false;
       _lastNotification = null;
       _disconnecting = false;
+      if (!wasBusy) busy = false;
       notifyListeners();
     }
   }
@@ -1055,7 +1157,26 @@ class AppState extends ChangeNotifier {
   // Proxy server
   // -------------------------------------------------------------------------
 
-  Future<void> startProxy({int? serverPort}) async {
+  /// Serializes queued start/stop operations so a rapid toggle cannot leave a
+  /// listener running with the UI reporting stopped (or the reverse).
+  Future<void>? _proxyTail;
+
+  Future<void> _runProxyTransition(Future<void> Function() action) {
+    final previous = _proxyTail;
+    final run = previous == null
+        ? action()
+        : previous.then(
+            (_) => action(),
+            onError: (Object _) => action(),
+          );
+    _proxyTail = run.then((_) {}, onError: (Object _) {});
+    return run;
+  }
+
+  Future<void> startProxy({int? serverPort}) =>
+      _runProxyTransition(() => _startProxy(serverPort));
+
+  Future<void> _startProxy(int? serverPort) async {
     final active = node;
     if (active == null) {
       log(identities.isEmpty
@@ -1065,29 +1186,38 @@ class AppState extends ChangeNotifier {
               : 'Connect a device first');
       return;
     }
-    server ??= CompanionServer(
+    final current = server ??= CompanionServer(
       bridge: active,
       config: CompanionServerConfig(port: serverPort ?? port),
       metrics: companionMetrics,
       onLog: log,
     );
     try {
-      await server!.start();
-      port = server!.port ?? port;
+      await current.start();
+      port = current.port ?? port;
       proxyStatus = ProxyStatus.running;
       log('Proxy server listening on port $port');
       await _updateNotification();
     } catch (e) {
       log('Failed to start proxy: $e');
-      await server?.stop();
-      server = null;
+      try {
+        await current.stop();
+      } catch (_) {}
+      if (identical(server, current)) server = null;
     }
     notifyListeners();
   }
 
-  Future<void> stopProxy() async {
-    await server?.stop();
+  Future<void> stopProxy() => _runProxyTransition(_stopProxy);
+
+  Future<void> _stopProxy() async {
+    final current = server;
     server = null;
+    try {
+      await current?.stop();
+    } catch (e) {
+      log('Could not stop the proxy cleanly: $e');
+    }
     proxyStatus = ProxyStatus.stopped;
     await _updateNotification();
     notifyListeners();

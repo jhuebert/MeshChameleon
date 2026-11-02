@@ -83,6 +83,8 @@ class BleDeviceLink implements RadioLink {
     // characteristic object. Cancel them before subscribing again or every
     // notification is delivered once per reconnect.
     await _cancelSubscriptions();
+    _rx = null;
+    _tx = null;
     _setState(LinkState.connecting);
     try {
       await device.connect(timeout: const Duration(seconds: 15));
@@ -119,6 +121,8 @@ class BleDeviceLink implements RadioLink {
       _setState(LinkState.connected);
     } catch (e) {
       await _cancelSubscriptions();
+      _rx = null;
+      _tx = null;
       _setState(LinkState.disconnected);
       rethrow;
     }
@@ -127,6 +131,8 @@ class BleDeviceLink implements RadioLink {
   @override
   Future<void> disconnect() async {
     await _cancelSubscriptions();
+    _rx = null;
+    _tx = null;
     _failAll(const DeviceCommandError.disconnected(message: 'disconnected'));
     try {
       await device.disconnect();
@@ -235,9 +241,14 @@ class BleDeviceLink implements RadioLink {
       // awaits the request.
       unawaited(response.then<void>((_) {}, onError: (_, __) {}));
       try {
-        await _writeFrame(rx, frame);
+        await _writeFrame(rx, frame).timeout(requestTimeout);
         return await response.timeout(requestTimeout);
       } on TimeoutException {
+        // A reply that arrives after the timeout cannot be matched to this
+        // request. Drop the connection so it cannot satisfy the next request
+        // with the same expected response code.
+        _pending = null;
+        await disconnect();
         throw DeviceCommandError.timeout(
           message: 'BLE reply timed out after '
               '${requestTimeout.inMilliseconds}ms',
