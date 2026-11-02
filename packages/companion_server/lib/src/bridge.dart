@@ -479,3 +479,17 @@ Never _unsupported(String operation) => throw CompanionOperationError(
       errCodeUnsupportedCmd,
       message: '$operation not implemented',
     );
+
+/// The CLI text for a failed bridge operation.
+///
+/// Shared by the CLI runtime and the server's `CMD_RUN_CLI_COMMAND` handler so
+/// both surfaces describe the same failure the same way.
+String companionOperationErrorText(CompanionOperationError error) {
+  if (error.disabled) return 'Error: disabled';
+  return switch (error.code) {
+    errCodeFileIoError || errCodeTableFull => 'Error: storage failure',
+    errCodeBadState => 'Error: device unavailable',
+    errCodeIllegalArg => 'Error: illegal argument',
+    _ => 'Error: unsupported',
+  };
+}

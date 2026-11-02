@@ -3074,18 +3074,31 @@ void main() {
         await client.frames.next(), [pushCodeControlData, 252, 186, 2, 1, 2]);
   });
 
-  test('empty commands and unexpected bridge errors answer ERR illegal arg',
+  test('unexpected bridge errors answer ERR bad state and count internally',
       () async {
     client.send(const []);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
     bridge.contactsError = StateError('backend exploded');
     client.send([cmdGetContacts, 0, 0, 0, 0]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+    expect(server.metrics.internalErrors, 1);
     expect(
-      serverLogs.any((line) => line.contains('backend exploded')),
+      serverLogs.any((line) =>
+          line.contains('internal error') && line.contains('backend exploded')),
       isTrue,
     );
+
+    // Malformed input is still the client's error, not an internal failure.
+    bridge.contactsError = const FormatException('bad input');
+    client.send([cmdGetContacts, 0, 0, 0, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(server.metrics.internalErrors, 1);
+
+    bridge.contactsError = RangeError('bad range');
+    client.send([cmdGetContacts, 0, 0, 0, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(server.metrics.internalErrors, 1);
   });
 
   test('operation errors preserve codes and disabled/uncertain flags',

@@ -20,6 +20,7 @@ void main() {
     metrics.errorReplyFrameSent();
     metrics.disabledReplyFrameSent();
     metrics.unsupportedCommandReceived();
+    metrics.internalError();
     metrics.appTargetVersionReceived(3);
 
     expect(metrics.commandsReceived, 1);
@@ -30,6 +31,7 @@ void main() {
     expect(metrics.errorReplyFrames, 1);
     expect(metrics.disabledReplyFrames, 1);
     expect(metrics.unsupportedCommands, 1);
+    expect(metrics.internalErrors, 1);
     expect(metrics.appTargetVer, 3);
 
     metrics.appTargetVersionReset();

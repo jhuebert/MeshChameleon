@@ -85,15 +85,8 @@ class CliRuntime {
     }
   }
 
-  String operationErrorText(CompanionOperationError e) {
-    if (e.disabled) return 'Error: disabled';
-    return switch (e.code) {
-      errCodeFileIoError || errCodeTableFull => 'Error: storage failure',
-      errCodeBadState => 'Error: device unavailable',
-      errCodeIllegalArg => 'Error: illegal argument',
-      _ => 'Error: unsupported',
-    };
-  }
+  String operationErrorText(CompanionOperationError e) =>
+      companionOperationErrorText(e);
 
   String deviceErrorText(DeviceCommandError e) => switch (e.kind) {
         DeviceCommandErrorKind.disabled => 'Error: disabled',

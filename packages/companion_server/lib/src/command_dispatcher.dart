@@ -75,9 +75,19 @@ class CompanionCommandDispatcher {
       await spec.handler(data);
     } on CompanionOperationError catch (e) {
       _sendOperationError(e);
-    } catch (e) {
-      host.log('cmd 0x${cmd.toRadixString(16)} error: $e');
+    } on FormatException catch (e) {
+      host.log('cmd 0x${cmd.toRadixString(16)} invalid input: $e');
       host.sendErr(errCodeIllegalArg);
+    } on ArgumentError catch (e) {
+      host.log('cmd 0x${cmd.toRadixString(16)} invalid input: $e');
+      host.sendErr(errCodeIllegalArg);
+    } catch (e) {
+      // A handler bug is not the client's bad input. Surface a bad-state reply
+      // and make the regression visible in diagnostics instead of masking it
+      // as ILLEGAL_ARG.
+      host.metrics.internalError();
+      host.log('cmd 0x${cmd.toRadixString(16)} internal error: $e');
+      host.sendErr(errCodeBadState);
     }
   }
 
@@ -354,16 +364,7 @@ class CompanionCommandDispatcher {
     try {
       text = await host.bridge.runCliCommandBytes(data);
     } on CompanionOperationError catch (e) {
-      text = e.disabled
-          ? 'Error: disabled'
-          : switch (e.code) {
-              errCodeFileIoError ||
-              errCodeTableFull =>
-                'Error: storage failure',
-              errCodeBadState => 'Error: device unavailable',
-              errCodeIllegalArg => 'Error: illegal argument',
-              _ => 'Error: unsupported',
-            };
+      text = companionOperationErrorText(e);
     } catch (_) {
       text = 'Error: illegal argument';
     }

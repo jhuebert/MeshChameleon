@@ -21,6 +21,7 @@ class CompanionMetrics {
   int errorReplyFrames = 0;
   int disabledReplyFrames = 0;
   int unsupportedCommands = 0;
+  int internalErrors = 0;
 
   /// Protocol version from the most recent DEVICE_QUERY / APP_START.
   int? appTargetVer;
@@ -86,6 +87,10 @@ class CompanionMetrics {
   void disabledReplyFrameSent() => disabledReplyFrames++;
 
   void unsupportedCommandReceived() => unsupportedCommands++;
+
+  /// A handler failed with an unexpected exception (a server bug rather than a
+  /// malformed command).
+  void internalError() => internalErrors++;
 
   void writeFailed() => writeErrors++;
 

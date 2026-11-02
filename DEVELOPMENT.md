@@ -63,7 +63,9 @@ handlers, `push_codec.dart` holds the pure push/message byte encoders, and
 `bridge.dart` is the host interface. Unimplemented bridge operations throw
 `CompanionOperationError(errCodeUnsupportedCmd)`; only pure empty-state getters
 (no contacts, no messages, default preferences) have working defaults. Stats
-are returned as the typed `MeshStats` object.
+are returned as the typed `MeshStats` object. Unexpected handler failures answer
+`ERR_BAD_STATE` and increment `internalErrors`; malformed input remains
+`ERR_ILLEGAL_ARG`.
 
 ## Running an end-to-end test without hardware
 

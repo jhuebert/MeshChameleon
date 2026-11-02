@@ -200,6 +200,45 @@ void main() {
     expect(full.toString(), contains('uncertain'));
     expect(full.toString(), contains('timed out'));
   });
+
+  test('operation error text maps every wire code', () {
+    expect(
+      companionOperationErrorText(
+        const CompanionOperationError(errCodeIllegalArg),
+      ),
+      'Error: illegal argument',
+    );
+    expect(
+      companionOperationErrorText(
+        const CompanionOperationError(errCodeFileIoError),
+      ),
+      'Error: storage failure',
+    );
+    expect(
+      companionOperationErrorText(
+        const CompanionOperationError(errCodeTableFull),
+      ),
+      'Error: storage failure',
+    );
+    expect(
+      companionOperationErrorText(
+        const CompanionOperationError(errCodeBadState),
+      ),
+      'Error: device unavailable',
+    );
+    expect(
+      companionOperationErrorText(
+        const CompanionOperationError(errCodeUnsupportedCmd),
+      ),
+      'Error: unsupported',
+    );
+    expect(
+      companionOperationErrorText(
+        const CompanionOperationError(errCodeIllegalArg, disabled: true),
+      ),
+      'Error: disabled',
+    );
+  });
 }
 
 Uint8List _ascii(String value) => Uint8List.fromList(value.codeUnits);
