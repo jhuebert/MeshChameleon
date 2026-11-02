@@ -106,7 +106,7 @@ void main() {
       () async {
     final app = await newApp();
     addTearDown(app.disconnectDevice);
-    app.autoResume = true;
+    await app.setAutoResume(true);
     final link = FakeDeviceLink(
       deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
       deviceNodeName: 'Physical companion',

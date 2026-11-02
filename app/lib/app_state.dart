@@ -24,6 +24,7 @@ import 'services/network_connection_history.dart';
 import 'services/network_connection_store.dart';
 import 'services/notification_content.dart';
 import 'services/proxy_status.dart';
+import 'services/session_settings.dart';
 import 'services/session_store.dart';
 
 export 'services/notification_content.dart';
@@ -185,15 +186,15 @@ class AppState extends ChangeNotifier {
   RadioLink? link;
   CompanionServer? server;
 
-  int port = defaultCompanionPort;
+  int get port => _sessionSettings.port;
+  set port(int value) => _sessionSettings.port = value;
   ProxyStatus proxyStatus = ProxyStatus.stopped;
   String? deviceLabel;
   bool deviceConnected = false;
   bool busy = false;
-  bool _intentionalOff = false;
 
   /// True after a physical shutdown until the user explicitly connects again.
-  bool get intentionallyOff => _intentionalOff;
+  bool get intentionallyOff => _sessionSettings.intentionallyOff;
   RadioLink? _connectingLink;
   bool _connectCancelled = false;
 
@@ -213,10 +214,15 @@ class AppState extends ChangeNotifier {
     return run;
   }
 
+  late final SessionSettings _sessionSettings = SessionSettings(
+    store: sessionStore,
+    onLog: log,
+  );
+
   /// Last device session (device link + proxy port), restored on launch when
   /// [autoResume] is on.
-  SessionConfig? lastSession;
-  bool autoResume = false;
+  SessionConfig? get lastSession => _sessionSettings.lastSession;
+  bool get autoResume => _sessionSettings.autoResume;
 
   /// Successful network targets, newest first.
   late final NetworkConnectionHistory _networkHistory =
@@ -322,16 +328,7 @@ class AppState extends ChangeNotifier {
     }
     final manager = await _ensureManager();
     await manager.load();
-    final session = await sessionStore.load();
-    lastSession = session;
-    if (session != null) {
-      port = session.proxyPort;
-      autoResume = session.autoResume;
-      _intentionalOff = session.intentionallyOff;
-    } else {
-      autoResume = false;
-      _intentionalOff = false;
-    }
+    await _sessionSettings.load();
     // Load the history before auto-resume so a resumed TCP session refreshes
     // its target instead of replacing the saved list.
     await _networkHistory.load();
@@ -758,19 +755,9 @@ class AppState extends ChangeNotifier {
     if (!isValidTcpPort(value) || proxyStatus == ProxyStatus.running) {
       return false;
     }
-    port = value;
-    final current = lastSession;
-    if (current != null) {
-      final updated = current.copyWith(proxyPort: value);
-      lastSession = updated;
-      try {
-        await sessionStore.save(updated);
-      } catch (e) {
-        log('Could not save the proxy port: $e');
-      }
-    }
+    final changed = await _sessionSettings.setPort(value);
     notifyListeners();
-    return true;
+    return changed;
   }
 
   /// Persist the last session so it can be restored on the next launch.
@@ -779,30 +766,14 @@ class AppState extends ChangeNotifier {
   /// connection; auto-resume is simply unavailable until the next successful
   /// save.
   Future<void> _recordSession(SessionConfig session) async {
-    lastSession = session;
-    _intentionalOff = false;
-    try {
-      await sessionStore.save(session);
-    } catch (e) {
-      log('Could not save the last session: $e');
-    }
+    await _sessionSettings.record(session);
     notifyListeners();
   }
 
   /// Toggle automatic session restore (reconnect the last device and restart the
   /// proxy when the app opens).
   Future<void> setAutoResume(bool value) async {
-    autoResume = value;
-    final current = lastSession;
-    if (current != null) {
-      final updated = current.copyWith(autoResume: value);
-      lastSession = updated;
-      try {
-        await sessionStore.save(updated);
-      } catch (e) {
-        log('Could not save the resume setting: $e');
-      }
-    }
+    await _sessionSettings.setAutoResume(value);
     notifyListeners();
   }
 
@@ -889,7 +860,7 @@ class AppState extends ChangeNotifier {
     void handle(LinkState state) {
       if (state != LinkState.disconnected ||
           _disconnecting ||
-          _intentionalOff ||
+          intentionallyOff ||
           _connectCancelled ||
           !deviceConnected ||
           _reconnectTimer != null) {
@@ -910,7 +881,7 @@ class AppState extends ChangeNotifier {
   }
 
   void _scheduleReconnect() {
-    if (_intentionalOff) return;
+    if (intentionallyOff) return;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(reconnectDelay, () {
       unawaited(_runConnectionTransition(_reconnect));
@@ -925,7 +896,7 @@ class AppState extends ChangeNotifier {
     if (curLink == null ||
         manager == null ||
         _disconnecting ||
-        _intentionalOff) {
+        intentionallyOff) {
       return;
     }
     reconnectAttempts++;
@@ -934,7 +905,7 @@ class AppState extends ChangeNotifier {
       await connectWithBackoff(curLink, onLog: log);
       if (!identical(curLink, link) ||
           _disconnecting ||
-          _intentionalOff ||
+          intentionallyOff ||
           curLink.currentState != LinkState.connected) {
         return;
       }
@@ -960,7 +931,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _onNodePoweredOff() async {
-    _intentionalOff = true;
+    final offPersisted = _sessionSettings.markPoweredOff();
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     final manager = _manager;
@@ -971,16 +942,7 @@ class AppState extends ChangeNotifier {
     deviceInfo = null;
     deviceLabel = null;
     log('Device powered off; automatic reconnect suppressed');
-    final current = lastSession;
-    if (current != null) {
-      final updated = current.copyWith(intentionallyOff: true);
-      lastSession = updated;
-      try {
-        await sessionStore.save(updated);
-      } catch (e) {
-        log('Could not persist intentional shutdown: $e');
-      }
-    }
+    await offPersisted;
     await stopProxy();
     try {
       await _foreground.stop();

@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
 import 'json_document_store.dart';
+import 'network_address.dart';
+
+export 'network_address.dart';
 
 /// Current on-disk saved-network-connection schema.
 const int networkConnectionHistoryVersion = 1;
@@ -12,12 +15,6 @@ const int maxSavedNetworkConnections = 20;
 
 /// Largest timestamp representable by [DateTime] (UTC epoch milliseconds).
 const int _maxTimestampMilliseconds = 8640000000000000;
-
-/// Whether [host] is a non-empty TCP/IP host name or address.
-bool isValidTcpHost(String host) => host.trim().isNotEmpty;
-
-/// Whether [port] is a usable non-zero TCP port.
-bool isValidTcpPort(int port) => port >= 1 && port <= 65535;
 
 bool _isValidTimestamp(int timestamp) =>
     timestamp > 0 && timestamp <= _maxTimestampMilliseconds;
@@ -81,16 +78,6 @@ class SavedNetworkConnection {
 
   @override
   int get hashCode => Object.hash(key, lastConnectedAt);
-}
-
-/// Formats a TCP target, bracketing IPv6 literals (for example
-/// `[fe80::1]:5000`).
-String formatNetworkAddress(String host, int port) {
-  final trimmed = host.trim();
-  if (trimmed.contains(':') && !trimmed.startsWith('[')) {
-    return '[$trimmed]:$port';
-  }
-  return '$trimmed:$port';
 }
 
 /// Adds or refreshes [host]:[port] and returns the normalized history.
