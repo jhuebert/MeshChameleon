@@ -80,7 +80,7 @@ jobs:
       - name: Reserve build number
         id: reserve
         env:
-          GH_TOKEN: ${{ secrets.BUILD_NUMBER_TOKEN }}
+          GH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
         run: ./scripts/reserve_build_number.sh
 
   release:
