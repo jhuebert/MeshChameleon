@@ -39,14 +39,16 @@ void main() {
         channels: {
           0: Channel(
             name: 'public',
-            secret: Uint8List.fromList(
-                LocalIdentity.defaultPublicChannelSecret),
+            secret:
+                Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
           ),
-          1: Channel(name: 'team', secret: Uint8List.fromList(List.filled(16, 7))),
+          1: Channel(
+              name: 'team', secret: Uint8List.fromList(List.filled(16, 7))),
         },
         queue: [
           QueuedMessage(
-            senderKey: Uint8List.fromList(List<int>.generate(32, (i) => 255 - i)),
+            senderKey:
+                Uint8List.fromList(List<int>.generate(32, (i) => 255 - i)),
             txtType: txtTypePlain,
             timestamp: 42,
             text: 'hello',
@@ -63,7 +65,8 @@ void main() {
         ],
         advertPaths: {
           'AABBCCDDEEFF00': AdvertPath(
-            publicKeyPrefix: Uint8List.fromList([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00]),
+            publicKeyPrefix:
+                Uint8List.fromList([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x00]),
             name: 'peer',
             pathLen: 1,
             path: Uint8List.fromList([0x11]),
@@ -168,15 +171,15 @@ void main() {
       expect(state.customSettings['key'], 'value');
     });
 
-    test('storage_counts_utf8_compact_virtual_state_not_physical_flash_or_pretty_bytes',
+    test(
+        'storage_counts_utf8_compact_virtual_state_not_physical_flash_or_pretty_bytes',
         () {
       final state = NodeState(
         prefs: NodePrefs(nodeName: 'café'),
         customSettings: {'sensor': 'välue'},
       );
       final compact = jsonEncode(state.toJson());
-      final pretty =
-          const JsonEncoder.withIndent('  ').convert(state.toJson());
+      final pretty = const JsonEncoder.withIndent('  ').convert(state.toJson());
 
       expect(state.storageBytes, utf8.encode(compact).length);
       expect(state.storageBytes, greaterThan(compact.length),
@@ -458,8 +461,8 @@ void main() {
         channels: {
           0: Channel(
             name: 'public',
-            secret: Uint8List.fromList(
-                LocalIdentity.defaultPublicChannelSecret),
+            secret:
+                Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
           ),
         },
       ));
@@ -484,7 +487,8 @@ void main() {
       expect(saved.prefs.longitude, -3.25);
       expect(saved.channels[1]!.name, 'team');
 
-      final relaunched = MeshNode(identity: aliceId, link: aliceLink, store: store);
+      final relaunched =
+          MeshNode(identity: aliceId, link: aliceLink, store: store);
       await relaunched.load();
       expect(relaunched.prefs.nodeName, 'renamed');
       expect(relaunched.channels[1]!.secret, List.filled(16, 9));
@@ -496,7 +500,8 @@ void main() {
 
       expect((await store.load())!.queue, hasLength(1));
 
-      final relaunched = MeshNode(identity: aliceId, link: aliceLink, store: store);
+      final relaunched =
+          MeshNode(identity: aliceId, link: aliceLink, store: store);
       await relaunched.load();
       final msg = await relaunched.syncNextMessage();
       expect(msg, isNotNull);
@@ -595,7 +600,9 @@ void main() {
       final oneBytes = NodeState(
         prefs: NodePrefs(),
         channels: {0: channel},
-        queue: [_queuedChannelData(Uint8List.fromList([1]))],
+        queue: [
+          _queuedChannelData(Uint8List.fromList([1]))
+        ],
       ).storageBytes;
       final quota = emptyBytes + (oneBytes - emptyBytes) + 20;
 

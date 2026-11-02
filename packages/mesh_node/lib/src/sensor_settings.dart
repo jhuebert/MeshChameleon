@@ -18,8 +18,7 @@ abstract class VirtualSensorSettingsProvider {
 
 /// Default provider: this build has no virtual GPS/environment hardware, so it
 /// exposes zero settings and rejects every SET with ERR6.
-class EmptyVirtualSensorSettingsProvider
-    extends VirtualSensorSettingsProvider {
+class EmptyVirtualSensorSettingsProvider extends VirtualSensorSettingsProvider {
   const EmptyVirtualSensorSettingsProvider();
 
   @override

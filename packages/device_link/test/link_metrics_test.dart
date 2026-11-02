@@ -115,7 +115,8 @@ void main() {
     inner.deviceInfoError = null;
     final throwing = _ThrowingLink();
     final throwingMetrics = LinkMetrics();
-    final throwingDecorator = MeteredRadioLink(throwing, metrics: throwingMetrics);
+    final throwingDecorator =
+        MeteredRadioLink(throwing, metrics: throwingMetrics);
     await expectLater(throwingDecorator.deviceInfo(), throwsStateError);
     expect(throwingMetrics.deviceRequestFailures, 1);
     expect(throwingMetrics.lastError, contains('generic failure'));
@@ -131,12 +132,14 @@ void main() {
     await link.selfInfo();
     await link.radioParams();
     await link.radioStats();
-    await link.setRadioParams(const RadioParams(
-      frequencyHz: 869000000,
-      bandwidthHz: 125000,
-      spreadingFactor: 11,
-      codingRate: 5,
-    ), clientRepeat: true);
+    await link.setRadioParams(
+        const RadioParams(
+          frequencyHz: 869000000,
+          bandwidthHz: 125000,
+          spreadingFactor: 11,
+          codingRate: 5,
+        ),
+        clientRepeat: true);
     await link.setTxPower(17);
     await link.reboot();
     await link.shutdown();

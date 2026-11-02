@@ -79,8 +79,7 @@ Future<_Fixture> _makeFixture({
         );
   final link = FakeDeviceLink(batteryReading_: reading);
   await link.connect();
-  final identity =
-      await LocalIdentity.fromSeed(Uint8List(32)..[0] = 90);
+  final identity = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 90);
   final node = MeshNode(
     identity: identity,
     link: link,
@@ -130,8 +129,8 @@ void main() {
     final refreshed = await f.node.getBatteryAndStorage();
     expect(refreshed.millivolts, 3650);
     expect(refreshed.storageTotalKb, virtualStorageTotalKb);
-    expect(refreshed.storageUsedKb,
-        storageKibForBytes(f.node.storageUsedBytes));
+    expect(
+        refreshed.storageUsedKb, storageKibForBytes(f.node.storageUsedBytes));
     expect(refreshed.storageUsedKb, isNot(777));
     expect(f.link.batteryReads, 2);
   });
@@ -305,8 +304,7 @@ void main() {
 
     final initial = await f.node.getBatteryAndStorage();
     expect(initial.millivolts, 3700);
-    expect(initial.storageUsedKb,
-        storageKibForBytes(f.node.storageUsedBytes));
+    expect(initial.storageUsedKb, storageKibForBytes(f.node.storageUsedBytes));
     expect(initial.storageTotalKb, virtualStorageTotalKb);
     expect(initial.storageUsedKb, isNot(12));
     expect(initial.storageTotalKb, isNot(1024));
@@ -325,8 +323,7 @@ void main() {
     }
     final grown = await f.node.getBatteryAndStorage();
     expect(f.node.storageUsedBytes, greaterThan(0));
-    expect(grown.storageUsedKb,
-        storageKibForBytes(f.node.storageUsedBytes));
+    expect(grown.storageUsedKb, storageKibForBytes(f.node.storageUsedBytes));
     expect(grown.storageUsedKb, greaterThan(initial.storageUsedKb));
     expect(grown.millivolts, 3700);
     expect(f.link.batteryReads, 1, reason: 'storage refresh is virtual only');
@@ -335,8 +332,7 @@ void main() {
       await f.node.removeContact(key);
     }
     final shrunk = await f.node.getBatteryAndStorage();
-    expect(shrunk.storageUsedKb,
-        storageKibForBytes(f.node.storageUsedBytes));
+    expect(shrunk.storageUsedKb, storageKibForBytes(f.node.storageUsedBytes));
     expect(shrunk.storageUsedKb, lessThan(grown.storageUsedKb));
     expect(shrunk.storageTotalKb, virtualStorageTotalKb);
     expect(shrunk.millivolts, 3700);

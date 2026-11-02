@@ -145,8 +145,8 @@ void main() {
   });
 
   test('every pinned R1 command has an explicit server dispatch case', () {
-    final source = File('../companion_server/lib/src/server.dart')
-        .readAsStringSync();
+    final source =
+        File('../companion_server/lib/src/server.dart').readAsStringSync();
     for (final name in _pinnedCommandIds.values) {
       expect(source, contains('case $name:'),
           reason: 'server dispatch is missing $name');

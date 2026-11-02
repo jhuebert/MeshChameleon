@@ -45,7 +45,8 @@ void main() {
       },
       queue: [
         QueuedMessage(senderKey: peer.publicKey, text: 'dm'),
-        QueuedMessage(senderKey: Uint8List(32), text: 'channel', isChannel: true),
+        QueuedMessage(
+            senderKey: Uint8List(32), text: 'channel', isChannel: true),
       ],
     ));
     final node = await makeNode(store: store);

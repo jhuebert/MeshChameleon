@@ -55,7 +55,9 @@ Future<BluetoothDevice> _scanFor(String needle) async {
     timeout: const Duration(seconds: 20),
     androidScanMode: AndroidScanMode.lowLatency,
   );
-  await FlutterBluePlus.isScanning.where((s) => s == false).first
+  await FlutterBluePlus.isScanning
+      .where((s) => s == false)
+      .first
       .timeout(const Duration(seconds: 30), onTimeout: () => false);
   await sub.cancel();
 
@@ -247,8 +249,8 @@ void main() {
 /// Adds [pubkey] to a network companion's contact table (so it can decrypt a
 /// DM from us without us broadcasting an advert).
 Future<void> _registerContact(String host, int port, Uint8List pubkey) async {
-  final socket = await Socket.connect(host, port,
-      timeout: const Duration(seconds: 10));
+  final socket =
+      await Socket.connect(host, port, timeout: const Duration(seconds: 10));
   socket.setOption(SocketOption.tcpNoDelay, true);
   final client = _FramedClient(socket);
   try {
@@ -306,10 +308,9 @@ class _FramedClient {
   Future<bool> awaitCode(int code, Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      final frame = await _frames
-          .next()
-          .timeout(deadline.difference(DateTime.now()),
-              onTimeout: () => Uint8List(0));
+      final frame = await _frames.next().timeout(
+          deadline.difference(DateTime.now()),
+          onTimeout: () => Uint8List(0));
       if (frame.isEmpty) return false;
       if (frame[0] == code) return true;
     }

@@ -121,7 +121,15 @@ class RecordingSink implements CompanionPushSink {
   @override
   void pushTraceData(int pathLen, int flags, int tag, int authCode,
       Uint8List pathHashes, Uint8List pathSnrs, int finalSnrByte) {
-    traces.add([pathLen, flags, tag, authCode, ...pathHashes, ...pathSnrs, finalSnrByte]);
+    traces.add([
+      pathLen,
+      flags,
+      tag,
+      authCode,
+      ...pathHashes,
+      ...pathSnrs,
+      finalSnrByte
+    ]);
   }
 }
 
@@ -155,11 +163,9 @@ class _FakeScheduler implements MeshScheduler {
 
   int get pending => jobs.where((j) => !j.done && !j.cancelled).length;
 
-  List<int> get pendingTimes => jobs
-      .where((j) => !j.done && !j.cancelled)
-      .map((j) => j.at)
-      .toList()
-    ..sort();
+  List<int> get pendingTimes =>
+      jobs.where((j) => !j.done && !j.cancelled).map((j) => j.at).toList()
+        ..sort();
 
   @override
   CancelScheduled schedule(Duration delay, void Function() action) {
@@ -269,7 +275,8 @@ void main() {
     expect(bobSink.newAdverts, isEmpty);
   });
 
-  test('repeated advert from a known contact pushes PUSH_CODE_ADVERT', () async {
+  test('repeated advert from a known contact pushes PUSH_CODE_ADVERT',
+      () async {
     await alice.advertise();
     await pump();
     await alice.advertise();
@@ -302,8 +309,7 @@ void main() {
     expect(aliceSink.confirmed.first, result.expectedAck);
   });
 
-  test('direct text uses the client timestamp and attempt verbatim',
-      () async {
+  test('direct text uses the client timestamp and attempt verbatim', () async {
     await alice.addUpdateContact(Contact(
       publicKey: bob.identity.publicKey,
       name: 'bob',
@@ -388,7 +394,8 @@ void main() {
     await bob.advertise();
     await pump();
 
-    final result = await alice.sendTextMessage(bob.identity.publicKey, 'dedup me');
+    final result =
+        await alice.sendTextMessage(bob.identity.publicKey, 'dedup me');
     expect(result.success, isTrue);
     await pumpAck();
     final raw = (alice.link as FakeDeviceLink).transmitted.last;
@@ -549,7 +556,10 @@ void main() {
     final tag = result.expectedAck!;
     final body = Uint8List.fromList([
       ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
-      9, 8, 7, 6,
+      9,
+      8,
+      7,
+      6,
     ]);
     (alice.link as FakeDeviceLink)
         .deliver(6.0, -70, (await _responsePacket(bob, alice, body)).writeTo());
@@ -662,8 +672,7 @@ void main() {
 
     // Channel RX accepts up to 167 application bytes; 168 is dropped.
     final bobChannel = bob.getChannel(0)!;
-    final rxMax =
-        Uint8List.fromList(List<int>.generate(167, (i) => i & 0xFF));
+    final rxMax = Uint8List.fromList(List<int>.generate(167, (i) => i & 0xFF));
     (bob.link as FakeDeviceLink)
         .deliver(6.0, -70, _groupDataPacket(bobChannel, 0x1234, rxMax));
     await pump();
@@ -838,8 +847,8 @@ void main() {
 
     // Bob sent a multipart ACK plus the plain ACK.
     expect(bobLink.transmitted.length - before, 2);
-    expect(Packet.readFrom(bobLink.transmitted.last)!.payloadType,
-        payloadTypeAck);
+    expect(
+        Packet.readFrom(bobLink.transmitted.last)!.payloadType, payloadTypeAck);
     expect(Packet.readFrom(bobLink.transmitted[before])!.payloadType,
         payloadTypeMultipart);
 
@@ -856,7 +865,8 @@ void main() {
     expect(bobSink.controlData.first, [0, 0x80, 1, 2, 3]);
   });
 
-  test('setRadioParams updates prefs and forwards to the device link', () async {
+  test('setRadioParams updates prefs and forwards to the device link',
+      () async {
     alice.setRadioParams(869000000, 125000, 11, 5);
     await pump();
     expect(alice.prefs.frequencyHz, 869000000);
@@ -876,7 +886,8 @@ void main() {
   test('a 64-byte (imported) identity can advertise and message', () async {
     // Simulate import-from-device: rebuild alice from the 64-byte expanded form
     // of its key (as IdentityStore persists and the device exports).
-    final imported = await LocalIdentity.fromMeshcore64(alice.identity.meshcore64);
+    final imported =
+        await LocalIdentity.fromMeshcore64(alice.identity.meshcore64);
     expect(imported.canSign, isTrue);
 
     final localBus = FakeRadioBus();
@@ -945,8 +956,8 @@ void main() {
     final def = Uint8List(16)..[0] = 1;
     await alice.setDefaultFloodScope('def', def);
 
-    Future<Packet> lastPacket() async => Packet.readFrom(
-        (alice.link as FakeDeviceLink).transmitted.last)!;
+    Future<Packet> lastPacket() async =>
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
 
     // No override: the default scope applies to channel sends.
     await alice.sendChannelMessage(0, 'hi');
@@ -1057,8 +1068,7 @@ void main() {
     relaunched.stop();
   });
 
-  test('other_params_preserve_all_omitted_fields_and_pack_telemetry',
-      () async {
+  test('other_params_preserve_all_omitted_fields_and_pack_telemetry', () async {
     await alice.setOtherParams(
       manualAddContacts: 1,
       telemetryModes: 0x26,
@@ -1107,8 +1117,7 @@ void main() {
     expect(alice.getCustomVars(), isEmpty);
   });
 
-  test('advert_and_self_export_hide_or_include_virtual_gps_together',
-      () async {
+  test('advert_and_self_export_hide_or_include_virtual_gps_together', () async {
     await alice.setAdvertLatLon(12.5, -3.25);
     await alice.setOtherParams(
       manualAddContacts: 0,
@@ -1116,8 +1125,8 @@ void main() {
     );
     await alice.advertise();
     await pump();
-    var packet = Packet.readFrom(
-        (alice.link as FakeDeviceLink).transmitted.last)!;
+    var packet =
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
     var decoded = PacketBuilder.decodeAdvertData(
         packet.payload.sublist(pubKeySize + timestampSize + signatureSize));
     expect(decoded.lat, 0.0);
@@ -1214,7 +1223,8 @@ void main() {
     );
   });
 
-  test('virtual_time_change_does_not_expire_monotonic_dedup_or_change_host_radio_clock',
+  test(
+      'virtual_time_change_does_not_expire_monotonic_dedup_or_change_host_radio_clock',
       () async {
     final bus = FakeRadioBus();
     final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 33);
@@ -1297,8 +1307,8 @@ void main() {
     await bob.advertise();
     await pump();
 
-    final result = await alice
-        .sendAnonReq(bob.identity.publicKey, Uint8List.fromList([1, 0]));
+    final result = await alice.sendAnonReq(
+        bob.identity.publicKey, Uint8List.fromList([1, 0]));
     expect(result.success, isTrue);
     final tag = result.expectedAck!;
     await pump();
@@ -1482,7 +1492,8 @@ void main() {
     await alice.setPathHashMode(2);
     await alice.sendChannelMessage(0, 'three-byte path mode');
 
-    final packet = Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
+    final packet =
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
     expect(packet.pathHashSize, 3);
     expect(packet.pathHashCount, 0);
 
@@ -1763,8 +1774,8 @@ void main() {
 
       await expectLater(
         node.setRadioParams(869000000, 125000, 11, 5),
-        throwsA(isA<CompanionOperationError>()
-            .having((e) => e.code, 'code', code)),
+        throwsA(
+            isA<CompanionOperationError>().having((e) => e.code, 'code', code)),
       );
       expect(node.prefs.frequencyHz, before);
       expect(link.calls.where((c) => c == 'setRadioParams').length, 1);
@@ -2011,7 +2022,8 @@ void main() {
   });
 
   test('sendTracePathRaw transmits a trace packet', () async {
-    final ok = await alice.sendTracePathRaw(0x1234, 0, 0, Uint8List.fromList([1, 2]));
+    final ok =
+        await alice.sendTracePathRaw(0x1234, 0, 0, Uint8List.fromList([1, 2]));
     expect(ok, isTrue);
     final sent = (alice.link as FakeDeviceLink).transmitted.last;
     final packet = Packet.readFrom(sent)!;
@@ -2035,7 +2047,8 @@ void main() {
     await pump();
 
     expect(aliceSink.traces.length, 1);
-    expect(aliceSink.traces.first, [2, 0, 0x1111, 0, 0x01, 0x02, 0x20, 0x30, 24]);
+    expect(
+        aliceSink.traces.first, [2, 0, 0x1111, 0, 0x01, 0x02, 0x20, 0x30, 24]);
   });
 
   test('a partial trace packet is ignored (proxy does not forward traces)',
@@ -2079,7 +2092,13 @@ void main() {
   test('manual1_uses_type_mask', () async {
     bob.prefs.manualAddContacts = 1;
     bob.prefs.autoaddConfig = autoAddChat | autoAddRoom;
-    final types = <int>[advTypeChat, advTypeRepeater, advTypeRoom, advTypeSensor, 0];
+    final types = <int>[
+      advTypeChat,
+      advTypeRepeater,
+      advTypeRoom,
+      advTypeSensor,
+      0
+    ];
     for (var i = 0; i < types.length; i++) {
       final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 110 + i);
       final advert = await _makeAdvert(
@@ -2498,8 +2517,8 @@ void main() {
     var before = (bob.link as FakeDeviceLink).transmitted.length;
     var result = await bob.sendTextMessage(key, 'zero');
     expect(result.success, isTrue);
-    var sent = Packet.readFrom(
-        (bob.link as FakeDeviceLink).transmitted[before])!;
+    var sent =
+        Packet.readFrom((bob.link as FakeDeviceLink).transmitted[before])!;
     expect(sent.routeType, routeTypeDirect);
     expect(sent.pathLenByte, 0);
     expect(sent.path, isEmpty);
@@ -2626,8 +2645,7 @@ void main() {
       b.prefs.multiAcks = preference;
       scheduler.resetJobs();
       bLink.transmitted.clear();
-      await a.sendTextMessage(
-          b.identity.publicKey, 'multi $preference');
+      await a.sendTextMessage(b.identity.publicKey, 'multi $preference');
       await pump();
       scheduler.advance(const Duration(milliseconds: 200));
       await pump();
@@ -2692,7 +2710,8 @@ void main() {
     scheduler.advance(const Duration(milliseconds: 1));
     await pump();
     expect(bLink.transmitted, hasLength(2));
-    expect(Packet.readFrom(bLink.transmitted.last)!.payloadType, payloadTypeAck);
+    expect(
+        Packet.readFrom(bLink.transmitted.last)!.payloadType, payloadTypeAck);
   });
 
   test('plain_ack_has_hash4_extended_attempt_and_entropy_signed_has4',
@@ -2779,13 +2798,11 @@ void main() {
       outPathLen: -1,
     ));
 
-    final result =
-        await a.sendTextMessage(peer.publicKey, 'x' * 150);
+    final result = await a.sendTextMessage(peer.publicKey, 'x' * 150);
     expect(result.isFlood, isTrue);
     final packet = Packet.readFrom(aLink.transmitted.last)!;
-    final cr = a.prefs.codingRate <= 4
-        ? a.prefs.codingRate + 4
-        : a.prefs.codingRate;
+    final cr =
+        a.prefs.codingRate <= 4 ? a.prefs.codingRate + 4 : a.prefs.codingRate;
     final airtimeMs = loraTimeOnAirMicros(
           payloadBytes: packet.rawLength,
           spreadingFactor: a.prefs.spreadingFactor,
@@ -2975,7 +2992,8 @@ void main() {
     expect(bLink.calls, isNot(contains('runCliCommand')));
   });
 
-  test('permitted_set_name_changes_virtual_only_and_replies_cli_data_after600ms',
+  test(
+      'permitted_set_name_changes_virtual_only_and_replies_cli_data_after600ms',
       () async {
     final (a, b, _, bLink, scheduler) = await _schedulerPair();
     await b.addUpdateContact(Contact(
@@ -3068,7 +3086,8 @@ void main() {
     bob.stop();
   });
 
-  test('remote_radio_reboot_wifi_password_are_denied_no_device_calls', () async {
+  test('remote_radio_reboot_wifi_password_are_denied_no_device_calls',
+      () async {
     final (a, b, _, bLink, scheduler) = await _schedulerPair();
     await b.addUpdateContact(Contact(
       publicKey: a.identity.publicKey,
@@ -3326,7 +3345,8 @@ void main() {
     );
     bLink.deliver(6, -70, first.writeTo());
     await pump();
-    await b.replaceIdentity(await LocalIdentity.fromSeed(Uint8List(32)..[0] = 77));
+    await b
+        .replaceIdentity(await LocalIdentity.fromSeed(Uint8List(32)..[0] = 77));
     scheduler.advance(const Duration(milliseconds: 600));
     await pump();
     expect(bLink.transmitted, isEmpty);
@@ -3347,7 +3367,6 @@ void main() {
   });
 }
 
-
 Future<LocalIdentity> _identityWithHashByte(int byte, int start) async {
   var n = start;
   while (true) {
@@ -3361,7 +3380,8 @@ Future<LocalIdentity> _identityWithHashByte(int byte, int start) async {
 Future<Packet> _responsePacket(
     MeshNode from, MeshNode to, Uint8List body) async {
   final secret = await from.identity.sharedSecret(to.identity.publicKey);
-  final cipher = CryptoUtils.encryptThenMac(secret.sublist(0, 16), secret, body);
+  final cipher =
+      CryptoUtils.encryptThenMac(secret.sublist(0, 16), secret, body);
   final payload = Uint8List.fromList([
     to.identity.publicKey[0],
     from.identity.publicKey[0],
@@ -3374,8 +3394,7 @@ Future<Packet> _responsePacket(
 
 /// Build a flooded `PAYLOAD_TYPE_GRP_DATA` packet directly (bypassing the
 /// 165-byte TX validator) so receive-side limits can be exercised.
-Uint8List _groupDataPacket(
-    Channel channel, int dataType, Uint8List data) {
+Uint8List _groupDataPacket(Channel channel, int dataType, Uint8List data) {
   final secret = Uint8List(32);
   secret.setRange(0, channel.secret.length.clamp(0, 32), channel.secret);
   final channelHash = CryptoUtils.sha256(secret.sublist(0, 16))[0];
@@ -3438,8 +3457,7 @@ Future<Packet> _signedAdvert(
   required int timestamp,
 }) async {
   final pubkey = identity.publicKey;
-  final timestampBytes =
-      (BufferWriter()..writeUInt32Le(timestamp)).toBytes();
+  final timestampBytes = (BufferWriter()..writeUInt32Le(timestamp)).toBytes();
   final body = Uint8List.fromList([...pubkey, ...timestampBytes, ...appdata]);
   final signature = await identity.sign(body);
   return Packet()

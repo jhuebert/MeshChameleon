@@ -131,11 +131,13 @@ class NodeState {
         'prefs': _prefsToJson(prefs),
         'contacts': contacts.map(_contactToJson).toList(),
         'channels': channels.entries
-            .map((e) => <String, Object?>{'index': e.key, ..._channelToJson(e.value)})
+            .map((e) =>
+                <String, Object?>{'index': e.key, ..._channelToJson(e.value)})
             .toList(),
         'queue': queue.map(_queuedMessageToJson).toList(),
         'advert_paths': advertPaths.entries
-            .map((e) => <String, Object?>{'key': e.key, ..._advertPathToJson(e.value)})
+            .map((e) =>
+                <String, Object?>{'key': e.key, ..._advertPathToJson(e.value)})
             .toList(),
         'custom_settings': customSettings,
       };
@@ -223,9 +225,8 @@ class JsonNodeStore implements NodeStore {
     final canonical = jsonEncode(json);
     final bytes = utf8.encode(canonical).length;
     _checkVirtualQuota(bytes, _lastBytes, maxBytes);
-    final encoded = pretty
-        ? const JsonEncoder.withIndent('  ').convert(json)
-        : canonical;
+    final encoded =
+        pretty ? const JsonEncoder.withIndent('  ').convert(json) : canonical;
 
     final write = _tail.then(
       (_) => _write(encoded),
@@ -333,8 +334,7 @@ NodePrefs _prefsFromJson(Map<String, Object?> j) {
     manualAddContacts:
         _int(j['manual_add_contacts'], defaults.manualAddContacts),
     autoaddConfig: _int(j['autoadd_config'], defaults.autoaddConfig),
-    autoaddMaxHops:
-        _int(j['autoadd_max_hops'], defaults.autoaddMaxHops),
+    autoaddMaxHops: _int(j['autoadd_max_hops'], defaults.autoaddMaxHops),
     timezoneOffsetHours:
         _int(j['timezone_offset_hours'], defaults.timezoneOffsetHours),
     clientRepeat: _int(j['client_repeat'], defaults.clientRepeat),
@@ -342,9 +342,8 @@ NodePrefs _prefsFromJson(Map<String, Object?> j) {
     rxDelayBaseMs: _int(j['rx_delay_base_ms'], defaults.rxDelayBaseMs),
     airtimeFactorMs: _int(j['airtime_factor_ms'], defaults.airtimeFactorMs),
     defaultScopeName: _str(j['default_scope_name'], defaults.defaultScopeName),
-    defaultScopeKey: j['default_scope_key'] == null
-        ? null
-        : _bytes(j['default_scope_key']),
+    defaultScopeKey:
+        j['default_scope_key'] == null ? null : _bytes(j['default_scope_key']),
   );
 }
 

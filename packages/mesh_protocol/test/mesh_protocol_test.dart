@@ -190,7 +190,8 @@ void main() {
 
     test('round trip with transport codes and path', () {
       final p = Packet()
-        ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeTransportFlood)
+        ..header =
+            Packet.createHeader(payloadTypeTxtMsg, routeTypeTransportFlood)
         ..transportCode0 = 0x1122
         ..transportCode1 = 0x3344
         ..setPath([0xAA, 0xBB])
@@ -243,7 +244,8 @@ void main() {
   group('CryptoUtils', () {
     test('AES-ECB encrypt/decrypt round trips with padding', () {
       final key = Uint8List.fromList(List.generate(16, (i) => i));
-      final plaintext = Uint8List.fromList(List.generate(30, (i) => i * 3 % 256));
+      final plaintext =
+          Uint8List.fromList(List.generate(30, (i) => i * 3 % 256));
       final cipher = CryptoUtils.aesEcbEncrypt(key, plaintext);
       expect(cipher.length, 32); // padded to block boundary
       expect(CryptoUtils.aesEcbDecrypt(key, cipher).sublist(0, 30), plaintext);
@@ -282,7 +284,8 @@ void main() {
       final sig = await a.sign(message);
       expect(sig.length, 64);
       expect(await LocalIdentity.verify(message, sig, b.publicKey), isTrue);
-      expect(await LocalIdentity.verify(Uint8List.fromList([9]), sig, b.publicKey),
+      expect(
+          await LocalIdentity.verify(Uint8List.fromList([9]), sig, b.publicKey),
           isFalse);
     });
 
@@ -345,8 +348,7 @@ void main() {
       expect(await LocalIdentity.validateMeshcore64(privateKey), isTrue);
 
       final seeded = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 7);
-      expect(await LocalIdentity.validateMeshcore64(seeded.meshcore64),
-          isTrue);
+      expect(await LocalIdentity.validateMeshcore64(seeded.meshcore64), isTrue);
 
       expect(await LocalIdentity.validateMeshcore64(Uint8List(32)), isFalse);
       expect(await LocalIdentity.validateMeshcore64(Uint8List(64)), isFalse);

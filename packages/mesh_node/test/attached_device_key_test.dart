@@ -36,7 +36,8 @@ void main() {
     }
 
     await rejects(node.sendTextMessage(device.publicKey, 'hello'));
-    await rejects(node.sendBinaryReq(device.publicKey, Uint8List.fromList([1])));
+    await rejects(
+        node.sendBinaryReq(device.publicKey, Uint8List.fromList([1])));
     await rejects(node.sendAnonReq(device.publicKey, Uint8List.fromList([1])));
     await rejects(node.sendTelemetryRequest(device.publicKey));
     expect(link.transmitted, hasLength(before));

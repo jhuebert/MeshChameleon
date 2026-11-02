@@ -393,8 +393,7 @@ class TestBridge extends CompanionBridge {
     sentTextAttempt = attempt;
     sentTextTimestamp = timestamp;
     return sentTextResult ??
-        const SentResult(
-            success: true, expectedAck: 0x1234, timeoutMs: 5000);
+        const SentResult(success: true, expectedAck: 0x1234, timeoutMs: 5000);
   }
 
   @override
@@ -2151,7 +2150,8 @@ void main() {
         // A 32-byte channel secret is clamped to the 16-byte wire field.
         expect(frame.sublist(34, 50), psk.sublist(0, 16));
       } else if (i == 2) {
-        expect(frame.sublist(34, 50), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        expect(frame.sublist(34, 50),
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
       } else {
         expect(frame.sublist(2, 34), everyElement(0));
         expect(frame.sublist(34, 50), everyElement(0));
@@ -2204,8 +2204,7 @@ void main() {
     client.send([cmdSetChannel, 0, 1, 2]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
-    bridge.setChannelError =
-        const CompanionOperationError(errCodeFileIoError);
+    bridge.setChannelError = const CompanionOperationError(errCodeFileIoError);
     client.send((BufferWriter()
           ..writeByte(cmdSetChannel)
           ..writeByte(7)
@@ -2424,8 +2423,7 @@ void main() {
     expect(v3[0], respCodeContactMsgRecvV3);
     expect(v3.sublist(4, 10), [1, 2, 0, 0, 0, 0]);
 
-    bridge.syncNextError =
-        const CompanionOperationError(errCodeTableFull);
+    bridge.syncNextError = const CompanionOperationError(errCodeTableFull);
     client.send([cmdSyncNextMessage]);
     expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
   });
@@ -2463,8 +2461,7 @@ void main() {
     expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
 
     bridge.exportKeyOverride = null;
-    bridge.exportKeyError =
-        const CompanionOperationError(errCodeFileIoError);
+    bridge.exportKeyError = const CompanionOperationError(errCodeFileIoError);
     client.send([cmdExportPrivateKey]);
     expect(await client.frames.next(), [respCodeErr, errCodeFileIoError]);
 
@@ -2606,14 +2603,31 @@ void main() {
 
   test('RUN_CLI_COMMAND maps every bridge error kind', () async {
     final cases = <(CompanionOperationError, String)>[
-      (const CompanionOperationError(errCodeUnsupportedCmd), 'Error: unsupported'),
+      (
+        const CompanionOperationError(errCodeUnsupportedCmd),
+        'Error: unsupported'
+      ),
       (const CompanionOperationError(errCodeNotFound), 'Error: unsupported'),
-      (const CompanionOperationError(errCodeTableFull), 'Error: storage failure'),
-      (const CompanionOperationError(errCodeBadState), 'Error: device unavailable'),
-      (const CompanionOperationError(errCodeFileIoError), 'Error: storage failure'),
-      (const CompanionOperationError(errCodeIllegalArg), 'Error: illegal argument'),
-      (const CompanionOperationError(respCodeDisabled, disabled: true),
-          'Error: disabled'),
+      (
+        const CompanionOperationError(errCodeTableFull),
+        'Error: storage failure'
+      ),
+      (
+        const CompanionOperationError(errCodeBadState),
+        'Error: device unavailable'
+      ),
+      (
+        const CompanionOperationError(errCodeFileIoError),
+        'Error: storage failure'
+      ),
+      (
+        const CompanionOperationError(errCodeIllegalArg),
+        'Error: illegal argument'
+      ),
+      (
+        const CompanionOperationError(respCodeDisabled, disabled: true),
+        'Error: disabled'
+      ),
     ];
     for (final (error, expected) in cases) {
       bridge.cliError = error;
@@ -2646,8 +2660,7 @@ void main() {
     client.send([cmdSetCustomVar, ...utf8Bytes(':value')]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
-    bridge.customVarError =
-        const CompanionOperationError(errCodeTableFull);
+    bridge.customVarError = const CompanionOperationError(errCodeTableFull);
     client.send([cmdSetCustomVar, ...utf8Bytes('key:value')]);
     expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
   });
@@ -2666,8 +2679,7 @@ void main() {
       () async {
     client.send([cmdSetOtherParams]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
-    bridge.otherParamsError =
-        const CompanionOperationError(errCodeBadState);
+    bridge.otherParamsError = const CompanionOperationError(errCodeBadState);
     client.send([cmdSetOtherParams, 1]);
     expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
 
@@ -2748,13 +2760,11 @@ void main() {
   });
 
   test('advert setters and the advert send map bridge failures', () async {
-    bridge.advertNameError =
-        const CompanionOperationError(errCodeIllegalArg);
+    bridge.advertNameError = const CompanionOperationError(errCodeIllegalArg);
     client.send([cmdSetAdvertName, ...utf8Bytes('name')]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
-    bridge.advertLatLonError =
-        const CompanionOperationError(errCodeBadState);
+    bridge.advertLatLonError = const CompanionOperationError(errCodeBadState);
     client.send((BufferWriter()
           ..writeByte(cmdSetAdvertLatLon)
           ..writeInt32Le(0)
@@ -3002,7 +3012,10 @@ void main() {
       pushCodeLoginSuccess,
       3,
       ...prefix,
-      0x44, 0x33, 0x22, 0x11,
+      0x44,
+      0x33,
+      0x22,
+      0x11,
       5,
       14,
     ]);
@@ -3014,11 +3027,12 @@ void main() {
     expect(await client.frames.next(), [pushCodeLoginFail, 0, ...prefix]);
 
     server.pushStatusResponse(prefix, Uint8List.fromList([9]));
-    expect(await client.frames.next(),
-        [pushCodeStatusResponse, 0, ...prefix, 9]);
+    expect(
+        await client.frames.next(), [pushCodeStatusResponse, 0, ...prefix, 9]);
 
     server.pushControlData(-1.0, -70, 2, Uint8List.fromList([1, 2]));
-    expect(await client.frames.next(), [pushCodeControlData, 252, 186, 2, 1, 2]);
+    expect(
+        await client.frames.next(), [pushCodeControlData, 252, 186, 2, 1, 2]);
   });
 
   test('empty commands and unexpected bridge errors answer ERR illegal arg',
@@ -3035,10 +3049,10 @@ void main() {
     );
   });
 
-  test('operation errors preserve codes and disabled/uncertain flags', () async {
+  test('operation errors preserve codes and disabled/uncertain flags',
+      () async {
     final pubkey = Uint8List(32)..[0] = 9;
-    bridge.addContactError =
-        const CompanionOperationError(errCodeTableFull);
+    bridge.addContactError = const CompanionOperationError(errCodeTableFull);
     client.send([cmdAddUpdateContact, ..._contactBody(pubkey)]);
     expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
 

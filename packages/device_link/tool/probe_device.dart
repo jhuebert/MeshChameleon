@@ -42,7 +42,8 @@ Future<void> main(List<String> args) async {
   stdout.writeln('DEVICE_INFO fw=${info.firmwareVerCode} '
       'maxContacts=${info.maxContacts} maxChannels=${info.maxChannels} '
       'clientRepeat=${info.clientRepeat} pathHashMode=${info.pathHashMode}');
-  stdout.writeln('  manufacturer="${info.manufacturer}" version="${info.version}"');
+  stdout.writeln(
+      '  manufacturer="${info.manufacturer}" version="${info.version}"');
 
   final self = await link.selfInfo();
   stdout.writeln('SELF_INFO name="${self.nodeName}" advType=${self.advType}');
@@ -51,7 +52,8 @@ Future<void> main(List<String> args) async {
       'cr=${self.radioParams.codingRate}');
   stdout.writeln('  txPower=${self.txPowerDbm} maxTxPower=${self.maxTxPower} '
       'lat=${self.latitude} lon=${self.longitude}');
-  stdout.writeln('  devicePubkey=${bytesToHex(self.publicKey)} (ignored by proxy)');
+  stdout.writeln(
+      '  devicePubkey=${bytesToHex(self.publicKey)} (ignored by proxy)');
 
   final battery = await link.battery();
   stdout.writeln('BATTERY ${battery?.millivolts}mV '
@@ -107,8 +109,7 @@ Future<Packet?> _transmitProbeGroupText(TcpDeviceLink link) async {
   final rng = Random.secure();
   final channel = Channel(
     name: _randomChannelName(rng),
-    secret: Uint8List.fromList(
-        List<int>.generate(16, (_) => rng.nextInt(256))),
+    secret: Uint8List.fromList(List<int>.generate(16, (_) => rng.nextInt(256))),
   );
   final packet = PacketBuilder.createGroupText(
     channel: channel,

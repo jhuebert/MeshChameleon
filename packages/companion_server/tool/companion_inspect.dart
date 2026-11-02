@@ -24,8 +24,8 @@ Future<void> main(List<String> args) async {
   final filter = args.length > 3 ? args[3] : '';
   final maxMessages = args.length > 4 ? int.parse(args[4]) : 50;
 
-  final socket = await Socket.connect(host, port,
-      timeout: const Duration(seconds: 10));
+  final socket =
+      await Socket.connect(host, port, timeout: const Duration(seconds: 10));
   socket.setOption(SocketOption.tcpNoDelay, true);
 
   final codec = SerialFrameCodec.bidirectional();
@@ -61,8 +61,18 @@ Future<void> main(List<String> args) async {
         'maxContacts=${deviceInfo[2] * 2} maxChannels=$maxChannels');
 
     // CMD_APP_START needs len>=8 (6 reserved bytes then trailing app name).
-    send([cmdAppStart, appProtocolVersion, 0, 0, 0, 0, 0, 0,
-      ...'CompanionInspect'.codeUnits, 0]);
+    send([
+      cmdAppStart,
+      appProtocolVersion,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      ...'CompanionInspect'.codeUnits,
+      0
+    ]);
     var self = await nextDefault();
     var guard = 0;
     while (self.isNotEmpty &&
@@ -81,8 +91,8 @@ Future<void> main(List<String> args) async {
     final pubkey = self.sublist(4, 36);
     final freqKhz =
         ByteData.sublistView(self, 48, 52).getUint32(0, Endian.little);
-    final name = String.fromCharCodes(
-        self.sublist(58).takeWhile((b) => b != 0));
+    final name =
+        String.fromCharCodes(self.sublist(58).takeWhile((b) => b != 0));
     stdout.writeln('SELF_INFO name="$name" pubkey=${bytesToHex(pubkey)} '
         'freq=${freqKhz * 1000}Hz');
 
@@ -116,8 +126,9 @@ Future<void> _dumpChannels(
       continue;
     }
     final idx = frame[1];
-    final name = String.fromCharCodes(
-        frame.sublist(2, 34).takeWhile((b) => b != 0)).trim();
+    final name =
+        String.fromCharCodes(frame.sublist(2, 34).takeWhile((b) => b != 0))
+            .trim();
     final secret = frame.sublist(34, 50);
     final hash = CryptoUtils.sha256(Uint8List.fromList(secret))[0];
     stdout.writeln('  [$idx] name="$name" psk=${bytesToHex(secret)} '
@@ -150,9 +161,9 @@ Future<void> _dumpContacts(
     final flags = c[34];
     final pathLen = c[35];
     final nameStart = 36 + maxPathSize;
-    final name = String.fromCharCodes(
-        c.sublist(nameStart, nameStart + maxNameSize)
-            .takeWhile((b) => b != 0)).trim();
+    final name = String.fromCharCodes(c
+        .sublist(nameStart, nameStart + maxNameSize)
+        .takeWhile((b) => b != 0)).trim();
     stdout.writeln('  ${bytesToHex(pubkey.sublist(0, 6))} "$name" '
         'advType=$advType flags=0x${flags.toRadixString(16)} pathLen=$pathLen');
   }

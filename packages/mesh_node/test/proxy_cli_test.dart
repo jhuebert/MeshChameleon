@@ -133,8 +133,7 @@ void main() {
     final socket = await Socket.connect('127.0.0.1', first.port!);
     final client = _Client(socket);
     addTearDown(client.close);
-    final replacement =
-        await LocalIdentity.fromSeed(Uint8List(32)..[0] = 42);
+    final replacement = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 42);
     client.send([cmdImportPrivateKey, ...replacement.meshcore64]);
     expect(await client.next(), [respCodeOk]);
     expect(first.node.identity.publicKey, replacement.publicKey);
@@ -142,8 +141,7 @@ void main() {
     await client.close();
     await first.close();
 
-    expect(await written.readAsString(),
-        bytesToHex(replacement.meshcore64));
+    expect(await written.readAsString(), bytesToHex(replacement.meshcore64));
     expect((await written.stat()).mode & 0x1FF, 0x180,
         reason: 'atomic replacement preserves mode 0600');
 
@@ -161,8 +159,7 @@ void main() {
     final client = _Client(socket);
     addTearDown(client.close);
 
-    final replacement =
-        await LocalIdentity.fromSeed(Uint8List(32)..[0] = 43);
+    final replacement = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 43);
     client.send([cmdImportPrivateKey, ...replacement.meshcore64]);
     expect(await client.next(), [respCodeOk]);
     expect(handle.node.identity.publicKey, replacement.publicKey);

@@ -355,7 +355,8 @@ void main() {
     expect(locWithFlag!.contains(0x88), isTrue);
   });
 
-  test('incoming_telem_reply_uses_virtual_key_coords_and_fresh_physical_voltage',
+  test(
+      'incoming_telem_reply_uses_virtual_key_coords_and_fresh_physical_voltage',
       () async {
     final alice = await _identity(12);
     final bob = await _identity(13);
@@ -410,9 +411,7 @@ void main() {
     expect(link.calls, contains('battery'));
     expect(
       link.calls.where((c) =>
-          c == 'setRadioParams' ||
-          c == 'setTxPower' ||
-          c == 'setTuningParams'),
+          c == 'setRadioParams' || c == 'setTxPower' || c == 'setTuningParams'),
       isEmpty,
     );
   });
@@ -515,8 +514,14 @@ void main() {
     addTearDown(node.stop);
     await _addContact(node, alice);
     const tag = 0x11223344;
-    final body = [tag & 0xFF, (tag >> 8) & 0xFF, (tag >> 16) & 0xFF,
-      (tag >> 24) & 0xFF, 0xAA, 0xBB];
+    final body = [
+      tag & 0xFF,
+      (tag >> 8) & 0xFF,
+      (tag >> 16) & 0xFF,
+      (tag >> 24) & 0xFF,
+      0xAA,
+      0xBB
+    ];
     final response = await _responsePacket(from: alice, to: bob, body: body);
     link.deliver(6, -70, response.writeTo());
     await pump();
@@ -563,8 +568,8 @@ void main() {
     ];
     for (final data in pushes) {
       final body = BufferWriter()
-        ..writeUInt32Le(data[0] | (data[1] << 8) | (data[2] << 16) |
-            (data[3] << 24))
+        ..writeUInt32Le(
+            data[0] | (data[1] << 8) | (data[2] << 16) | (data[3] << 24))
         ..writeBytes(data.sublist(4));
       final response =
           await _responsePacket(from: alice, to: bob, body: body.toBytes());
@@ -586,11 +591,31 @@ void main() {
     await _addContact(node, alice);
 
     final subscribe = Uint8List.fromList([
-      0x08, 0x78, 0x56, 0x34, 0x12, 0x10, 0x00, 0x00, 0x03, 0x01, 0x02,
+      0x08,
+      0x78,
+      0x56,
+      0x34,
+      0x12,
+      0x10,
+      0x00,
+      0x00,
+      0x03,
+      0x01,
+      0x02,
       0x03,
     ]);
     final unsubscribe = Uint8List.fromList([
-      0x09, 0x78, 0x56, 0x34, 0x12, 0x10, 0x00, 0x00, 0x03, 0x01, 0x02,
+      0x09,
+      0x78,
+      0x56,
+      0x34,
+      0x12,
+      0x10,
+      0x00,
+      0x00,
+      0x03,
+      0x01,
+      0x02,
       0x03,
     ]);
     for (final request in [subscribe, unsubscribe]) {
@@ -689,7 +714,8 @@ void main() {
     aLink.transmitted.clear();
     bLink.transmitted.clear();
 
-    expect(await a.sendControlData(Uint8List.fromList([0x80, 0x01, 0x02])), isTrue);
+    expect(await a.sendControlData(Uint8List.fromList([0x80, 0x01, 0x02])),
+        isTrue);
     await pump();
     expect(bSink.control, [
       [0, 0x80, 1, 2],
@@ -736,7 +762,8 @@ void main() {
     expect(link.transmitted.single, packet.writeTo());
   });
 
-  test('unconsumed_direct_route_or_flood_control_is_logged_not_delivered_or_executed',
+  test(
+      'unconsumed_direct_route_or_flood_control_is_logged_not_delivered_or_executed',
       () async {
     final alice = await _identity(34);
     final bob = await _identity(35);
@@ -749,7 +776,10 @@ void main() {
       to: bob,
       payloadType: payloadTypeTxtMsg,
       body: [
-        ...(BufferWriter()..writeUInt32Le(7)..writeByte(0)).toBytes(),
+        ...(BufferWriter()
+              ..writeUInt32Le(7)
+              ..writeByte(0))
+            .toBytes(),
         ...'in transit'.codeUnits,
         0,
       ],
@@ -769,8 +799,7 @@ void main() {
     expect(sink.control, isEmpty);
     expect(sink.rawFrames, hasLength(2));
 
-    final rawCustom = PacketBuilder.createRawCustom([1, 2])
-      ..setPath([0xBB], 1);
+    final rawCustom = PacketBuilder.createRawCustom([1, 2])..setPath([0xBB], 1);
     link.deliver(6, -70, rawCustom.writeTo());
     await pump();
     expect(sink.rawData, isEmpty);

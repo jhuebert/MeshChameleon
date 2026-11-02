@@ -157,8 +157,8 @@ void main() {
 
     final active = manager.summaries.first;
     expect(active.id, first);
-    expect(manager.summaries.map((s) => s.id),
-        containsAll([alpha.id, beta.id]));
+    expect(
+        manager.summaries.map((s) => s.id), containsAll([alpha.id, beta.id]));
   });
 
   test('activation_switches_bridge_to_the_existing_live_node', () async {

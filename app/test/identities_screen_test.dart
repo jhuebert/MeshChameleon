@@ -137,8 +137,8 @@ void main() {
     expect(betaIndex, greaterThan(alphaIndex));
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('1 channels · 1 contacts'), findsOneWidget);
-    expect(find.text('1 DMs queued · 1 channel messages queued'),
-        findsOneWidget);
+    expect(
+        find.text('1 DMs queued · 1 channel messages queued'), findsOneWidget);
     expect(find.textContaining(first), findsNothing);
   });
 
@@ -163,9 +163,13 @@ void main() {
 
     expect(find.text('Custom Node'), findsOneWidget);
     expect(app.identities, hasLength(3));
-    expect(app.activeIdentityId, isNot(
-      app.identities.firstWhere((summary) => summary.name == 'Custom Node').id,
-    ));
+    expect(
+        app.activeIdentityId,
+        isNot(
+          app.identities
+              .firstWhere((summary) => summary.name == 'Custom Node')
+              .id,
+        ));
   });
 
   testWidgets('create wizard limits names by UTF-8 bytes and shows a counter',
@@ -240,8 +244,8 @@ void main() {
 
     expect(find.byType(HomeScreen), findsOneWidget);
     expect(app.activeIdentityId, secondId);
-    expect(find.textContaining('#${app.activeIdentity!.prefixHex}'),
-        findsWidgets);
+    expect(
+        find.textContaining('#${app.activeIdentity!.prefixHex}'), findsWidgets);
   });
 
   testWidgets('delete is disabled for the active identity and clear is present',
@@ -400,8 +404,8 @@ void main() {
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
     await tester.pump();
     expect(find.text('No identities yet'), findsOneWidget);
-    expect(find.widgetWithText(FilledButton, 'Create identity'),
-        findsOneWidget);
+    expect(
+        find.widgetWithText(FilledButton, 'Create identity'), findsOneWidget);
 
     fake.busy = true;
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
@@ -429,7 +433,9 @@ void main() {
     await tester.pumpWidget(_wrapFake(fake, const IdentitiesScreen()));
     await tester.pump();
     expect(
-      tester.widget<FilledButton>(find.widgetWithText(FilledButton, 'Retry')).onPressed,
+      tester
+          .widget<FilledButton>(find.widgetWithText(FilledButton, 'Retry'))
+          .onPressed,
       isNull,
     );
   });
@@ -530,8 +536,8 @@ void main() {
     await tester.tap(find.text('Clear local data'));
     await tester.pumpAndSettle();
     expect(find.text('Clear local data?'), findsOneWidget);
-    expect(find.textContaining('The MeshCore app will reconnect'),
-        findsOneWidget);
+    expect(
+        find.textContaining('The MeshCore app will reconnect'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(fake.clearCalls, isEmpty);

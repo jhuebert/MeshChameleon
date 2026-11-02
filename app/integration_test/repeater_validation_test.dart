@@ -33,8 +33,7 @@ const _repeaterBandwidthHz =
     int.fromEnvironment('REPEATER_BW_HZ', defaultValue: 125000);
 const _repeaterSpreadingFactor =
     int.fromEnvironment('REPEATER_SF', defaultValue: 8);
-const _repeaterCodingRate =
-    int.fromEnvironment('REPEATER_CR', defaultValue: 5);
+const _repeaterCodingRate = int.fromEnvironment('REPEATER_CR', defaultValue: 5);
 
 Future<BluetoothDevice> _scanFor(String needle) async {
   final found = <String, ScanResult>{};
@@ -56,8 +55,8 @@ Future<BluetoothDevice> _scanFor(String needle) async {
   await sub.cancel();
   final names = found.keys.toList();
   debugPrint('BLE scan found: $names');
-  final match =
-      found.entries.where((e) => e.key.toLowerCase().contains(needle.toLowerCase()));
+  final match = found.entries
+      .where((e) => e.key.toLowerCase().contains(needle.toLowerCase()));
   if (match.isEmpty) {
     if (found.length == 1) return found.values.first.device;
     throw StateError('No match for "$needle"; saw $names');
@@ -73,13 +72,15 @@ void main() {
       fail('Set BLE_NAME, REPEATER_PUBKEY_HEX, and REPEATER_PASSWORD.');
     }
     final device = await _scanFor(_bleName);
-    final link = BleDeviceLink(device: device, onLog: (m) => debugPrint('[ble] $m'));
+    final link =
+        BleDeviceLink(device: device, onLog: (m) => debugPrint('[ble] $m'));
     await link.connect();
     addTearDown(link.disconnect);
 
     final info = await link.deviceInfo();
     final orig = await link.radioParams();
-    debugPrint('device fw=${info.firmwareVerCode} orig freq=${orig.frequencyHz} '
+    debugPrint(
+        'device fw=${info.firmwareVerCode} orig freq=${orig.frequencyHz} '
         'bw=${orig.bandwidthHz} sf=${orig.spreadingFactor} cr=${orig.codingRate}');
 
     final identity = await LocalIdentity.generate();
@@ -102,7 +103,8 @@ void main() {
     await server.start();
     addTearDown(server.stop);
 
-    final client = _FramedClient(await Socket.connect('127.0.0.1', server.port!));
+    final client =
+        _FramedClient(await Socket.connect('127.0.0.1', server.port!));
     addTearDown(client.close);
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
@@ -134,23 +136,26 @@ void main() {
       // Login (ANON_REQ with the repeater admin password).
       client.send([cmdSendLogin, ...pubkey, ..._password.codeUnits, 0]);
       final loginReply = await client.next();
-      debugPrint('login reply code=${loginReply.isEmpty ? "none" : loginReply[0]}');
-      final loggedIn =
-          await client.awaitCode(pushCodeLoginSuccess, const Duration(seconds: 15));
+      debugPrint(
+          'login reply code=${loginReply.isEmpty ? "none" : loginReply[0]}');
+      final loggedIn = await client.awaitCode(
+          pushCodeLoginSuccess, const Duration(seconds: 15));
       debugPrint('LOGIN ${loggedIn ? "OK" : "no LOGIN_SUCCESS"}');
 
       // Status request.
       client.send([cmdSendStatusReq, ...pubkey]);
       final statusSent = await client.next();
-      debugPrint('status reply code=${statusSent.isEmpty ? "none" : statusSent[0]}');
-      final gotStatus =
-          await client.awaitCode(pushCodeStatusResponse, const Duration(seconds: 15));
+      debugPrint(
+          'status reply code=${statusSent.isEmpty ? "none" : statusSent[0]}');
+      final gotStatus = await client.awaitCode(
+          pushCodeStatusResponse, const Duration(seconds: 15));
       debugPrint('STATUS ${gotStatus ? "OK" : "no STATUS_RESPONSE"}');
 
       // Has-connection check on the keep-alive session.
       client.send([cmdHasConnection, ...pubkey]);
       final has = await client.next();
-      debugPrint('HAS_CONNECTION reply=${has.isEmpty ? "none" : has.sublist(0, has.length < 3 ? has.length : 3)}');
+      debugPrint(
+          'HAS_CONNECTION reply=${has.isEmpty ? "none" : has.sublist(0, has.length < 3 ? has.length : 3)}');
 
       // Binary request (CMD_SEND_BINARY_REQ 50) with REQ_TYPE_GET_STATUS.
       client.send([cmdSendBinaryReq, ...pubkey, reqTypeGetStatus]);
@@ -204,9 +209,9 @@ class _FramedClient {
   Future<bool> awaitCode(int code, Duration timeout) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      final frame = await _frames
-          .next()
-          .timeout(deadline.difference(DateTime.now()), onTimeout: () => Uint8List(0));
+      final frame = await _frames.next().timeout(
+          deadline.difference(DateTime.now()),
+          onTimeout: () => Uint8List(0));
       if (frame.isEmpty) return false;
       if (frame[0] == code) return true;
     }

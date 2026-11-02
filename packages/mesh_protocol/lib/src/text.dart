@@ -3,8 +3,7 @@ import 'dart:convert';
 /// Maximum advertised-name length in UTF-8 bytes.
 const int maxAdvertNameBytes = 31;
 
-bool _isControlRune(int rune) =>
-    rune < 0x20 || (rune >= 0x7F && rune <= 0x9F);
+bool _isControlRune(int rune) => rune < 0x20 || (rune >= 0x7F && rune <= 0x9F);
 
 /// Validate a name supplied as a Dart string.
 ///

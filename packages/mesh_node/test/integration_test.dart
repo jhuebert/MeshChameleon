@@ -83,7 +83,8 @@ void main() {
     final link = FakeDeviceLink();
     await link.connect();
     final store = InMemoryNodeStore();
-    final alice = MeshNode(identity: aliceId, link: link, store: store)..start();
+    final alice = MeshNode(identity: aliceId, link: link, store: store)
+      ..start();
     await alice.addUpdateContact(Contact(
       publicKey: bobId.publicKey,
       outPathLen: PathUtils.encodePathLen(2, 1),
@@ -125,7 +126,8 @@ void main() {
       expect(routedPacket.pathHashSize, 2);
       expect(routedPacket.path, [0xAA, 0xBB]);
 
-      expect((await command([cmdResetPath, ...bobId.publicKey]))[0], respCodeOk);
+      expect(
+          (await command([cmdResetPath, ...bobId.publicKey]))[0], respCodeOk);
       final flood = await command(directMessage('reset route'));
       expect(flood[0], respCodeSent);
       expect(flood[1], 1);

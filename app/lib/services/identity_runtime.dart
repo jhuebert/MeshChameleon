@@ -41,7 +41,6 @@ class IdentitySummary {
   String get prefixHex => bytesToHex(
         publicKey.sublist(0, publicKey.length < 4 ? publicKey.length : 4),
       ).toUpperCase();
-
 }
 
 /// Live objects for one identity while a device is attached.

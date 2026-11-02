@@ -149,7 +149,8 @@ void main() {
     expect(a.queuedDirectCount, 0, reason: 'sender is excluded from mirror');
     expect(a.link, isA<FakeDeviceLink>());
     expect((a.link as FakeDeviceLink).transmitted, hasLength(1));
-    expect(router.mirrored.single, (a.link as FakeDeviceLink).transmitted.single,
+    expect(
+        router.mirrored.single, (a.link as FakeDeviceLink).transmitted.single,
         reason: 'mirror copies keep the exact RF bytes');
 
     await Future<void>.delayed(const Duration(milliseconds: 260));
@@ -308,7 +309,8 @@ void main() {
 
     expect(sink.controlData, hasLength(1));
     expect(sink.rawData, hasLength(2),
-        reason: 'a local direct packet is final-hop even with a remaining path');
+        reason:
+            'a local direct packet is final-hop even with a remaining path');
     expect((a.link as FakeDeviceLink).transmitted, hasLength(3));
   });
 

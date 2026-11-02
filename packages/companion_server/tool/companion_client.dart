@@ -22,8 +22,8 @@ Future<void> main(List<String> args) async {
   final port = int.parse(args[1]);
 
   stdout.writeln('connecting $host:$port ...');
-  final socket = await Socket.connect(host, port,
-      timeout: const Duration(seconds: 10));
+  final socket =
+      await Socket.connect(host, port, timeout: const Duration(seconds: 10));
   socket.setOption(SocketOption.tcpNoDelay, true);
 
   final codec = SerialFrameCodec.bidirectional();
@@ -57,8 +57,18 @@ Future<void> main(List<String> args) async {
         'maxContacts=${deviceInfo[2] * 2} maxChannels=${deviceInfo[3]}');
 
     // CMD_APP_START needs len>=8 (6 reserved bytes then trailing app name).
-    send([cmdAppStart, appProtocolVersion, 0, 0, 0, 0, 0, 0,
-      ...'MeshCoreCLI'.codeUnits, 0]);
+    send([
+      cmdAppStart,
+      appProtocolVersion,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      ...'MeshCoreCLI'.codeUnits,
+      0
+    ]);
     final selfInfo = await next();
     if (selfInfo.length < 59) {
       stderr.writeln('SELF_INFO too short (${selfInfo.length} bytes)');
@@ -67,7 +77,8 @@ Future<void> main(List<String> args) async {
     final pubkey = selfInfo.sublist(4, 36);
     // SELF_INFO reports frequency in kHz; normalise to Hz for display.
     final freq =
-        ByteData.sublistView(selfInfo, 48, 52).getUint32(0, Endian.little) * 1000;
+        ByteData.sublistView(selfInfo, 48, 52).getUint32(0, Endian.little) *
+            1000;
     final nameBytes = <int>[];
     for (var i = 58; i < selfInfo.length && selfInfo[i] != 0; i++) {
       nameBytes.add(selfInfo[i]);
