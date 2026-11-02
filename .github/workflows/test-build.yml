@@ -1,0 +1,363 @@
+name: Test build
+
+# Manual signed test build for a branch, tag, or commit.
+#
+# Run this workflow from main: the release environment only allows deployments
+# from main, and taking the target from the `ref` input keeps the workflow
+# definition itself on the reviewed main branch. The build job runs without
+# signing secrets. The sign job uses the `release` environment and waits for its
+# required reviewer before the app signing key is decoded.
+#
+# The result is a workflow artifact, not a GitHub Release.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit to build'
+        required: true
+        type: string
+      build_number:
+        description: 'Android version code base (empty: pubspec build + 1)'
+        required: false
+        type: string
+      run_checks:
+        description: 'Run analysis and tests before building'
+        required: false
+        type: boolean
+        default: true
+
+run-name: Test build ${{ inputs.ref }} (${{ inputs.build_number || 'auto' }})
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-build-${{ inputs.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.7
+  EXPECTED_APP_SIGNING_SHA256: 47f300e48206ea4bb8e3857670c06fe17b4d1a962c747940000948846767d55e
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      version_name: ${{ steps.meta.outputs.version_name }}
+      build_number: ${{ steps.meta.outputs.build_number }}
+      commit: ${{ steps.meta.outputs.commit }}
+      short_commit: ${{ steps.meta.outputs.short_commit }}
+      build_ref: ${{ steps.meta.outputs.build_ref }}
+    steps:
+      - name: Check workflow ref
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Run this workflow from main; put the branch to build in the ref input."
+            exit 1
+          fi
+
+      - name: Check out requested ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Read build metadata
+        id: meta
+        env:
+          INPUT_BUILD_NUMBER: ${{ inputs.build_number }}
+          INPUT_REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          version_line="$(sed -n 's/^version:[[:space:]]*//p' app/pubspec.yaml | head -n1)"
+          version_name="${version_line%%+*}"
+          pubspec_build="${version_line##*+}"
+          if [[ ! "$version_name" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::could not parse the version name from app/pubspec.yaml"
+            exit 1
+          fi
+          if [[ ! "$pubspec_build" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::could not parse the build number from app/pubspec.yaml"
+            exit 1
+          fi
+          if [[ -n "$INPUT_BUILD_NUMBER" ]]; then
+            if [[ ! "$INPUT_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::build_number must be a positive integer"
+              exit 1
+            fi
+            build_number="$INPUT_BUILD_NUMBER"
+          else
+            build_number=$((pubspec_build + 1))
+          fi
+          commit="$(git rev-parse HEAD)"
+          short_commit="$(git rev-parse --short=7 HEAD)"
+          {
+            echo "version_name=$version_name"
+            echo "build_number=$build_number"
+            echo "commit=$commit"
+            echo "short_commit=$short_commit"
+            echo "build_ref=$INPUT_REF"
+          } >> "$GITHUB_OUTPUT"
+          echo "Building $version_name (base version code $build_number) from $INPUT_REF at $commit"
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('app/android/gradle/wrapper/gradle-wrapper.properties', 'app/android/**/*.gradle.kts', 'app/android/gradle.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Analyze and test
+        if: ${{ inputs.run_checks }}
+        run: ./scripts/check.sh
+
+      - name: Build release APKs
+        env:
+          VERSION_NAME: ${{ steps.meta.outputs.version_name }}
+          BUILD_NUMBER: ${{ steps.meta.outputs.build_number }}
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export MESHCHAMELEON_GIT_DIRTY=0
+          out=app/build/app/outputs/flutter-apk
+          dest=dist-test/built
+          mkdir -p "$dest"
+          ./scripts/build.sh apk --release --build-number "$BUILD_NUMBER"
+          cp "$out/app-release.apk" \
+            "$dest/MeshChameleon-${VERSION_NAME}-${BUILD_NUMBER}-universal-built.apk"
+          ./scripts/build.sh apk --release --build-number "$BUILD_NUMBER" --split-per-abi
+          cp "$out/app-arm64-v8a-release.apk" \
+            "$dest/MeshChameleon-${VERSION_NAME}-${BUILD_NUMBER}-arm64-v8a-built.apk"
+          cp "$out/app-armeabi-v7a-release.apk" \
+            "$dest/MeshChameleon-${VERSION_NAME}-${BUILD_NUMBER}-armeabi-v7a-built.apk"
+          ls -l "$dest"
+
+      - name: Upload built APKs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: built-apks
+          path: dist-test/built
+          if-no-files-found: error
+          retention-days: 14
+
+  sign:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out signing scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          path: source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Download built APKs
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: built-apks
+          path: dist-test/built
+
+      - name: Set up Java
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Decode app signing key
+        env:
+          APP_SIGNING_KEYSTORE_BASE64: ${{ secrets.APP_SIGNING_KEYSTORE_BASE64 }}
+          APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
+          APP_SIGNING_KEY_ALIAS: ${{ secrets.APP_SIGNING_KEY_ALIAS }}
+          APP_SIGNING_KEY_PASSWORD: ${{ secrets.APP_SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in APP_SIGNING_KEYSTORE_BASE64 APP_SIGNING_KEYSTORE_PASSWORD \
+            APP_SIGNING_KEY_ALIAS APP_SIGNING_KEY_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "::error::missing secret $name; configure the release environment"
+              exit 1
+            fi
+          done
+          keystore="$RUNNER_TEMP/app-signing-keystore.p12"
+          printf '%s' "$APP_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          cert="$(
+            keytool -list -v -keystore "$keystore" -alias "$APP_SIGNING_KEY_ALIAS" \
+              -storepass:env APP_SIGNING_KEYSTORE_PASSWORD 2>/dev/null |
+              awk -F': ' '/SHA256:/ { gsub(/:/, "", $2); print tolower($2); exit }'
+          )"
+          if [[ "$cert" != "$EXPECTED_APP_SIGNING_SHA256" ]]; then
+            echo "::error::app signing certificate $cert does not match $EXPECTED_APP_SIGNING_SHA256"
+            exit 1
+          fi
+          echo "APP_SIGNING_KEYSTORE=$keystore" >> "$GITHUB_ENV"
+          echo "APP_SIGNING_SHA256=$cert" >> "$GITHUB_ENV"
+
+      - name: Re-sign and verify APKs
+        env:
+          APP_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.APP_SIGNING_KEYSTORE_PASSWORD }}
+          APP_SIGNING_KEY_ALIAS: ${{ secrets.APP_SIGNING_KEY_ALIAS }}
+          APP_SIGNING_KEY_PASSWORD: ${{ secrets.APP_SIGNING_KEY_PASSWORD }}
+          VERSION_NAME: ${{ needs.build.outputs.version_name }}
+          BUILD_NUMBER: ${{ needs.build.outputs.build_number }}
+          BUILD_COMMIT: ${{ needs.build.outputs.commit }}
+          BUILD_REF: ${{ needs.build.outputs.build_ref }}
+        run: |
+          set -euo pipefail
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          build_tools="$(ls -d "$sdk"/build-tools/* | sort -V | tail -1)"
+          aapt="$build_tools/aapt"
+          keystore="$APP_SIGNING_KEYSTORE"
+          expected_sha="$APP_SIGNING_SHA256"
+
+          shopt -s nullglob
+          apks=(dist-test/built/*-built.apk)
+          if ((${#apks[@]} == 0)); then
+            echo "::error::no built APKs found"
+            exit 1
+          fi
+
+          universal=""
+          for apk in "${apks[@]}"; do
+            case "$(basename "$apk")" in
+              *-universal-built.apk) universal="$apk" ;;
+            esac
+          done
+          if [[ -z "$universal" ]]; then
+            echo "::error::universal APK missing"
+            exit 1
+          fi
+          badging="$("$aapt" dump badging "$universal" | sed -n '1p')"
+          base_code="$(sed -E "s/.*versionCode='([0-9]+)'.*/\1/" <<<"$badging")"
+          apk_name="$(sed -E "s/.*versionName='([^']*)'.*/\1/" <<<"$badging")"
+          if [[ "$apk_name" != "$VERSION_NAME" || "$base_code" != "$BUILD_NUMBER" ]]; then
+            echo "::error::universal APK is $apk_name ($base_code), expected $VERSION_NAME ($BUILD_NUMBER)"
+            exit 1
+          fi
+
+          mkdir -p dist-test/final
+          for apk in "${apks[@]}"; do
+            file="$(basename "$apk")"
+            case "$file" in
+              *-universal-*) abi=universal; expected_code="$base_code" ;;
+              *-arm64-v8a-*) abi=arm64-v8a; expected_code=$((base_code + 2000)) ;;
+              *-armeabi-v7a-*) abi=armeabi-v7a; expected_code=$((base_code + 1000)) ;;
+              *-x86_64-*) abi=x86_64; expected_code=$((base_code + 4000)) ;;
+              *)
+                echo "::error::unrecognized APK name $file"
+                exit 1
+                ;;
+            esac
+            badging="$("$aapt" dump badging "$apk" | sed -n '1p')"
+            pkg="$(sed -E "s/package: name='([^']+)'.*/\1/" <<<"$badging")"
+            code="$(sed -E "s/.*versionCode='([0-9]+)'.*/\1/" <<<"$badging")"
+            name="$(sed -E "s/.*versionName='([^']*)'.*/\1/" <<<"$badging")"
+            if [[ "$pkg" != "org.huebert.meshchameleon" ]]; then
+              echo "::error::$file has package $pkg"
+              exit 1
+            fi
+            if [[ "$name" != "$VERSION_NAME" ]]; then
+              echo "::error::$file has versionName $name, expected $VERSION_NAME"
+              exit 1
+            fi
+            if [[ "$code" != "$expected_code" ]]; then
+              echo "::error::$file has versionCode $code, expected $expected_code"
+              exit 1
+            fi
+
+            out="dist-test/final/MeshChameleon-${VERSION_NAME}-${code}-${abi}-test.apk"
+            cp "$apk" "$out"
+            bash source/scripts/sign_apks.sh \
+              --keystore "$keystore" \
+              --alias "$APP_SIGNING_KEY_ALIAS" \
+              --expected-sha256 "$expected_sha" \
+              "$out"
+            echo "signed $out (version code $code)"
+          done
+
+          {
+            echo "MeshChameleon test build"
+            echo ""
+            echo "ref=$BUILD_REF"
+            echo "commit=$BUILD_COMMIT"
+            echo "version=$VERSION_NAME"
+            echo "base_version_code=$BUILD_NUMBER"
+            echo "app_signing_sha256=$expected_sha"
+            echo "run=https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          } > dist-test/final/build-metadata.txt
+
+          {
+            echo "MeshChameleon test build"
+            echo ""
+            echo "Ref: $BUILD_REF"
+            echo "Commit: $BUILD_COMMIT"
+            echo "Version: $VERSION_NAME"
+            echo "Base version code: $BUILD_NUMBER"
+            echo ""
+            echo "These APKs are signed with the app signing key, so installing one"
+            echo "over an existing GitHub release install keeps app data."
+            echo ""
+            echo "Install the file that matches the current install:"
+            for f in dist-test/final/*-test.apk; do
+              echo "- $(basename "$f")"
+            done
+            echo ""
+            echo "If Android rejects an APK as a downgrade, use a higher build_number"
+            echo "input or install the variant with the higher version code."
+          } > dist-test/final/README.txt
+
+          (cd dist-test/final && sha256sum ./*-test.apk > SHA256SUMS.txt)
+          ls -l dist-test/final
+
+          {
+            echo "## MeshChameleon test build"
+            echo ""
+            echo "- Ref: $BUILD_REF"
+            echo "- Commit: $BUILD_COMMIT"
+            echo "- Version: $VERSION_NAME (base version code $BUILD_NUMBER)"
+            echo "- App signing certificate: $expected_sha"
+            echo ""
+            echo "Download the signed test-build artifact from this run, unzip it, and install the APK that matches the current install:"
+            for f in dist-test/final/*-test.apk; do
+              echo "- $(basename "$f")"
+            done
+            echo ""
+            echo "The APKs update in place and keep app data. Artifacts expire after 14 days."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload signed test APKs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: MeshChameleon-test-${{ needs.build.outputs.version_name }}-${{ needs.build.outputs.build_number }}-${{ needs.build.outputs.short_commit }}
+          path: dist-test/final
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f "${APP_SIGNING_KEYSTORE:-$RUNNER_TEMP/app-signing-keystore.p12}"
