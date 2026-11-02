@@ -20,6 +20,9 @@ import 'packet_transport.dart';
 import 'request_tracker.dart';
 import 'virtual_clock.dart';
 
+/// Outcome of an advert commit, captured inside the persistence queue.
+enum _AdvertOutcome { none, updated, discovered, tableFull, stored }
+
 /// Shared node state consumed by the packet router.
 class MeshRxDeps {
   const MeshRxDeps({
@@ -41,7 +44,6 @@ class MeshRxDeps {
     required this.isCurrent,
     required this.isBlocked,
     required this.identityGeneration,
-    required this.snapshot,
     required this.commit,
     required this.transmit,
     required this.enqueueMessage,
@@ -68,13 +70,8 @@ class MeshRxDeps {
   final bool Function(int generation) isCurrent;
   final bool Function() isBlocked;
   final int Function() identityGeneration;
-  final NodeState Function({
-    List<Contact>? contacts,
-    Map<String, AdvertPath>? advertPaths,
-    List<QueuedMessage>? queue,
-  }) snapshot;
   final Future<void> Function(
-    NodeState candidate, {
+    NodeState? Function(NodeState current) mutate, {
     int? identityGeneration,
   }) commit;
   final Future<void> Function(
@@ -236,40 +233,6 @@ class MeshRx {
       contacts.transient.removeAt(transientIdx);
     }
 
-    final existingIdx =
-        contactList.indexWhere((c) => c.publicKeyHex == bytesToHex(pubkey));
-    if (existingIdx >= 0) {
-      final existing = contactList[existingIdx];
-      if (ts <= existing.lastAdvertTimestamp) return;
-      final updated = existing.clone()
-        ..name = name
-        ..advType = type
-        ..lastAdvertTimestamp = ts
-        ..lastmod = now
-        ..rawAdvert = _normalizedAdvertBlob(packet);
-      if (decoded.hasLocation) {
-        updated
-          ..gpsLat = decoded.lat
-          ..gpsLon = decoded.lon;
-      }
-      final candidateContacts = [for (final c in contactList) c.clone()];
-      candidateContacts[existingIdx] = updated;
-      try {
-        await deps.commit(
-          deps.snapshot(
-            contacts: candidateContacts,
-            advertPaths: advertPaths.candidate(packet, pubkey, name, now),
-          ),
-          identityGeneration: generation,
-        );
-      } on CompanionOperationError {
-        return;
-      }
-      if (!deps.isCurrent(generation)) return;
-      pushSink?.pushAdvert(pubkey);
-      return;
-    }
-
     final newContact = Contact(
       publicKey: pubkey,
       name: name,
@@ -282,74 +245,118 @@ class MeshRx {
       gpsLon: decoded.hasLocation ? decoded.lon : 0.0,
       rawAdvert: _normalizedAdvertBlob(packet),
     );
-    final pathCache = advertPaths.candidate(packet, pubkey, name, now);
 
-    if (!contacts.shouldAutoAddType(type, prefs) ||
-        !contacts.hopAllowed(packet.pathHashCount, prefs)) {
-      // Discovery only: no persistent contact, but remember the inbound path.
-      try {
-        await deps.commit(
-          deps.snapshot(advertPaths: pathCache),
-          identityGeneration: generation,
-        );
-      } on CompanionOperationError {
-        // Path caching is best-effort; discovery still notifies the client.
-      }
-      if (!deps.isCurrent(generation)) return;
-      pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
-      return;
-    }
-
-    final candidateContacts = [for (final c in contactList) c.clone()];
+    _AdvertOutcome outcome = _AdvertOutcome.none;
     Contact? evicted;
-    if (candidateContacts.length >= virtualMaxContacts) {
-      final overwrite =
-          contacts.oldestOverwritableIndex(candidateContacts, prefs);
-      if (overwrite < 0) {
-        try {
-          await deps.commit(
-            deps.snapshot(advertPaths: pathCache),
-            identityGeneration: generation,
-          );
-        } on CompanionOperationError {
-          // Path caching is best-effort; the contact table is already full.
-        }
-        if (!deps.isCurrent(generation)) return;
-        pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
-        pushSink?.pushContactsFull();
-        return;
-      }
-      evicted = candidateContacts[overwrite];
-      candidateContacts[overwrite] = newContact;
-    } else {
-      candidateContacts.add(newContact);
-    }
-
     try {
-      await deps.commit(
-        deps.snapshot(
+      await deps.commit((current) {
+        final pathCache = advertPaths.candidate(
+          packet,
+          pubkey,
+          name,
+          now,
+          base: current.advertPaths,
+        );
+        final existingIdx = current.contacts
+            .indexWhere((c) => c.publicKeyHex == bytesToHex(pubkey));
+        if (existingIdx >= 0) {
+          final existing = current.contacts[existingIdx];
+          if (ts <= existing.lastAdvertTimestamp) {
+            outcome = _AdvertOutcome.none;
+            return null;
+          }
+          final updated = existing.clone()
+            ..name = name
+            ..advType = type
+            ..lastAdvertTimestamp = ts
+            ..lastmod = now
+            ..rawAdvert = _normalizedAdvertBlob(packet);
+          if (decoded.hasLocation) {
+            updated
+              ..gpsLat = decoded.lat
+              ..gpsLon = decoded.lon;
+          }
+          final candidateContacts = [
+            for (final c in current.contacts) c.clone(),
+          ];
+          candidateContacts[existingIdx] = updated;
+          outcome = _AdvertOutcome.updated;
+          return current.copyWith(
+            contacts: candidateContacts,
+            advertPaths: pathCache,
+          );
+        }
+
+        if (!contacts.shouldAutoAddType(type, current.prefs) ||
+            !contacts.hopAllowed(packet.pathHashCount, current.prefs)) {
+          // Discovery only: no persistent contact, but remember the path.
+          outcome = _AdvertOutcome.discovered;
+          return current.copyWith(advertPaths: pathCache);
+        }
+
+        final candidateContacts = [
+          for (final c in current.contacts) c.clone(),
+        ];
+        if (candidateContacts.length >= virtualMaxContacts) {
+          final overwrite = contacts.oldestOverwritableIndex(
+              candidateContacts, current.prefs);
+          if (overwrite < 0) {
+            outcome = _AdvertOutcome.tableFull;
+            return current.copyWith(advertPaths: pathCache);
+          }
+          evicted = candidateContacts[overwrite].clone();
+          candidateContacts[overwrite] = newContact.clone();
+        } else {
+          candidateContacts.add(newContact.clone());
+        }
+        outcome = _AdvertOutcome.stored;
+        return current.copyWith(
           contacts: candidateContacts,
           advertPaths: pathCache,
-        ),
-        identityGeneration: generation,
-      );
+        );
+      }, identityGeneration: generation);
     } on CompanionOperationError catch (e) {
       if (!deps.isCurrent(generation)) return;
-      if (e.code == errCodeTableFull) {
-        // Virtual quota is a full-table condition for auto-add discovery.
-        pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
-        pushSink?.pushContactsFull();
+      switch (outcome) {
+        case _AdvertOutcome.discovered:
+          // Path caching is best-effort; discovery still notifies the client.
+          pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
+        case _AdvertOutcome.tableFull:
+          pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
+          pushSink?.pushContactsFull();
+        case _AdvertOutcome.stored:
+          if (e.code == errCodeTableFull) {
+            // Virtual quota is a full-table condition for auto-add discovery.
+            pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
+            pushSink?.pushContactsFull();
+          }
+        case _AdvertOutcome.none:
+        case _AdvertOutcome.updated:
+          break;
       }
       return;
     }
     if (!deps.isCurrent(generation)) return;
-    if (evicted != null) {
-      deps.forgetContactState(evicted.publicKey);
-      pushSink?.pushContactDeleted(evicted.publicKey);
+    switch (outcome) {
+      case _AdvertOutcome.none:
+        return;
+      case _AdvertOutcome.updated:
+        pushSink?.pushAdvert(pubkey);
+      case _AdvertOutcome.discovered:
+        pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
+      case _AdvertOutcome.tableFull:
+        pushSink?.pushNewAdvert(newContact.toCompanionFrameBody());
+        pushSink?.pushContactsFull();
+      case _AdvertOutcome.stored:
+        final evictedContact = evicted;
+        if (evictedContact != null) {
+          deps.forgetContactState(evictedContact.publicKey);
+          pushSink?.pushContactDeleted(evictedContact.publicKey);
+        }
+        // Pinned BaseChatMesh behavior: a stored new candidate pushes ADVERT
+        // (0x80), while NEW_ADVERT (0x8A) is reserved for discovered-only ones.
+        pushSink?.pushAdvert(pubkey);
     }
-    // Pinned BaseChatMesh behavior: a stored new candidate pushes ADVERT (0x80),
-    // while NEW_ADVERT (0x8A) is reserved for discovered-but-not-stored ones.
-    pushSink?.pushAdvert(pubkey);
   }
 
   Future<void> _onDirectText(Packet packet, int generation) async {

@@ -262,32 +262,23 @@ void main() {
   });
 
   group('MessageQueue', () {
-    test('drops oldest entries on overflow and reports counts', () {
-      final queue = MessageQueue(maxQueueSize: 2)
-        ..replace([_message('one'), _message('two')]);
-
-      final candidate = queue.candidateWith(_message('three'));
-
-      expect(candidate.map((m) => m.text), ['two', 'three']);
-      expect(queue.length, 2);
-      expect(queue.directCount, 2);
-      expect(queue.channelCount, 0);
-    });
-
-    test('peek and remove deliver the oldest message', () {
+    test('replace reports length, max size, and direct/channel counts', () {
       final queue = MessageQueue(maxQueueSize: 2)
         ..replace([
           _message('one'),
           QueuedMessage(senderKey: Uint8List(32), isChannel: true),
         ]);
 
-      final first = queue.peek();
-      expect(first?.text, 'one');
+      expect(queue.length, 2);
+      expect(queue.maxQueueSize, 2);
+      expect(queue.messages.first.text, 'one');
       expect(queue.directCount, 1);
       expect(queue.channelCount, 1);
 
-      final remaining = queue.candidateWithoutFirst();
-      expect(remaining.single.isChannel, isTrue);
+      queue.replace([_message('replacement')]);
+      expect(queue.length, 1);
+      expect(queue.directCount, 1);
+      expect(queue.channelCount, 0);
     });
   });
 
@@ -556,7 +547,7 @@ void main() {
         store: store,
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => current,
-        publish: (state) {
+        publish: (_, state, {bool replace = false}) {
           current = state;
           published++;
         },
@@ -567,7 +558,7 @@ void main() {
       );
 
       final candidate = stateWithText('hello');
-      await persistence.commit(candidate);
+      await persistence.commit((_) => candidate);
 
       expect(published, 1);
       expect(current.queue.single.text, 'hello');
@@ -582,14 +573,14 @@ void main() {
         store: store,
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => current,
-        publish: (state) => current = state,
+        publish: (_, state, {bool replace = false}) => current = state,
         isRetired: () => false,
         isResetting: () => false,
         isCurrent: (_) => true,
         onStateChanged: () {},
       );
 
-      final commit = persistence.commit(stateWithText('blocked'));
+      final commit = persistence.commit((_) => stateWithText('blocked'));
       await Future<void>.delayed(Duration.zero);
       expect(store.saveStarted, isTrue);
       expect(store.saveFinished, isFalse);
@@ -607,6 +598,41 @@ void main() {
       expect(store.flushed, isTrue);
     });
 
+    test('queued mutations read the previously published state', () async {
+      final store = _BlockingStore();
+      var current = stateWithText('');
+      final persistence = StatePersistence(
+        store: store,
+        storageQuotaBytes: virtualStorageQuotaBytes,
+        snapshot: () => current,
+        publish: (_, state, {bool replace = false}) => current = state,
+        isRetired: () => false,
+        isResetting: () => false,
+        isCurrent: (_) => true,
+        onStateChanged: () {},
+      );
+
+      final first = persistence.commit((_) => stateWithText('one'));
+      await Future<void>.delayed(Duration.zero);
+      expect(store.saveStarted, isTrue);
+
+      var seen = '';
+      final second = persistence.commit((queued) {
+        seen = queued.queue.single.text;
+        return queued.copyWith(
+          queue: [QueuedMessage(senderKey: Uint8List(32), text: 'two')],
+        );
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(seen, isEmpty, reason: 'the first save is still blocked');
+
+      store.saveGate.complete();
+      await first;
+      await second;
+      expect(seen, 'one');
+      expect(current.queue.single.text, 'two');
+    });
+
     test('rejects retired, resetting, and stale-generation commits', () async {
       var retired = false;
       var resetting = false;
@@ -616,7 +642,7 @@ void main() {
         store: InMemoryNodeStore(),
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => stateWithText(''),
-        publish: (_) => published++,
+        publish: (_, __, {bool replace = false}) => published++,
         isRetired: () => retired,
         isResetting: () => resetting,
         isCurrent: (generation) => generation == currentGeneration,
@@ -625,7 +651,7 @@ void main() {
 
       retired = true;
       await expectLater(
-        persistence.commit(stateWithText('x')),
+        persistence.commit((_) => stateWithText('x')),
         throwsA(isA<CompanionOperationError>()
             .having((e) => e.code, 'code', errCodeBadState)),
       );
@@ -633,14 +659,15 @@ void main() {
       retired = false;
       resetting = true;
       await expectLater(
-        persistence.commit(stateWithText('x')),
+        persistence.commit((_) => stateWithText('x')),
         throwsA(isA<CompanionOperationError>()
             .having((e) => e.code, 'code', errCodeBadState)),
       );
 
       resetting = false;
       currentGeneration = 2;
-      await persistence.commit(stateWithText('x'), identityGeneration: 1);
+      await persistence.commit((_) => stateWithText('x'),
+          identityGeneration: 1);
       expect(published, 0);
     });
 
@@ -649,7 +676,7 @@ void main() {
         store: InMemoryNodeStore(),
         storageQuotaBytes: 400,
         snapshot: () => stateWithText(''),
-        publish: (_) {},
+        publish: (_, __, {bool replace = false}) {},
         isRetired: () => false,
         isResetting: () => false,
         isCurrent: (_) => true,
@@ -657,7 +684,7 @@ void main() {
       );
 
       await expectLater(
-        persistence.commit(stateWithText('x' * 2000)),
+        persistence.commit((_) => stateWithText('x' * 2000)),
         throwsA(isA<CompanionOperationError>()
             .having((e) => e.code, 'code', errCodeTableFull)),
       );
@@ -671,7 +698,7 @@ void main() {
         store: store,
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => current,
-        publish: (state) => current = state,
+        publish: (_, state, {bool replace = false}) => current = state,
         isRetired: () => false,
         isResetting: () => false,
         isCurrent: (_) => true,

@@ -99,6 +99,25 @@ class NodeState {
         customSettings: customSettings,
       );
 
+  /// Copy with one or more groups replaced. Every group is deep-copied by the
+  /// [NodeState] constructor, so the result is safe to persist.
+  NodeState copyWith({
+    NodePrefs? prefs,
+    List<Contact>? contacts,
+    Map<int, Channel>? channels,
+    List<QueuedMessage>? queue,
+    Map<String, AdvertPath>? advertPaths,
+    Map<String, String>? customSettings,
+  }) =>
+      NodeState(
+        prefs: prefs ?? this.prefs,
+        contacts: contacts ?? this.contacts,
+        channels: channels ?? this.channels,
+        queue: queue ?? this.queue,
+        advertPaths: advertPaths ?? this.advertPaths,
+        customSettings: customSettings ?? this.customSettings,
+      );
+
   factory NodeState.fromJson(Map<String, Object?> json) {
     final rawVersion = json['version'];
     // Versionless state predates the explicit version field and is read as v1.

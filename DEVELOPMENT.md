@@ -49,6 +49,11 @@ advert paths, the inbound queue, request tags, ACKs, connections, flood scope,
 raw transport, and state persistence. Keep protocol behavior changes in the
 owning collaborator and add focused tests for that collaborator.
 
+Durable mutations queue a read-modify-write function against the last published
+`NodeState`, so concurrent commits cannot each start from the same stale
+snapshot. Publication applies only the preference fields a candidate changed,
+which keeps an unrelated radio readback from being reverted.
+
 Inside `companion_server/lib/src/`, `server.dart` owns the TCP listener, client
 lifecycle, framing, timers, reply generation checks, and the push sink.
 `command_dispatcher.dart` owns the declarative command table and the command

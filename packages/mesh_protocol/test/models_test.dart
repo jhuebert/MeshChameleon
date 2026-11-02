@@ -182,6 +182,88 @@ void main() {
       target.copyFrom(NodePrefs());
       expect(target.defaultScopeKey, isNull);
     });
+
+    test('applyChangesFrom applies every field the candidate changed', () {
+      final base = NodePrefs(defaultScopeKey: Uint8List(16)..[0] = 1);
+      final key = Uint8List(16)..[0] = 7;
+      final next = NodePrefs(
+        nodeName: 'next',
+        advType: advTypeSensor,
+        txPowerDbm: 12,
+        maxTxPower: 18,
+        frequencyHz: 869000000,
+        bandwidthHz: 125000,
+        spreadingFactor: 11,
+        codingRate: 8,
+        latitude: 1.5,
+        longitude: -2.5,
+        advertLocPolicy: advertLocShare,
+        multiAcks: 3,
+        telemetryModeBase: 1,
+        telemetryModeLocation: 2,
+        telemetryModeEnvironment: 3,
+        manualAddContacts: 1,
+        autoaddConfig: 0x06,
+        autoaddMaxHops: 4,
+        timezoneOffsetHours: -6,
+        pathHashMode: 2,
+        rxDelayBaseMs: 100,
+        airtimeFactorMs: 200,
+        defaultScopeName: 'Region',
+        defaultScopeKey: key,
+      );
+      final live = NodePrefs();
+      live.applyChangesFrom(base, next);
+
+      expect(live.nodeName, 'next');
+      expect(live.advType, advTypeSensor);
+      expect(live.txPowerDbm, 12);
+      expect(live.maxTxPower, 18);
+      expect(live.frequencyHz, 869000000);
+      expect(live.bandwidthHz, 125000);
+      expect(live.spreadingFactor, 11);
+      expect(live.codingRate, 8);
+      expect(live.latitude, 1.5);
+      expect(live.longitude, -2.5);
+      expect(live.advertLocPolicy, advertLocShare);
+      expect(live.multiAcks, 3);
+      expect(live.telemetryModeBase, 1);
+      expect(live.telemetryModeLocation, 2);
+      expect(live.telemetryModeEnvironment, 3);
+      expect(live.manualAddContacts, 1);
+      expect(live.autoaddConfig, 0x06);
+      expect(live.autoaddMaxHops, 4);
+      expect(live.timezoneOffsetHours, -6);
+      expect(live.pathHashMode, 2);
+      expect(live.rxDelayBaseMs, 100);
+      expect(live.airtimeFactorMs, 200);
+      expect(live.defaultScopeName, 'Region');
+      expect(live.defaultScopeKey, key);
+      expect(live.defaultScopeKey, isNot(same(key)));
+    });
+
+    test('applyChangesFrom keeps live fields the candidate did not change', () {
+      final base = NodePrefs(
+        frequencyHz: 915000000,
+        defaultScopeName: 'old',
+        defaultScopeKey: Uint8List(16)..[0] = 1,
+      );
+      final next = NodePrefs(
+        frequencyHz: 915000000,
+        defaultScopeName: 'old',
+        defaultScopeKey: Uint8List(16)..[0] = 1,
+      );
+      final live = NodePrefs(
+        frequencyHz: 869000000,
+        defaultScopeName: 'readback',
+        defaultScopeKey: Uint8List(16)..[0] = 3,
+      );
+      live.applyChangesFrom(base, next);
+
+      expect(live.frequencyHz, 869000000);
+      expect(live.defaultScopeName, 'readback');
+      expect(live.defaultScopeKey![0], 3);
+    });
   });
 
   group('PhysicalCapabilities', () {

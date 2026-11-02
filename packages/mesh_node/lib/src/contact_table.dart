@@ -87,8 +87,6 @@ class ContactTable {
     return index < 0 ? null : index;
   }
 
-  void removeTransientAt(int index) => _transient.removeAt(index);
-
   void removeTransient(Uint8List pubkey) {
     final hex = bytesToHex(pubkey);
     _transient.removeWhere((c) => c.publicKeyHex == hex);
@@ -96,20 +94,19 @@ class ContactTable {
 
   void clearTransient() => _transient.clear();
 
-  /// Return the persistent table as cloned rows for a mutation candidate.
-  List<Contact> clonePersistent() => [for (final c in _persistent) c.clone()];
-
   /// Upsert [contact] into a cloned candidate table.
   ///
   /// Existing rows preserve their sync cursor, saved advert, and (when
-  /// [hasGps] is false) their last known location.
+  /// [hasGps] is false) their last known location. [base] lets a caller build
+  /// the candidate from state captured inside the persistence queue.
   ContactUpsert upsert(
     Contact contact, {
     required bool hasGps,
     required NodePrefs prefs,
     required int maxContacts,
+    List<Contact>? base,
   }) {
-    final candidate = clonePersistent();
+    final candidate = _clone(base);
     final index =
         candidate.indexWhere((c) => c.publicKeyHex == contact.publicKeyHex);
     if (index >= 0) {
@@ -162,9 +159,9 @@ class ContactTable {
 
   /// Return the persistent table with [pubkey] removed, or null when the key is
   /// not persistent.
-  List<Contact>? removePersistent(Uint8List pubkey) {
+  List<Contact>? removePersistent(Uint8List pubkey, {List<Contact>? base}) {
     final hex = bytesToHex(pubkey);
-    final candidate = clonePersistent();
+    final candidate = _clone(base);
     final before = candidate.length;
     candidate.removeWhere((c) => c.publicKeyHex == hex);
     return candidate.length == before ? null : candidate;
@@ -174,9 +171,9 @@ class ContactTable {
   ///
   /// Returns a persistent candidate when the contact is persistent, null when a
   /// transient contact was updated in place, or null when the key is unknown.
-  List<Contact>? resetPath(Uint8List pubkey) {
+  List<Contact>? resetPath(Uint8List pubkey, {List<Contact>? base}) {
     final hex = bytesToHex(pubkey);
-    final candidate = clonePersistent();
+    final candidate = _clone(base);
     final index = candidate.indexWhere((c) => c.publicKeyHex == hex);
     if (index >= 0) {
       candidate[index]
@@ -191,6 +188,10 @@ class ContactTable {
       ..outPathLen = -1;
     return null;
   }
+
+  List<Contact> _clone(List<Contact>? base) => [
+        for (final c in base ?? _persistent) c.clone(),
+      ];
 
   /// Register a transient zero-hop contact for [pubkey] if one doesn't exist.
   Contact ensureAnon(Uint8List pubkey) {

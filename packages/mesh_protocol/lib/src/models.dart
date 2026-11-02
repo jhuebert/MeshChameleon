@@ -199,6 +199,73 @@ class NodePrefs {
         ? null
         : Uint8List.fromList(other.defaultScopeKey!);
   }
+
+  /// Apply only the fields that differ between [base] and [next].
+  ///
+  /// Used when publishing a queued candidate: a radio readback may have
+  /// changed live preferences after [base] was captured, and those unrelated
+  /// fields must survive.
+  void applyChangesFrom(NodePrefs base, NodePrefs next) {
+    if (next.nodeName != base.nodeName) nodeName = next.nodeName;
+    if (next.advType != base.advType) advType = next.advType;
+    if (next.txPowerDbm != base.txPowerDbm) txPowerDbm = next.txPowerDbm;
+    if (next.maxTxPower != base.maxTxPower) maxTxPower = next.maxTxPower;
+    if (next.frequencyHz != base.frequencyHz) frequencyHz = next.frequencyHz;
+    if (next.bandwidthHz != base.bandwidthHz) bandwidthHz = next.bandwidthHz;
+    if (next.spreadingFactor != base.spreadingFactor) {
+      spreadingFactor = next.spreadingFactor;
+    }
+    if (next.codingRate != base.codingRate) codingRate = next.codingRate;
+    if (next.latitude != base.latitude) latitude = next.latitude;
+    if (next.longitude != base.longitude) longitude = next.longitude;
+    if (next.advertLocPolicy != base.advertLocPolicy) {
+      advertLocPolicy = next.advertLocPolicy;
+    }
+    if (next.multiAcks != base.multiAcks) multiAcks = next.multiAcks;
+    if (next.telemetryModeBase != base.telemetryModeBase) {
+      telemetryModeBase = next.telemetryModeBase;
+    }
+    if (next.telemetryModeLocation != base.telemetryModeLocation) {
+      telemetryModeLocation = next.telemetryModeLocation;
+    }
+    if (next.telemetryModeEnvironment != base.telemetryModeEnvironment) {
+      telemetryModeEnvironment = next.telemetryModeEnvironment;
+    }
+    if (next.manualAddContacts != base.manualAddContacts) {
+      manualAddContacts = next.manualAddContacts;
+    }
+    if (next.autoaddConfig != base.autoaddConfig) {
+      autoaddConfig = next.autoaddConfig;
+    }
+    if (next.autoaddMaxHops != base.autoaddMaxHops) {
+      autoaddMaxHops = next.autoaddMaxHops;
+    }
+    if (next.timezoneOffsetHours != base.timezoneOffsetHours) {
+      timezoneOffsetHours = next.timezoneOffsetHours;
+    }
+    if (next.pathHashMode != base.pathHashMode) {
+      pathHashMode = next.pathHashMode;
+    }
+    if (next.rxDelayBaseMs != base.rxDelayBaseMs) {
+      rxDelayBaseMs = next.rxDelayBaseMs;
+    }
+    if (next.airtimeFactorMs != base.airtimeFactorMs) {
+      airtimeFactorMs = next.airtimeFactorMs;
+    }
+    if (next.defaultScopeName != base.defaultScopeName) {
+      defaultScopeName = next.defaultScopeName;
+    }
+    if (!_sameScopeKey(next.defaultScopeKey, base.defaultScopeKey)) {
+      defaultScopeKey = next.defaultScopeKey == null
+          ? null
+          : Uint8List.fromList(next.defaultScopeKey!);
+    }
+  }
+
+  static bool _sameScopeKey(Uint8List? a, Uint8List? b) {
+    if (a == null || b == null) return a == b;
+    return bytesEqual(a, b);
+  }
 }
 
 /// Device capabilities returned by `CMD_DEVICE_QUERY`.

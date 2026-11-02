@@ -132,16 +132,6 @@ class MeshNode extends CompanionBridge implements CliHost {
       isCurrent: _identityCurrent,
       isBlocked: () => _semanticBlocked,
       identityGeneration: () => _identityGeneration,
-      snapshot: ({
-        List<Contact>? contacts,
-        Map<String, AdvertPath>? advertPaths,
-        List<QueuedMessage>? queue,
-      }) =>
-          _snapshot(
-        contacts: contacts,
-        advertPaths: advertPaths,
-        queue: queue,
-      ),
       commit: _commit,
       transmit: (
         Packet packet, {
@@ -756,12 +746,14 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   @override
   Future<void> setAutoAddConfig(int flags, int? maxHops) async {
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy.autoaddConfig = flags & 0xFF;
-    if (maxHops != null) {
-      prefsCopy.autoaddMaxHops = maxHops.clamp(0, 64);
-    }
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy.autoaddConfig = flags & 0xFF;
+      if (maxHops != null) {
+        prefsCopy.autoaddMaxHops = maxHops.clamp(0, 64);
+      }
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   @override
@@ -771,20 +763,22 @@ class MeshNode extends CompanionBridge implements CliHost {
     int? advertLocPolicy,
     int? multiAcks,
   }) async {
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy.manualAddContacts = manualAddContacts & 0xFF;
-    if (telemetryModes != null) {
-      final raw = telemetryModes & 0xFF;
-      prefsCopy
-        ..telemetryModeBase = raw & 0x03
-        ..telemetryModeLocation = (raw >> 2) & 0x03
-        ..telemetryModeEnvironment = (raw >> 4) & 0x03;
-    }
-    if (advertLocPolicy != null) {
-      prefsCopy.advertLocPolicy = advertLocPolicy & 0xFF;
-    }
-    if (multiAcks != null) prefsCopy.multiAcks = multiAcks & 0xFF;
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy.manualAddContacts = manualAddContacts & 0xFF;
+      if (telemetryModes != null) {
+        final raw = telemetryModes & 0xFF;
+        prefsCopy
+          ..telemetryModeBase = raw & 0x03
+          ..telemetryModeLocation = (raw >> 2) & 0x03
+          ..telemetryModeEnvironment = (raw >> 4) & 0x03;
+      }
+      if (advertLocPolicy != null) {
+        prefsCopy.advertLocPolicy = advertLocPolicy & 0xFF;
+      }
+      if (multiAcks != null) prefsCopy.multiAcks = multiAcks & 0xFF;
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   /// Persist the virtual multi-ACK preference without changing the other
@@ -797,9 +791,11 @@ class MeshNode extends CompanionBridge implements CliHost {
         message: 'multi.acks must be 0-255',
       );
     }
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy.multiAcks = value;
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy.multiAcks = value;
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   /// Persist the virtual timezone offset without changing epoch seconds.
@@ -811,9 +807,11 @@ class MeshNode extends CompanionBridge implements CliHost {
         message: 'invalid timezone offset',
       );
     }
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy.timezoneOffsetHours = hours;
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy.timezoneOffsetHours = hours;
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   int get timezoneOffsetHours => prefs.timezoneOffsetHours;
@@ -877,8 +875,11 @@ class MeshNode extends CompanionBridge implements CliHost {
         message: 'invalid sensor setting value',
       );
     }
-    final candidate = Map<String, String>.of(_customVars)..[name] = normalized;
-    await _commit(_snapshot(customSettings: candidate));
+    await _commit((current) {
+      final candidate = Map<String, String>.of(current.customSettings)
+        ..[name] = normalized;
+      return current.copyWith(customSettings: candidate);
+    });
   }
 
   @override
@@ -914,25 +915,29 @@ class MeshNode extends CompanionBridge implements CliHost {
     if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
-    final result = _contactTable.upsert(
-      contact,
-      hasGps: hasGps,
-      prefs: prefs,
-      maxContacts: virtualMaxContacts,
-    );
-    if (result.full) {
-      throw const CompanionOperationError(
-        errCodeTableFull,
-        message: 'contact table full',
+    ContactUpsert? upsert;
+    await _commit((current) {
+      upsert = _contactTable.upsert(
+        contact,
+        hasGps: hasGps,
+        prefs: current.prefs,
+        maxContacts: virtualMaxContacts,
+        base: current.contacts,
       );
-    }
-    await _commit(
-      _snapshot(contacts: result.candidate),
-      identityGeneration: identityGeneration,
-    );
+      final result = upsert!;
+      if (result.full) {
+        throw const CompanionOperationError(
+          errCodeTableFull,
+          message: 'contact table full',
+        );
+      }
+      return current.copyWith(contacts: result.candidate);
+    }, identityGeneration: identityGeneration);
     if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
+    final result = upsert;
+    if (result == null) return;
 
     // Promote over a transient slot only after the persistent add succeeded.
     _contactTable.removeTransient(contact.publicKey);
@@ -945,7 +950,12 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   @override
   Future<void> removeContact(Uint8List pubkey) async {
-    final candidate = _contactTable.removePersistent(pubkey);
+    List<Contact>? candidate;
+    await _commit((current) {
+      candidate =
+          _contactTable.removePersistent(pubkey, base: current.contacts);
+      return candidate == null ? null : current.copyWith(contacts: candidate!);
+    });
     if (candidate == null) {
       final transient = _contactTable.transientIndex(pubkey);
       if (transient == null) {
@@ -954,17 +964,20 @@ class MeshNode extends CompanionBridge implements CliHost {
           message: 'contact not found',
         );
       }
-      _contactTable.removeTransientAt(transient);
+      _contactTable.removeTransient(pubkey);
       _forgetContactState(pubkey);
       return;
     }
-    await _commit(_snapshot(contacts: candidate));
     _forgetContactState(pubkey);
   }
 
   @override
   Future<void> resetPath(Uint8List pubkey) async {
-    final candidate = _contactTable.resetPath(pubkey);
+    List<Contact>? candidate;
+    await _commit((current) {
+      candidate = _contactTable.resetPath(pubkey, base: current.contacts);
+      return candidate == null ? null : current.copyWith(contacts: candidate!);
+    });
     if (candidate == null) {
       if (_contactTable.transientIndex(pubkey) == null) {
         throw const CompanionOperationError(
@@ -974,7 +987,6 @@ class MeshNode extends CompanionBridge implements CliHost {
       }
       return;
     }
-    await _commit(_snapshot(contacts: candidate));
   }
 
   // -------------------------------------------------------------------------
@@ -995,15 +1007,12 @@ class MeshNode extends CompanionBridge implements CliHost {
         message: 'channel index out of range',
       );
     }
-    final candidate = {
-      for (final e in channels.entries)
-        e.key: Channel(
-          name: e.value.name,
-          secret: Uint8List.fromList(e.value.secret),
-        ),
-    };
-    candidate[index] = Channel(name: name, secret: Uint8List.fromList(secret));
-    await _commit(_snapshot(channels: candidate));
+    await _commit((current) {
+      final candidate = Map<int, Channel>.of(current.channels);
+      candidate[index] =
+          Channel(name: name, secret: Uint8List.fromList(secret));
+      return current.copyWith(channels: candidate);
+    });
   }
 
   // -------------------------------------------------------------------------
@@ -1042,9 +1051,11 @@ class MeshNode extends CompanionBridge implements CliHost {
         message: 'invalid advert name',
       );
     }
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy.nodeName = valid;
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy.nodeName = valid;
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   @override
@@ -1063,11 +1074,13 @@ class MeshNode extends CompanionBridge implements CliHost {
         message: 'invalid advert coordinates',
       );
     }
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy
-      ..latitude = latMicros / 1e6
-      ..longitude = lonMicros / 1e6;
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy
+        ..latitude = latMicros / 1e6
+        ..longitude = lonMicros / 1e6;
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   @override
@@ -1181,9 +1194,13 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   @override
   Future<QueuedMessage?> syncNextMessage() async {
-    final msg = _messageQueue.peek();
-    if (msg == null) return null;
-    await _commit(_snapshot(queue: _messageQueue.candidateWithoutFirst()));
+    QueuedMessage? msg;
+    await _commit((current) {
+      if (current.queue.isEmpty) return null;
+      final queue = [for (final m in current.queue.skip(1)) m.clone()];
+      msg = current.queue.first.clone();
+      return current.copyWith(queue: queue);
+    });
     return msg;
   }
 
@@ -1270,11 +1287,13 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   @override
   Future<void> setDefaultFloodScope(String name, Uint8List? key) async {
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy
-      ..defaultScopeName = name
-      ..defaultScopeKey = key == null ? null : Uint8List.fromList(key);
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy
+        ..defaultScopeName = name
+        ..defaultScopeKey = key == null ? null : Uint8List.fromList(key);
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   @override
@@ -1320,9 +1339,11 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// mode is never changed.
   @override
   Future<void> setPathHashMode(int mode) async {
-    final prefsCopy = NodePrefs()..copyFrom(prefs);
-    prefsCopy.pathHashMode = mode.clamp(0, 2);
-    await _commit(_snapshot(prefs: prefsCopy));
+    await _commit((current) {
+      final prefsCopy = NodePrefs()..copyFrom(current.prefs);
+      prefsCopy.pathHashMode = mode.clamp(0, 2);
+      return current.copyWith(prefs: prefsCopy);
+    });
   }
 
   @override
@@ -1502,17 +1523,36 @@ class MeshNode extends CompanionBridge implements CliHost {
       ..addAll(state.customSettings);
   }
 
-  void _publish(NodeState state) {
-    _applyState(state);
+  void _publish(NodeState current, NodeState next, {bool replace = false}) {
+    if (replace) {
+      prefs.copyFrom(next.prefs);
+    } else {
+      // Persist only the preference fields this commit intended to change so a
+      // radio readback that landed after the candidate snapshot survives.
+      prefs.applyChangesFrom(current.prefs, next.prefs);
+    }
+    _contactTable.replacePersistent(next.contacts);
+    channels
+      ..clear()
+      ..addAll(next.channels);
+    _messageQueue.replace(next.queue);
+    _advertPathCache.replace(next.advertPaths);
+    _customVars
+      ..clear()
+      ..addAll(next.customSettings);
   }
 
-  /// Save a candidate, then publish it. A save failure leaves node state
-  /// untouched so the client sees an honest error.
+  /// Save a candidate produced from the state inside the persistence queue,
+  /// then publish it. A save failure leaves node state untouched so the client
+  /// sees an honest error.
   ///
   /// [identityGeneration] scopes background RX mutations so a completion from
   /// the previous identity cannot save/publish over a successful switch.
-  Future<void> _commit(NodeState candidate, {int? identityGeneration}) =>
-      _state.commit(candidate, identityGeneration: identityGeneration);
+  Future<void> _commit(
+    NodeState? Function(NodeState current) mutate, {
+    int? identityGeneration,
+  }) =>
+      _state.commit(mutate, identityGeneration: identityGeneration);
 
   void _notifyStateChanged() {
     if (_retired) return;
@@ -1565,28 +1605,44 @@ class MeshNode extends CompanionBridge implements CliHost {
     if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }
-    final newOnly = _snapshot(queue: [message]);
-    if (newOnly.storageBytes > storageQuotaBytes) {
-      _transport.recordRxError();
-      return; // the new message alone does not fit; keep older messages
-    }
-    final candidateQueue = _messageQueue.candidateWith(message);
-    var candidate = _snapshot(queue: candidateQueue);
-    while (candidate.storageBytes > storageQuotaBytes &&
-        candidateQueue.length > 1) {
-      candidateQueue.removeAt(0);
-      candidate = _snapshot(queue: candidateQueue);
-    }
-    if (candidate.storageBytes > storageQuotaBytes) {
-      _transport.recordRxError();
-      return;
-    }
+    var quotaExceeded = false;
+    var enqueued = false;
     try {
-      await _commit(candidate, identityGeneration: identityGeneration);
+      await _commit((current) {
+        final newOnly = current.copyWith(queue: [message]);
+        if (newOnly.storageBytes > storageQuotaBytes) {
+          quotaExceeded = true;
+          return null; // the new message alone does not fit
+        }
+        final candidateQueue = [
+          for (final m in current.queue) m.clone(),
+          message.clone(),
+        ];
+        while (candidateQueue.length > _messageQueue.maxQueueSize) {
+          candidateQueue.removeAt(0); // drop oldest on count overflow
+        }
+        var candidate = current.copyWith(queue: candidateQueue);
+        while (candidate.storageBytes > storageQuotaBytes &&
+            candidateQueue.length > 1) {
+          candidateQueue.removeAt(0);
+          candidate = current.copyWith(queue: candidateQueue);
+        }
+        if (candidate.storageBytes > storageQuotaBytes) {
+          quotaExceeded = true;
+          return null;
+        }
+        enqueued = true;
+        return current.copyWith(queue: candidateQueue);
+      }, identityGeneration: identityGeneration);
     } on CompanionOperationError {
       _transport.recordRxError();
       return;
     }
+    if (quotaExceeded) {
+      _transport.recordRxError();
+      return;
+    }
+    if (!enqueued) return;
     if (identityGeneration != null && !_identityCurrent(identityGeneration)) {
       return;
     }

@@ -27,7 +27,8 @@ class StatePersistence {
   final NodeStore? store;
   final int storageQuotaBytes;
   final NodeState Function() snapshot;
-  final void Function(NodeState state) publish;
+  final void Function(NodeState current, NodeState next, {bool replace})
+      publish;
   final bool Function() isRetired;
   final bool Function() isResetting;
   final bool Function(int generation) isCurrent;
@@ -42,9 +43,17 @@ class StatePersistence {
 
   int get storageUsedBytes => snapshot().storageBytes;
 
-  /// Save a candidate, then publish it. A save failure leaves node state
-  /// untouched so the client sees an honest error.
-  Future<void> commit(NodeState candidate, {int? identityGeneration}) {
+  /// Read the current state, apply [mutate], save the result, then publish it.
+  ///
+  /// The read-modify-write happens inside the serial queue, so concurrent
+  /// mutations cannot each start from the same stale snapshot. Returning null
+  /// from [mutate] skips the commit (for example when a quota check rejects the
+  /// candidate). A save failure leaves node state untouched so the client sees
+  /// an honest error.
+  Future<void> commit(
+    NodeState? Function(NodeState current) mutate, {
+    int? identityGeneration,
+  }) {
     if (isRetired()) {
       return Future<void>.error(const CompanionOperationError(
         errCodeBadState,
@@ -61,11 +70,14 @@ class StatePersistence {
       if (identityGeneration != null && !isCurrent(identityGeneration)) {
         return;
       }
+      final current = snapshot();
+      final candidate = mutate(current);
+      if (candidate == null) return;
       await _save(candidate);
       if (identityGeneration != null && !isCurrent(identityGeneration)) {
         return;
       }
-      publish(candidate);
+      publish(current, candidate);
       onStateChanged();
     });
   }
@@ -73,9 +85,10 @@ class StatePersistence {
   /// Flush pending writes, then durably replace and publish [state].
   Future<void> replace(NodeState state) async {
     await _queue.run(() async {
+      final current = snapshot();
       await store?.flush();
       await _save(state);
-      publish(state);
+      publish(current, state, replace: true);
     });
     onStateChanged();
   }
