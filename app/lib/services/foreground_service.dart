@@ -12,6 +12,12 @@ class ForegroundService {
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
 
+  /// Whether this platform has a foreground service to start.
+  ///
+  /// Exposed so hosts and tests can decide whether to call [start]/[update]/
+  /// [stop] without importing Flutter's platform switch.
+  bool get isSupported => _isAndroid;
+
   Future<void> initialize() async {
     if (!_isAndroid || _initialized) return;
     FlutterForegroundTask.init(

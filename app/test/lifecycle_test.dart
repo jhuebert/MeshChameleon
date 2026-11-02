@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
+import 'package:meshchameleon/services/foreground_service.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/network_connection_store.dart';
@@ -16,13 +17,42 @@ const _capabilities = DeviceCapabilities(
   supportsBle: false,
 );
 
+class _FakeForegroundService extends ForegroundService {
+  int starts = 0;
+  int updates = 0;
+  int stops = 0;
+  String? lastTitle;
+  String? lastText;
+
+  @override
+  bool get isSupported => true;
+
+  @override
+  Future<void> start({required String title, required String text}) async {
+    starts++;
+    lastTitle = title;
+    lastText = text;
+  }
+
+  @override
+  Future<void> update({required String title, required String text}) async {
+    updates++;
+    lastTitle = title;
+    lastText = text;
+  }
+
+  @override
+  Future<void> stop() async {
+    stops++;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   late Directory dir;
   late IdentityRepository repository;
   late SessionStore sessionStore;
-
   setUp(() async {
     FlutterSecureStorage.setMockInitialValues({});
     dir = await Directory.systemTemp.createTemp('mesh_lifecycle_');
@@ -37,7 +67,7 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  Future<AppState> newApp() async {
+  Future<AppState> newApp({ForegroundService? foregroundService}) async {
     final app = AppState(
       repository: repository,
       sessionStore: sessionStore,
@@ -45,11 +75,32 @@ void main() {
         file: File('${dir.path}/network_connections.json'),
       ),
       capabilities: _capabilities,
+      foregroundService: foregroundService,
       reconnectDelay: const Duration(milliseconds: 10),
     );
     await app.loadIdentities();
     return app;
   }
+
+  test('foreground service calls are injectable', () async {
+    final foreground = _FakeForegroundService();
+    final app = await newApp(foregroundService: foreground);
+    addTearDown(app.disconnectDevice);
+
+    await app.connectSimulated(
+      simulatedLink: FakeDeviceLink(
+        deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+      ),
+    );
+    expect(app.deviceConnected, isTrue, reason: app.logs.join('\n'));
+    expect(foreground.starts, greaterThanOrEqualTo(1));
+    expect(foreground.updates, greaterThanOrEqualTo(1));
+    expect(foreground.lastTitle, isNotNull);
+    expect(foreground.lastText, contains('identity'));
+
+    await app.disconnectDevice();
+    expect(foreground.stops, greaterThanOrEqualTo(1));
+  });
 
   test('shutdown suppresses reconnect and auto-resume until explicit connect',
       () async {

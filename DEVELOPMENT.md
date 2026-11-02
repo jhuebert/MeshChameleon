@@ -480,7 +480,9 @@ its caveats.
 
 The proxy keeps the device link and the app-facing `ServerSocket` alive under a
 `flutter_foreground_task` service (M0 shape A: the engine runs in the main
-isolate). Two home-screen controls make that reliable:
+isolate). `ForegroundService` is injected into `AppState`, so tests can exercise
+the start/update/stop lifecycle without an Android platform. Two home-screen
+controls make that reliable:
 
 - **Battery optimization** — shows the current status and opens the system
   battery-optimization settings; the status is re-checked whenever the app

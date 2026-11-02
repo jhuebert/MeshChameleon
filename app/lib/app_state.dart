@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:collection';
-import 'dart:io';
 
 import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
@@ -94,6 +93,7 @@ class AppState extends ChangeNotifier {
     BuildInfo? buildInfo,
     CompanionMetrics? companionMetrics,
     LinkMetrics? linkMetrics,
+    ForegroundService? foregroundService,
     DateTime? startedAt,
     this.reconnectDelay = const Duration(seconds: 3),
   })  : _repository = repository,
@@ -102,6 +102,7 @@ class AppState extends ChangeNotifier {
         networkConnectionStore =
             networkConnectionStore ?? NetworkConnectionStore(),
         _tcpLinkFactory = tcpLinkFactory ?? _defaultTcpLinkFactory,
+        _foreground = foregroundService ?? ForegroundService(),
         capabilities = capabilities ?? DeviceCapabilities.current(),
         buildInfo = buildInfo ?? BuildInfo.fallback(),
         companionMetrics = companionMetrics ?? CompanionMetrics(),
@@ -202,7 +203,7 @@ class AppState extends ChangeNotifier {
   final Duration reconnectDelay;
 
   /// Foreground service that keeps the process alive while backgrounded.
-  final ForegroundService _foreground = ForegroundService();
+  final ForegroundService _foreground;
 
   IdentityRepository? _repository;
   IdentityManager? _manager;
@@ -939,7 +940,7 @@ class AppState extends ChangeNotifier {
   /// Refresh whether the OS currently exempts the app from battery
   /// optimizations. No-op off Android.
   Future<void> refreshBatteryOptimizationStatus() async {
-    if (!Platform.isAndroid) return;
+    if (!_foreground.isSupported) return;
     try {
       batteryOptimizationsIgnored =
           await _foreground.isIgnoringBatteryOptimizations();
@@ -953,7 +954,7 @@ class AppState extends ChangeNotifier {
   /// MeshChameleon to unrestricted. The status is re-checked when the app
   /// returns to the foreground.
   Future<void> openBatteryOptimizationSettings() async {
-    if (!Platform.isAndroid) return;
+    if (!_foreground.isSupported) return;
     try {
       await _foreground.openBatteryOptimizationSettings();
     } catch (e) {
@@ -1132,7 +1133,7 @@ class AppState extends ChangeNotifier {
       );
 
   Future<void> _startForegroundService() async {
-    if (!Platform.isAndroid) return;
+    if (!_foreground.isSupported) return;
     try {
       final content = _notificationContent();
       await _foreground.start(title: content.title, text: content.text);
