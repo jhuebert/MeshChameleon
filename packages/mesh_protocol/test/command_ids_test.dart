@@ -144,12 +144,17 @@ void main() {
     }
   });
 
-  test('every pinned R1 command has an explicit server dispatch case', () {
-    final source =
-        File('../companion_server/lib/src/server.dart').readAsStringSync();
+  test('every pinned R1 command has an explicit server command-table entry',
+      () {
+    final source = File(
+      '../companion_server/lib/src/command_dispatcher.dart',
+    ).readAsStringSync();
     for (final name in _pinnedCommandIds.values) {
-      expect(source, contains('case $name:'),
-          reason: 'server dispatch is missing $name');
+      expect(
+        RegExp('\\b$name:\\s+CommandSpec\\(').hasMatch(source),
+        isTrue,
+        reason: 'server dispatch is missing $name',
+      );
     }
   });
 }

@@ -49,6 +49,12 @@ advert paths, the inbound queue, request tags, ACKs, connections, flood scope,
 raw transport, and state persistence. Keep protocol behavior changes in the
 owning collaborator and add focused tests for that collaborator.
 
+Inside `companion_server/lib/src/`, `server.dart` owns the TCP listener, client
+lifecycle, framing, timers, reply generation checks, and the push sink.
+`command_dispatcher.dart` owns the declarative command table and the command
+handlers, `push_codec.dart` holds the pure push/message byte encoders, and
+`bridge.dart` is the host interface.
+
 ## Running an end-to-end test without hardware
 
 The pure-Dart packages include a stock-companion simulator (`FakeDeviceLink`)

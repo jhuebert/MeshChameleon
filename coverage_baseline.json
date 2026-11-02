@@ -5,13 +5,25 @@
       "covered": 83,
       "total": 83
     },
+    "packages/companion_server/lib/src/command_dispatcher.dart": {
+      "covered": 617,
+      "total": 621
+    },
+    "packages/companion_server/lib/src/command_spec.dart": {
+      "covered": 1,
+      "total": 1
+    },
     "packages/companion_server/lib/src/metrics.dart": {
-      "covered": 35,
-      "total": 36
+      "covered": 37,
+      "total": 38
+    },
+    "packages/companion_server/lib/src/push_codec.dart": {
+      "covered": 165,
+      "total": 165
     },
     "packages/companion_server/lib/src/server.dart": {
-      "covered": 1011,
-      "total": 1030
+      "covered": 165,
+      "total": 175
     },
     "packages/device_link/lib/src/backoff.dart": {
       "covered": 15,
@@ -46,8 +58,8 @@
       "total": 40
     },
     "packages/mesh_node/lib/src/advert_path_cache.dart": {
-      "covered": 21,
-      "total": 21
+      "covered": 20,
+      "total": 20
     },
     "packages/mesh_node/lib/src/battery_service.dart": {
       "covered": 56,
@@ -67,7 +79,7 @@
     },
     "packages/mesh_node/lib/src/contact_table.dart": {
       "covered": 107,
-      "total": 109
+      "total": 108
     },
     "packages/mesh_node/lib/src/flood_scope.dart": {
       "covered": 16,
@@ -82,24 +94,24 @@
       "total": 10
     },
     "packages/mesh_node/lib/src/mesh_node.dart": {
-      "covered": 594,
-      "total": 610
+      "covered": 590,
+      "total": 606
     },
     "packages/mesh_node/lib/src/mesh_rx.dart": {
-      "covered": 491,
-      "total": 513
+      "covered": 492,
+      "total": 514
     },
     "packages/mesh_node/lib/src/message_queue.dart": {
       "covered": 18,
-      "total": 20
+      "total": 18
     },
     "packages/mesh_node/lib/src/message_sender.dart": {
-      "covered": 184,
-      "total": 201
+      "covered": 185,
+      "total": 202
     },
     "packages/mesh_node/lib/src/node_store.dart": {
-      "covered": 241,
-      "total": 246
+      "covered": 248,
+      "total": 253
     },
     "packages/mesh_node/lib/src/packet_deduper.dart": {
       "covered": 25,
@@ -115,7 +127,7 @@
     },
     "packages/mesh_node/lib/src/request_tracker.dart": {
       "covered": 64,
-      "total": 73
+      "total": 69
     },
     "packages/mesh_node/lib/src/reset.dart": {
       "covered": 10,
@@ -134,8 +146,8 @@
       "total": 7
     },
     "packages/mesh_node/lib/src/state_persistence.dart": {
-      "covered": 42,
-      "total": 45
+      "covered": 44,
+      "total": 47
     },
     "packages/mesh_node/lib/src/virtual_clock.dart": {
       "covered": 11,
@@ -166,8 +178,8 @@
       "total": 73
     },
     "packages/mesh_protocol/lib/src/models.dart": {
-      "covered": 129,
-      "total": 129
+      "covered": 128,
+      "total": 128
     },
     "packages/mesh_protocol/lib/src/packet.dart": {
       "covered": 62,

@@ -7,6 +7,18 @@ import 'package:companion_server/companion_server.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:test/test.dart';
 
+class FailingSinkBridge extends TestBridge {
+  FailingSinkBridge(super.identity);
+
+  bool failSetPushSink = true;
+
+  @override
+  void setPushSink(CompanionPushSink? sink) {
+    if (failSetPushSink) throw StateError('push sink unavailable');
+    super.setPushSink(sink);
+  }
+}
+
 class TestBridge extends CompanionBridge {
   TestBridge(this.identity);
 
@@ -2981,6 +2993,26 @@ void main() {
     expect(info[0], respCodeSelfInfo);
   });
 
+  test('a closed client is reported as a closed session', () async {
+    await client.close();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(server.hasClient, isFalse);
+    expect(server.metrics.lastDisconnectReason, 'closed');
+  });
+
+  test('switchBridge reports a failing push sink and still completes',
+      () async {
+    final failing = FailingSinkBridge(identity);
+    await server.switchBridge(failing);
+    expect(server.bridge, same(failing));
+    failing.failSetPushSink = false;
+    await Future<void>.delayed(Duration.zero);
+    expect(
+      serverLogs.any((line) => line.contains('bridge switch error')),
+      isTrue,
+    );
+  });
+
   test('remaining push frames match the firmware layouts', () async {
     final prefix = Uint8List.fromList([1, 2, 3, 4, 5, 6]);
 
@@ -3173,6 +3205,96 @@ void main() {
     client.send([cmdResetPath, ...pubkey]);
     expect(await client.frames.next(), [respCodeOk]);
     expect(bridge.resetPathFor, pubkey);
+  });
+
+  test(
+      'the command table declares every supported command and enforces '
+      'its minimum payload length', () async {
+    expect(
+        server.commandSpecs.keys,
+        containsAll(const [
+          cmdDeviceQuery,
+          cmdAppStart,
+          cmdGetDeviceTime,
+          cmdSetDeviceTime,
+          cmdGetBattAndStorage,
+          cmdGetCustomVars,
+          cmdSetCustomVar,
+          cmdGetAutoAddConfig,
+          cmdSetAutoAddConfig,
+          cmdSetOtherParams,
+          cmdSetRadioParams,
+          cmdSetRadioTxPower,
+          cmdSetDevicePin,
+          cmdFactoryReset,
+          cmdExportPrivateKey,
+          cmdImportPrivateKey,
+          cmdGetTuningParams,
+          cmdSetTuningParams,
+          cmdSetPathHashMode,
+          cmdRunCliCommand,
+          cmdGetContacts,
+          cmdGetContactByKey,
+          cmdAddUpdateContact,
+          cmdRemoveContact,
+          cmdResetPath,
+          cmdGetChannel,
+          cmdSetChannel,
+          cmdSendSelfAdvert,
+          cmdSetAdvertName,
+          cmdSetAdvertLatLon,
+          cmdSendTxtMsg,
+          cmdSendChannelTxtMsg,
+          cmdSendChannelData,
+          cmdSendControlData,
+          cmdSyncNextMessage,
+          cmdSignStart,
+          cmdSignData,
+          cmdSignFinish,
+          cmdGetStats,
+          cmdGetAllowedRepeatFreq,
+          cmdGetAdvertPath,
+          cmdExportContact,
+          cmdImportContact,
+          cmdShareContact,
+          cmdSendBinaryReq,
+          cmdSendAnonReq,
+          cmdSendTelemetryReq,
+          cmdSendTracePath,
+          cmdSendPathDiscoveryReq,
+          cmdSendLogin,
+          cmdSendStatusReq,
+          cmdSendRawData,
+          cmdSendRawPacket,
+          cmdLogout,
+          cmdHasConnection,
+          cmdSetFloodScope,
+          cmdSetDefaultFloodScope,
+          cmdGetDefaultFloodScope,
+          cmdReboot,
+        ]));
+    expect(server.commandSpecs.length, 59);
+    expect(server.commandSpecs[cmdSendTxtMsg]!.minDataLength, 12);
+    expect(server.commandSpecs[cmdImportPrivateKey]!.minDataLength, 64);
+    expect(server.commandSpecs[cmdGetContactByKey]!.minDataLength, pubKeySize);
+    expect(server.commandSpecs[cmdSendAnonReq]!.minDataLength, pubKeySize + 1);
+    expect(server.commandSpecs[cmdReboot]!.minDataLength, 0);
+
+    for (final entry in server.commandSpecs.entries) {
+      final min = entry.value.minDataLength;
+      expect(min, greaterThanOrEqualTo(0),
+          reason: 'cmd 0x${entry.key.toRadixString(16)}');
+      if (min == 0) continue;
+      client.send([entry.key, ...List.filled(min - 1, 0)]);
+      expect(
+        await client.frames.next(),
+        [respCodeErr, errCodeIllegalArg],
+        reason: 'cmd 0x${entry.key.toRadixString(16)} with ${min - 1} bytes',
+      );
+    }
+
+    client.send([0xFF]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
   });
 }
 
