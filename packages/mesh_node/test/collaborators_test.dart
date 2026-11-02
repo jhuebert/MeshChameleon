@@ -595,9 +595,7 @@ void main() {
           current = state;
           published++;
         },
-        isRetired: () => false,
-        isResetting: () => false,
-        isCurrent: (_) => true,
+        guard: RuntimeGuard(),
         onStateChanged: () {},
       );
 
@@ -618,9 +616,7 @@ void main() {
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => current,
         publish: (_, state, {bool replace = false}) => current = state,
-        isRetired: () => false,
-        isResetting: () => false,
-        isCurrent: (_) => true,
+        guard: RuntimeGuard(),
         onStateChanged: () {},
       );
 
@@ -650,9 +646,7 @@ void main() {
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => current,
         publish: (_, state, {bool replace = false}) => current = state,
-        isRetired: () => false,
-        isResetting: () => false,
-        isCurrent: (_) => true,
+        guard: RuntimeGuard(),
         onStateChanged: () {},
       );
 
@@ -678,40 +672,37 @@ void main() {
     });
 
     test('rejects retired, resetting, and stale-generation commits', () async {
-      var retired = false;
-      var resetting = false;
-      var currentGeneration = 1;
+      StatePersistence make(
+        RuntimeGuard guard, {
+        void Function()? onPublish,
+      }) =>
+          StatePersistence(
+            store: InMemoryNodeStore(),
+            storageQuotaBytes: virtualStorageQuotaBytes,
+            snapshot: () => stateWithText(''),
+            publish: (_, __, {bool replace = false}) => onPublish?.call(),
+            guard: guard,
+            onStateChanged: () {},
+          );
+
+      final retired = RuntimeGuard()..retire();
+      await expectLater(
+        make(retired).commit((_) => stateWithText('x')),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeBadState)),
+      );
+
+      final resetting = RuntimeGuard()..beginReset();
+      await expectLater(
+        make(resetting).commit((_) => stateWithText('x')),
+        throwsA(isA<CompanionOperationError>()
+            .having((e) => e.code, 'code', errCodeBadState)),
+      );
+
       var published = 0;
-      final persistence = StatePersistence(
-        store: InMemoryNodeStore(),
-        storageQuotaBytes: virtualStorageQuotaBytes,
-        snapshot: () => stateWithText(''),
-        publish: (_, __, {bool replace = false}) => published++,
-        isRetired: () => retired,
-        isResetting: () => resetting,
-        isCurrent: (generation) => generation == currentGeneration,
-        onStateChanged: () {},
-      );
-
-      retired = true;
-      await expectLater(
-        persistence.commit((_) => stateWithText('x')),
-        throwsA(isA<CompanionOperationError>()
-            .having((e) => e.code, 'code', errCodeBadState)),
-      );
-
-      retired = false;
-      resetting = true;
-      await expectLater(
-        persistence.commit((_) => stateWithText('x')),
-        throwsA(isA<CompanionOperationError>()
-            .having((e) => e.code, 'code', errCodeBadState)),
-      );
-
-      resetting = false;
-      currentGeneration = 2;
-      await persistence.commit((_) => stateWithText('x'),
-          identityGeneration: 1);
+      final stale = RuntimeGuard()..bumpGeneration();
+      await make(stale, onPublish: () => published++)
+          .commit((_) => stateWithText('x'), identityGeneration: 0);
       expect(published, 0);
     });
 
@@ -721,9 +712,7 @@ void main() {
         storageQuotaBytes: 400,
         snapshot: () => stateWithText(''),
         publish: (_, __, {bool replace = false}) {},
-        isRetired: () => false,
-        isResetting: () => false,
-        isCurrent: (_) => true,
+        guard: RuntimeGuard(),
         onStateChanged: () {},
       );
 
@@ -743,9 +732,7 @@ void main() {
         storageQuotaBytes: virtualStorageQuotaBytes,
         snapshot: () => current,
         publish: (_, state, {bool replace = false}) => current = state,
-        isRetired: () => false,
-        isResetting: () => false,
-        isCurrent: (_) => true,
+        guard: RuntimeGuard(),
         onStateChanged: () => notified++,
       );
 
@@ -757,37 +744,33 @@ void main() {
     });
 
     test('replace rejects retired and non-reset callers', () async {
-      var retired = false;
-      var resetting = false;
-      final persistence = StatePersistence(
-        store: InMemoryNodeStore(),
-        storageQuotaBytes: virtualStorageQuotaBytes,
-        snapshot: () => stateWithText(''),
-        publish: (_, __, {bool replace = false}) {},
-        isRetired: () => retired,
-        isResetting: () => resetting,
-        isCurrent: (_) => true,
-        onStateChanged: () {},
-      );
+      StatePersistence make(RuntimeGuard guard) => StatePersistence(
+            store: InMemoryNodeStore(),
+            storageQuotaBytes: virtualStorageQuotaBytes,
+            snapshot: () => stateWithText(''),
+            publish: (_, __, {bool replace = false}) {},
+            guard: guard,
+            onStateChanged: () {},
+          );
 
-      retired = true;
+      final retired = RuntimeGuard()..retire();
       await expectLater(
-        persistence.replace(stateWithText('x')),
+        make(retired).replace(stateWithText('x')),
         throwsA(isA<CompanionOperationError>()
             .having((e) => e.code, 'code', errCodeBadState)),
       );
 
-      retired = false;
-      resetting = true;
+      final resetting = RuntimeGuard()..beginReset();
       await expectLater(
-        persistence.replace(stateWithText('x')),
+        make(resetting).replace(stateWithText('x')),
         throwsA(isA<CompanionOperationError>()
             .having((e) => e.code, 'code', errCodeBadState)),
       );
 
-      await persistence.replace(stateWithText('reset'), allowResetting: true);
-      resetting = false;
-      await persistence.replace(stateWithText('done'));
+      await make(resetting)
+          .replace(stateWithText('reset'), allowResetting: true);
+      resetting.endReset();
+      await make(resetting).replace(stateWithText('done'));
     });
   });
 
@@ -813,9 +796,7 @@ void main() {
         prefs: prefs,
         clock: VirtualClock(),
         localRouter: null,
-        isBlocked: () => false,
-        isRetired: () => false,
-        isCurrent: (_) => true,
+        guard: RuntimeGuard(),
         effectiveFloodScope: () => null,
         publicKey: () => _key(1),
       );
@@ -853,14 +834,13 @@ void main() {
     test('suppresses transmissions while blocked', () async {
       final link = FakeDeviceLink();
       await link.connect();
+      final guard = RuntimeGuard()..powerOff();
       final transport = PacketTransport(
         link: link,
         prefs: NodePrefs(),
         clock: VirtualClock(),
         localRouter: null,
-        isBlocked: () => true,
-        isRetired: () => false,
-        isCurrent: (_) => true,
+        guard: guard,
         effectiveFloodScope: () => null,
         publicKey: () => _key(1),
       );

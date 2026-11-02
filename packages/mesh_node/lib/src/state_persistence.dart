@@ -5,6 +5,7 @@ import 'package:companion_server/companion_server.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'node_store.dart';
+import 'runtime_guard.dart';
 import 'serial_queue.dart';
 
 /// Serialises durable node-state mutations and publication.
@@ -18,9 +19,7 @@ class StatePersistence {
     required this.storageQuotaBytes,
     required this.snapshot,
     required this.publish,
-    required this.isRetired,
-    required this.isResetting,
-    required this.isCurrent,
+    required this.guard,
     required this.onStateChanged,
   });
 
@@ -29,10 +28,14 @@ class StatePersistence {
   final NodeState Function() snapshot;
   final void Function(NodeState current, NodeState next, {bool replace})
       publish;
-  final bool Function() isRetired;
-  final bool Function() isResetting;
-  final bool Function(int generation) isCurrent;
+  final RuntimeGuard guard;
   final void Function() onStateChanged;
+
+  bool isRetired() => guard.retired;
+
+  bool isResetting() => guard.resetting;
+
+  bool isCurrent(int generation) => guard.isCurrent(generation);
 
   final SerialQueue _queue = SerialQueue();
 

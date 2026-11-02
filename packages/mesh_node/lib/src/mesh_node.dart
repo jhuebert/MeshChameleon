@@ -109,9 +109,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       prefs: this.prefs,
       clock: this.clock,
       localRouter: localRouter,
-      isBlocked: () => _semanticBlocked,
-      isRetired: () => _guard.retired,
-      isCurrent: _identityCurrent,
+      guard: _guard,
       effectiveFloodScope: _effectiveFloodScope,
       publicKey: () => identity.publicKey,
     );
@@ -159,9 +157,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       storageQuotaBytes: storageQuotaBytes,
       snapshot: _snapshot,
       publish: _publish,
-      isRetired: () => _guard.retired,
-      isResetting: () => _guard.resetting,
-      isCurrent: _identityCurrent,
+      guard: _guard,
       onStateChanged: _notifyStateChanged,
     );
     _messages = MessageSender(MessageSenderDeps(

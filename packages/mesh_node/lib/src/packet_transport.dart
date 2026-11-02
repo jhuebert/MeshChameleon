@@ -5,6 +5,7 @@ import 'package:device_link/device_link.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'local_peer_router.dart';
+import 'runtime_guard.dart';
 import 'virtual_clock.dart';
 
 /// Raw-radio transmission, airtime accounting, and packet counters.
@@ -18,9 +19,7 @@ class PacketTransport {
     required this.prefs,
     required this.clock,
     required this.localRouter,
-    required this.isBlocked,
-    required this.isRetired,
-    required this.isCurrent,
+    required this.guard,
     required this.effectiveFloodScope,
     required this.publicKey,
   });
@@ -30,15 +29,13 @@ class PacketTransport {
   final VirtualClock clock;
   final LocalPeerRouter? localRouter;
 
-  /// True while semantic TX is suppressed (retired, powered off, resetting, or
-  /// an identity swap is in progress).
-  final bool Function() isBlocked;
+  final RuntimeGuard guard;
 
-  /// True once this runtime has been permanently retired.
-  final bool Function() isRetired;
+  bool isBlocked() => guard.blocked;
 
-  /// True when [generation] still owns the active identity.
-  final bool Function(int generation) isCurrent;
+  bool isRetired() => guard.retired;
+
+  bool isCurrent(int generation) => guard.isCurrent(generation);
 
   final Uint8List? Function() effectiveFloodScope;
   final Uint8List Function() publicKey;
