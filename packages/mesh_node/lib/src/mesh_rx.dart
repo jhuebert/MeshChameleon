@@ -891,14 +891,13 @@ class MeshRx {
   /// been fully consumed (the trace has returned to us).
   void _onTrace(Packet packet) {
     if (!packet.isRouteDirect) return;
-    final payload = packet.payload;
-    if (payload.length < 9) return;
-    final r = BufferReader(payload);
-    final tag = r.readUInt32Le();
-    final authCode = r.readUInt32Le();
-    final flags = r.readByte();
-    final pathSz = flags & 0x03;
-    final pathHashes = Uint8List.fromList(payload.sublist(9));
+    final trace = decodeTracePayload(packet.payload);
+    if (trace == null) return;
+    final tag = trace.tag;
+    final authCode = trace.authCode;
+    final flags = trace.flags;
+    final pathSz = trace.pathSize;
+    final pathHashes = trace.path;
     final pathLen = pathHashes.length;
 
     final hopCount = packet.path.length;

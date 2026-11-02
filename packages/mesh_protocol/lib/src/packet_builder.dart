@@ -9,6 +9,7 @@ import 'identity.dart';
 import 'models.dart';
 import 'packet.dart';
 import 'paths.dart';
+import 'trace_codec.dart';
 
 /// A decoded advert packet: public key, timestamp, signature, and appdata.
 class AdvertPacket {
@@ -337,17 +338,16 @@ class PacketBuilder {
     required int authCode,
     required int flags,
     List<int> path = const [],
-  }) {
-    final w = BufferWriter()
-      ..writeUInt32Le(tag)
-      ..writeUInt32Le(authCode)
-      ..writeByte(flags & 0xFF)
-      ..writeBytes(path);
-    return Packet()
-      ..header = Packet.createHeader(payloadTypeTrace, routeTypeDirect)
-      ..pathLenByte = 0
-      ..payload = w.toBytes();
-  }
+  }) =>
+      Packet()
+        ..header = Packet.createHeader(payloadTypeTrace, routeTypeDirect)
+        ..pathLenByte = 0
+        ..payload = encodeTracePayload(
+          tag: tag,
+          authCode: authCode,
+          flags: flags,
+          path: path,
+        );
 
   /// Build a raw custom packet (`PAYLOAD_TYPE_RAW_CUSTOM`) sent directly along
   /// [path]. Backs `CMD_SEND_RAW_DATA`.

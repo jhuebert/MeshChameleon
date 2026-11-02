@@ -18,3 +18,4 @@ export 'src/packet_builder.dart';
 export 'src/paths.dart';
 export 'src/telemetry_codec.dart';
 export 'src/text.dart';
+export 'src/trace_codec.dart';

@@ -815,23 +815,17 @@ class CompanionCommandDispatcher {
   }
 
   Future<void> _cmdSendTracePath(Uint8List data) async {
-    final r = BufferReader(data);
-    final tag = r.readUInt32Le();
-    final authCode = r.readUInt32Le();
-    final flags = r.readByte();
-    final pathBytes = r.readRemainingBytes();
-    final pathLen = pathBytes.length;
-    final pathSz = flags & 0x03;
-    if ((pathLen >> pathSz) > maxPathSize || pathLen % (1 << pathSz) != 0) {
+    final trace = decodeTracePayload(data);
+    if (trace == null || !trace.hasValidPath) {
       return host.sendErr(errCodeIllegalArg);
     }
-    final ok =
-        await host.bridge.sendTracePathRaw(tag, authCode, flags, pathBytes);
+    final ok = await host.bridge
+        .sendTracePathRaw(trace.tag, trace.authCode, trace.flags, trace.path);
     if (!ok) return host.sendErr(errCodeTableFull);
-    final timeout = 5000 + pathLen * 200;
+    final timeout = 5000 + trace.path.length * 200;
     host.sendFrame(encodeSentValues(
       isFlood: false,
-      expectedAck: tag,
+      expectedAck: trace.tag,
       timeoutMs: timeout,
     ));
   }
