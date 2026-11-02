@@ -50,7 +50,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     PhysicalCapabilities physical = const PhysicalCapabilities(),
     this.store,
     this.ackTimeout = const Duration(seconds: 10),
-    this.maxQueueSize = defaultOfflineQueueSize,
+    int maxQueueSize = defaultOfflineQueueSize,
     this.storageQuotaBytes = virtualStorageQuotaBytes,
     this.sensorSettings = const EmptyVirtualSensorSettingsProvider(),
     this.scheduler = const TimerMeshScheduler(),
@@ -274,7 +274,8 @@ class MeshNode extends CompanionBridge implements CliHost {
   final NodeStore? store;
 
   /// Maximum number of queued inbound messages; oldest are dropped on overflow.
-  final int maxQueueSize;
+  /// Maximum queued messages before the oldest is dropped.
+  int get maxQueueSize => _messageQueue.maxQueueSize;
 
   /// Deterministic virtual storage quota for this node (4 MiB by default).
   final int storageQuotaBytes;
@@ -1618,7 +1619,7 @@ class MeshNode extends CompanionBridge implements CliHost {
           for (final m in current.queue) m.clone(),
           message.clone(),
         ];
-        while (candidateQueue.length > _messageQueue.maxQueueSize) {
+        while (candidateQueue.length > maxQueueSize) {
           candidateQueue.removeAt(0); // drop oldest on count overflow
         }
         var candidate = current.copyWith(queue: candidateQueue);

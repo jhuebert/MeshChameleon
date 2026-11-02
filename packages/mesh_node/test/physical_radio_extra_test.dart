@@ -238,11 +238,16 @@ void main() {
     radio.syncPhysicalState(
       params: params(freq: 869000000),
       tuning: const TuningParams(rxDelayBaseMs: 4, airtimeFactorMs: 5),
-      capabilities: const PhysicalCapabilities(firmwareVerCode: 12),
+      capabilities: const PhysicalCapabilities(
+        firmwareVerCode: 12,
+        maxTxPower: 28,
+      ),
     );
     expect(prefs.frequencyHz, 869000000);
     expect(prefs.rxDelayBaseMs, 4);
     expect(radio.capabilities.firmwareVerCode, 12);
+    expect(prefs.maxTxPower, 28,
+        reason: 'SELF_INFO must report the physical TX limit');
     expect(radio.diagnostic, isNull);
     expect(link.calls, isNot(contains('selfInfo')));
   });

@@ -400,7 +400,12 @@ class PhysicalRadio {
       _hasTuningCache = true;
       _tuningCacheVerified = true;
     }
-    if (capabilities != null) _capabilities = capabilities;
+    if (capabilities != null) {
+      _capabilities = capabilities;
+      // SELF_INFO reports prefs.maxTxPower; keep it aligned with the physical
+      // authority used by setTxPower validation.
+      prefs.maxTxPower = capabilities.maxTxPower;
+    }
     _diagnostic = null;
     onPersist();
   }
