@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../app_state.dart';
 import '../services/backup_codec.dart';
 import '../services/backup_service.dart';
+import '../widgets/app_snack_bar.dart';
 
 /// User-facing backup and restore, reachable from the Home screen.
 ///
@@ -47,9 +48,7 @@ class _BackupScreenState extends State<BackupScreen> {
       );
       if (!mounted) return;
       if (path != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Backup saved')),
-        );
+        showAppSnackBar(context, 'Backup saved', replace: false);
       }
     } on BackupException catch (e) {
       _showError(e.message);
@@ -107,9 +106,7 @@ class _BackupScreenState extends State<BackupScreen> {
       final restored = await context.read<AppState>().restoreBackup(preview);
       if (!mounted) return;
       if (restored) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Backup restored')),
-        );
+        showAppSnackBar(context, 'Backup restored', replace: false);
       } else {
         _showError(
             'Could not restore the backup. Your previous data was kept.');

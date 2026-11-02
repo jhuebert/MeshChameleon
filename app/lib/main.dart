@@ -10,6 +10,7 @@ import 'screens/identities_screen.dart';
 import 'screens/log_screen.dart';
 import 'services/build_info.dart';
 import 'services/network_connection_store.dart';
+import 'widgets/app_snack_bar.dart';
 import 'widgets/device_target_icon.dart';
 
 void main() async {
@@ -241,8 +242,10 @@ class _ProxyPortCardState extends State<_ProxyPortCard> {
         !await app.setProxyPort(value)) {
       _controller.text = app.port.toString();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Enter a port between 1 and 65535')),
+        showAppSnackBar(
+          context,
+          'Enter a port between 1 and 65535',
+          replace: false,
         );
       }
     }

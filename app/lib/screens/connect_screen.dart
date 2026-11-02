@@ -10,6 +10,7 @@ import '../services/ble_device_link.dart';
 import '../services/device_capabilities.dart';
 import '../services/network_connection_store.dart';
 import '../services/session_store.dart';
+import '../widgets/app_snack_bar.dart';
 import '../widgets/device_target_icon.dart';
 
 enum _ConnectTab {
@@ -184,15 +185,12 @@ class _ConnectScreenState extends State<ConnectScreen>
       _showFailure('Could not remove the saved connection.');
       return;
     }
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text('Removed ${connection.displayAddress}'),
-        action: SnackBarAction(
-          label: 'Undo',
-          onPressed: () => unawaited(_restoreSaved(connection)),
-        ),
+    showAppSnackBar(
+      context,
+      'Removed ${connection.displayAddress}',
+      action: SnackBarAction(
+        label: 'Undo',
+        onPressed: () => unawaited(_restoreSaved(connection)),
       ),
     );
   }
@@ -235,11 +233,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     }
   }
 
-  void _showFailure(String message) {
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(content: Text(message)));
-  }
+  void _showFailure(String message) => showAppSnackBar(context, message);
 
   @override
   Widget build(BuildContext context) {

@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../services/identity_runtime.dart';
+import '../widgets/app_snack_bar.dart';
 
 class IdentitiesScreen extends StatefulWidget {
   const IdentitiesScreen({super.key});
@@ -131,10 +132,8 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
     return result ?? false;
   }
 
-  void _snack(String message) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
-  }
+  void _snack(String message) =>
+      showAppSnackBar(context, message, replace: false);
 
   @override
   Widget build(BuildContext context) {

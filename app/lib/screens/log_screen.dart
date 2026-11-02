@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_state.dart';
+import '../widgets/app_snack_bar.dart';
 
 class LogScreen extends StatelessWidget {
   const LogScreen({super.key});
@@ -10,9 +11,7 @@ class LogScreen extends StatelessWidget {
   Future<void> _copy(BuildContext context, List<String> logs) async {
     await Clipboard.setData(ClipboardData(text: logs.join('\n')));
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Log copied')),
-    );
+    showAppSnackBar(context, 'Log copied', replace: false);
   }
 
   @override

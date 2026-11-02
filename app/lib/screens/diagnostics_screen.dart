@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../app_state.dart';
 import '../services/diagnostics_snapshot.dart';
+import '../widgets/app_snack_bar.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key});
@@ -61,9 +62,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     final report = context.read<AppState>().diagnosticsSnapshot().toReport();
     await Clipboard.setData(ClipboardData(text: report));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Diagnostics copied')),
-    );
+    showAppSnackBar(context, 'Diagnostics copied', replace: false);
   }
 
   @override
