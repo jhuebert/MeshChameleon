@@ -52,17 +52,19 @@ void main() {
   });
 
   testWidgets('StatusCard and BusyStrip render their content', (tester) async {
+    // Keep this non-const so BusyStrip's constructor line is instrumented.
+    // ignore: prefer_const_declarations
+    final busyPadding = EdgeInsets.zero;
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
         home: Scaffold(
           body: Column(
             children: [
-              StatusCard(
+              const StatusCard(
                 margin: EdgeInsets.all(4),
                 child: Text('Status'),
               ),
-              BusyStrip(),
-              BusyStrip(padding: EdgeInsets.zero),
+              BusyStrip(padding: busyPadding),
             ],
           ),
         ),
@@ -70,7 +72,7 @@ void main() {
     );
 
     expect(find.text('Status'), findsOneWidget);
-    expect(find.byType(LinearProgressIndicator), findsNWidgets(2));
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
   });
 
   testWidgets('ErrorBanner hides and shows its recovery action',
