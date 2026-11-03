@@ -33,6 +33,8 @@ keep `ATTRIBUTION.md` accurate.
 - `packages/mesh_node/` — node state and companion logic, driven by `RadioLink`.
 - `packages/device_link/` — pure-Dart `RadioLink` SPI, TCP device client, and
   fake device/radio bus for tests.
+- `packages/test_support/` — dev-only framed TCP client, stream queue, and
+  fake scheduler shared by package, app, and hardware tests.
 - `app/` — Flutter UI, secure identity storage, BLE NUS transport, and app
   orchestration.
 - `app/integration_test/` — hardware-in-the-loop validation, not part of the
