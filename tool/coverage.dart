@@ -191,11 +191,7 @@ Future<void> _collectFile(File file, Map<String, _FileCoverage> files) async {
   if (file.path.endsWith('.vm.json')) {
     _mergeVmJson(await file.readAsString(), files);
   } else if (file.path.endsWith('.info')) {
-    _mergeLcov(
-      await file.readAsString(),
-      files,
-      baseDir: _lcovBaseDir(file),
-    );
+    _mergeLcov(await file.readAsString(), files, baseDir: _lcovBaseDir(file));
   }
 }
 
@@ -316,8 +312,9 @@ String? _productionPathFor(String source, {Directory? baseDir}) {
     // LCOV paths from `flutter test --coverage` are relative to the package
     // root, e.g. `lib/services/identity_store.dart`.
     final base = baseDir.path;
-    final separator =
-        base.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator;
+    final separator = base.endsWith(Platform.pathSeparator)
+        ? ''
+        : Platform.pathSeparator;
     path = '$base$separator$source';
   } else {
     return null;
