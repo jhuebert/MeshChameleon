@@ -10,8 +10,10 @@
   "minimumReleaseAge": "7 days",
   "osvVulnerabilityAlerts": true,
   "dependencyDashboard": true,
+  "dependencyDashboardApproval": false,
   "automerge": false,
   "platformAutomerge": false,
+  "prCreation": "immediate",
   "packageRules": [
     {
       "description": "Auto-merge patch and minor updates after the full CI check passes",

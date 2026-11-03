@@ -600,9 +600,10 @@ are enabled, and `:configMigration` keeps the config current. Related updates
 are grouped for the Android Gradle toolchain, GitHub Actions, Dart dev tooling,
 the cryptography stack, and Flutter Blue Plus. Renovate also creates and
 maintains the single **Dependency Dashboard** GitHub issue
-(`dependencyDashboard: true`), which lists pending updates and accepts manual
-approval requests. The Flutter SDK pin in the workflow `env` blocks is updated
-by a custom manager because `subosito/flutter-action` receives it through
+(`dependencyDashboard: true`), which lists detected dependencies and pending
+updates; approval gating is off, so Renovate opens eligible PRs itself. The
+Flutter SDK pin in the workflow `env` blocks is updated by a custom manager
+because `subosito/flutter-action` receives it through
 `${{ env.FLUTTER_VERSION }}`.
 `BUNDLETOOL_VERSION` stays manual because its download checksum must change with
 the version. Validate config edits with
