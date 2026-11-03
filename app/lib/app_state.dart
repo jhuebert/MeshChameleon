@@ -14,6 +14,7 @@ import 'services/build_info.dart';
 import 'services/connection_controller.dart';
 import 'services/device_capabilities.dart';
 import 'services/diagnostics_snapshot.dart';
+import 'services/foreground_controller.dart';
 import 'services/foreground_service.dart';
 import 'services/identity_controller.dart';
 import 'services/identity_manager.dart';
@@ -22,7 +23,7 @@ import 'services/identity_runtime.dart';
 import 'services/identity_store.dart';
 import 'services/network_connection_history.dart';
 import 'services/network_connection_store.dart';
-import 'services/notification_content.dart';
+import 'services/proxy_controller.dart';
 import 'services/session_settings.dart';
 import 'services/session_store.dart';
 
@@ -53,7 +54,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
         networkConnectionStore =
             networkConnectionStore ?? NetworkConnectionStore(),
         _tcpLinkFactory = tcpLinkFactory ?? _defaultTcpLinkFactory,
-        _foreground = foregroundService ?? ForegroundService(),
+        _foregroundService = foregroundService ?? ForegroundService(),
         capabilities = capabilities ?? DeviceCapabilities.current(),
         buildInfo = buildInfo ?? BuildInfo.fallback(),
         companionMetrics = companionMetrics ?? CompanionMetrics(),
@@ -145,7 +146,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   final Duration reconnectDelay;
 
   /// Foreground service that keeps the process alive while backgrounded.
-  final ForegroundService _foreground;
+  final ForegroundService _foregroundService;
 
   IdentityRepository? _repository;
   IdentityManager? _manager;
@@ -166,13 +167,12 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     return created;
   }
 
-  CompanionServer? server;
-
   @override
   int get port => _sessionSettings.port;
   set port(int value) => _sessionSettings.port = value;
+  CompanionServer? get server => _proxy.server;
   @override
-  ProxyStatus proxyStatus = ProxyStatus.stopped;
+  ProxyStatus get proxyStatus => _proxy.status;
   @override
   bool busy = false;
 
@@ -211,7 +211,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     setBusy: (value) => busy = value,
     notify: notifyListeners,
     log: log,
-    updateNotification: _updateNotification,
+    updateNotification: _foreground.update,
     proxyServer: () => server,
   );
 
@@ -242,6 +242,28 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     sessionSettings: _sessionSettings,
     networkHistory: _networkHistory,
     reconnectDelay: reconnectDelay,
+  );
+
+  late final ProxyController _proxy = ProxyController(
+    activeNode: () => node,
+    identityCount: () => identities.length,
+    deviceConnected: () => deviceConnected,
+    metrics: companionMetrics,
+    port: () => port,
+    setPort: (value) => port = value,
+    notify: notifyListeners,
+    log: log,
+    updateNotification: _foreground.update,
+  );
+
+  late final ForegroundController _foreground = ForegroundController(
+    service: _foregroundService,
+    identityCount: () => identities.length,
+    activeName: () => activeIdentity?.name,
+    deviceConnected: () => deviceConnected,
+    proxyStatus: () => proxyStatus,
+    port: () => port,
+    log: log,
   );
 
   /// Whether the OS exempts the app from battery optimizations (null until
@@ -279,13 +301,11 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
 
   String? get activeIdentityId => _manager?.activeId;
 
-  bool _foregroundStarted = false;
-  String? _lastNotification;
   bool _logNotificationScheduled = false;
 
   /// Whether the Android foreground service is currently holding the process
   /// alive (always false on desktop).
-  bool get foregroundServiceRunning => _foregroundStarted;
+  bool get foregroundServiceRunning => _foreground.running;
 
   /// Append a timestamped line and coalesce synchronous bursts into one
   /// listener update.
@@ -312,10 +332,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   void _onManagerChanged() {
     if (_disposed) return;
     notifyListeners();
-    final content = _notificationContent();
-    if (_foregroundStarted && content.key != _lastNotification) {
-      unawaited(_updateNotification());
-    }
+    unawaited(_foreground.updateIfChanged());
   }
 
   Future<IdentityManager> _ensureManager() async {
@@ -558,131 +575,25 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   /// optimizations. No-op off Android.
   @override
   Future<void> refreshBatteryOptimizationStatus() async {
-    if (!_foreground.isSupported) return;
-    try {
-      batteryOptimizationsIgnored =
-          await _foreground.isIgnoringBatteryOptimizations();
-      notifyListeners();
-    } catch (e) {
-      log('Battery optimization check failed: $e');
-    }
+    final ignored = await _foreground.batteryStatus();
+    if (ignored == null) return;
+    batteryOptimizationsIgnored = ignored;
+    notifyListeners();
   }
 
   /// Open the system battery-optimization settings so the user can set
   /// MeshChameleon to unrestricted. The status is re-checked when the app
   /// returns to the foreground.
   @override
-  Future<void> openBatteryOptimizationSettings() async {
-    if (!_foreground.isSupported) return;
-    try {
-      await _foreground.openBatteryOptimizationSettings();
-    } catch (e) {
-      log('Battery optimization settings failed to open: $e');
-    }
-  }
-
-  /// Persistent-notification copy reflecting the live identity count and state.
-  NotificationContent _notificationContent() => buildNotificationContent(
-        identityCount: identities.length,
-        activeName: activeIdentity?.name,
-        deviceConnected: deviceConnected,
-        proxyStatus: proxyStatus,
-        port: port,
-      );
-
-  Future<void> _startForegroundService() async {
-    if (!_foreground.isSupported) return;
-    try {
-      final content = _notificationContent();
-      await _foreground.start(title: content.title, text: content.text);
-      _foregroundStarted = true;
-      _lastNotification = content.key;
-    } catch (e) {
-      log('Foreground service unavailable: $e');
-    }
-  }
-
-  Future<void> _updateNotification() async {
-    try {
-      final content = _notificationContent();
-      await _foreground.update(title: content.title, text: content.text);
-      _lastNotification = content.key;
-    } catch (e) {
-      log('Foreground service update failed: $e');
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // Proxy server
-  // -------------------------------------------------------------------------
-
-  /// Serializes queued start/stop operations so a rapid toggle cannot leave a
-  /// listener running with the UI reporting stopped (or the reverse).
-  Future<void>? _proxyTail;
-
-  Future<void> _runProxyTransition(Future<void> Function() action) {
-    final previous = _proxyTail;
-    final run = previous == null
-        ? action()
-        : previous.then(
-            (_) => action(),
-            onError: (Object _) => action(),
-          );
-    _proxyTail = run.then((_) {}, onError: (Object _) {});
-    return run;
-  }
+  Future<void> openBatteryOptimizationSettings() =>
+      _foreground.openBatterySettings();
 
   @override
   Future<void> startProxy({int? serverPort}) =>
-      _runProxyTransition(() => _startProxy(serverPort));
-
-  Future<void> _startProxy(int? serverPort) async {
-    final active = node;
-    if (active == null) {
-      log(identities.isEmpty
-          ? 'No identity available'
-          : deviceConnected
-              ? 'The active identity is unavailable'
-              : 'Connect a device first');
-      return;
-    }
-    final current = server ??= CompanionServer(
-      bridge: active,
-      config: CompanionServerConfig(port: serverPort ?? port),
-      metrics: companionMetrics,
-      onLog: log,
-    );
-    try {
-      await current.start();
-      port = current.port ?? port;
-      proxyStatus = ProxyStatus.running;
-      log('Proxy server listening on port $port');
-      await _updateNotification();
-    } catch (e) {
-      log('Failed to start proxy: $e');
-      try {
-        await current.stop();
-      } catch (_) {}
-      if (identical(server, current)) server = null;
-    }
-    notifyListeners();
-  }
+      _proxy.start(serverPort: serverPort);
 
   @override
-  Future<void> stopProxy() => _runProxyTransition(_stopProxy);
-
-  Future<void> _stopProxy() async {
-    final current = server;
-    server = null;
-    try {
-      await current?.stop();
-    } catch (e) {
-      log('Could not stop the proxy cleanly: $e');
-    }
-    proxyStatus = ProxyStatus.stopped;
-    await _updateNotification();
-    notifyListeners();
-  }
+  Future<void> stopProxy() => _proxy.stop();
 
   @override
   Future<IdentityManager> ensureManager() => _ensureManager();
@@ -691,35 +602,25 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   void notify() => notifyListeners();
 
   @override
-  bool get proxyRunning => proxyStatus == ProxyStatus.running;
+  bool get proxyRunning => _proxy.running;
 
   @override
-  Future<void> startForegroundService() => _startForegroundService();
+  Future<void> startForegroundService() => _foreground.start();
 
   @override
-  Future<void> stopForegroundService() async {
-    try {
-      await _foreground.stop();
-    } catch (_) {
-      // The service may already be stopped.
-    }
-    _foregroundStarted = false;
-  }
+  Future<void> stopForegroundService() => _foreground.stop();
 
   @override
-  Future<void> updateNotification() => _updateNotification();
+  Future<void> updateNotification() => _foreground.update();
 
   @override
-  void resetNotificationState() {
-    _foregroundStarted = false;
-    _lastNotification = null;
-  }
+  void resetNotificationState() => _foreground.reset();
 
   @override
   void dispose() {
     _disposed = true;
     _connection.dispose();
-    unawaited(server?.stop());
+    _proxy.dispose();
     unawaited(_manager?.dispose());
     super.dispose();
   }
