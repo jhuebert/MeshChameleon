@@ -16,6 +16,7 @@ import 'services/build_info.dart';
 import 'services/device_capabilities.dart';
 import 'services/diagnostics_snapshot.dart';
 import 'services/foreground_service.dart';
+import 'services/identity_controller.dart';
 import 'services/identity_manager.dart';
 import 'services/identity_repository.dart';
 import 'services/identity_runtime.dart';
@@ -226,6 +227,17 @@ class AppState extends ChangeNotifier implements AppViewState {
     onLog: log,
   );
 
+  late final IdentityController _identityController = IdentityController(
+    ensureManager: _ensureManager,
+    currentManager: () => _manager,
+    isBusy: () => busy,
+    setBusy: (value) => busy = value,
+    notify: notifyListeners,
+    log: log,
+    updateNotification: _updateNotification,
+    proxyServer: () => server,
+  );
+
   /// Last device session (device link + proxy port), restored on launch when
   /// [autoResume] is on.
   @override
@@ -354,138 +366,33 @@ class AppState extends ChangeNotifier implements AppViewState {
   }
 
   @override
-  Future<String> suggestIdentityName() async {
-    final manager = await _ensureManager();
-    return manager.suggestName();
-  }
+  Future<String> suggestIdentityName() => _identityController.suggestName();
 
   /// Create an additional identity. It is inactive; the active selection does
   /// not change.
   @override
-  Future<IdentityRecord?> createIdentity({String? name}) async {
-    if (busy) return null;
-    if (identityDatabaseError != null) return null;
-    busy = true;
-    notifyListeners();
-    try {
-      final manager = await _ensureManager();
-      final record = await manager.create(name: name);
-      log('Created identity ${record.name}');
-      await _updateNotification();
-      return record;
-    } catch (e) {
-      log('Could not create identity: $e');
-      return null;
-    } finally {
-      busy = false;
-      notifyListeners();
-    }
-  }
+  Future<IdentityRecord?> createIdentity({String? name}) =>
+      _identityController.create(name: name);
 
   /// Make [id] the identity served to the MeshCore app.
   @override
-  Future<bool> activateIdentity(String id) async {
-    if (busy) return false;
-    final manager = _manager;
-    if (manager == null) return false;
-    if (manager.activeId == id) return true;
-    busy = true;
-    notifyListeners();
-    try {
-      final runningServer =
-          server != null && proxyStatus == ProxyStatus.running ? server : null;
-      final ok = await manager.activate(
-        id,
-        switchBridge: runningServer?.switchBridge,
-      );
-      if (ok) {
-        final name = manager.activeSummary?.name ?? id;
-        log('Activated identity $name');
-        await _updateNotification();
-      }
-      return ok;
-    } catch (e) {
-      log('Identity activation failed: $e');
-      return false;
-    } finally {
-      busy = false;
-      notifyListeners();
-    }
-  }
+  Future<bool> activateIdentity(String id) => _identityController.activate(id);
 
   /// Enable or disable an identity. The active identity cannot be disabled.
   @override
-  Future<bool> setIdentityEnabled(String id, bool enabled) async {
-    if (busy) return false;
-    final manager = _manager;
-    if (manager == null) return false;
-    busy = true;
-    notifyListeners();
-    try {
-      final ok = await manager.setEnabled(id, enabled);
-      if (ok) {
-        final summary = identities.firstWhere((identity) => identity.id == id);
-        log('${enabled ? 'Enabled' : 'Disabled'} identity ${summary.name}');
-        await _updateNotification();
-      }
-      return ok;
-    } catch (e) {
-      log('Could not ${enabled ? 'enable' : 'disable'} identity: $e');
-      return false;
-    } finally {
-      busy = false;
-      notifyListeners();
-    }
-  }
+  Future<bool> setIdentityEnabled(String id, bool enabled) =>
+      _identityController.setEnabled(id, enabled);
 
   /// Delete an inactive identity. The manager and repository enforce the
   /// active/last-identity rules.
   @override
-  Future<bool> deleteIdentity(String id) async {
-    if (busy) return false;
-    final manager = _manager;
-    if (manager == null) return false;
-    busy = true;
-    notifyListeners();
-    try {
-      await manager.delete(id);
-      log('Deleted one identity');
-      await _updateNotification();
-      return true;
-    } catch (e) {
-      log('Could not delete identity: $e');
-      return false;
-    } finally {
-      busy = false;
-      notifyListeners();
-    }
-  }
+  Future<bool> deleteIdentity(String id) => _identityController.delete(id);
 
   /// Clear contacts, channels, messages, advert paths, and non-name prefs for
   /// one identity while keeping its key and current name.
   @override
-  Future<bool> clearLocalData(String id) async {
-    if (busy) return false;
-    final manager = _manager;
-    if (manager == null) return false;
-    busy = true;
-    notifyListeners();
-    try {
-      final wasActive = manager.activeId == id;
-      await manager.clearLocalData(id);
-      if (wasActive && (server?.hasClient ?? false)) {
-        await server!.disconnectClient(reason: 'local data cleared');
-      }
-      log('Cleared local data for one identity');
-      return true;
-    } catch (e) {
-      log('Could not clear local identity data: $e');
-      return false;
-    } finally {
-      busy = false;
-      notifyListeners();
-    }
-  }
+  Future<bool> clearLocalData(String id) =>
+      _identityController.clearLocalData(id);
 
   // -------------------------------------------------------------------------
   // Backup and restore
