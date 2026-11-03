@@ -10,6 +10,7 @@ import 'backup_validator.dart';
 import 'identity_index.dart';
 import 'identity_repository.dart';
 import 'identity_store.dart';
+import 'json_document_store.dart';
 import 'json_file.dart';
 import 'network_connection_store.dart';
 import 'session_store.dart';
@@ -457,17 +458,17 @@ class BackupService {
   }
 
   Future<NodeState?> _readState(IdentityRecord record) async {
-    final file = repository.stateFile(record.id);
-    if (!await file.exists()) return null;
+    final store = JsonDocumentStore<NodeState>(
+      resolveFile: () async => repository.stateFile(record.id),
+      decode: (json) =>
+          json is Map ? NodeState.fromJson(json.cast<String, Object?>()) : null,
+      encode: (state) => state.toJson(),
+      version: nodeStateSchemaVersion,
+      quarantineOnError: false,
+    );
     try {
-      final raw = await file.readAsString();
-      if (raw.trim().isEmpty) return null;
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) {
-        throw const FormatException('state is not an object');
-      }
-      return NodeState.fromJson(decoded.cast<String, Object?>());
-    } catch (_) {
+      return await store.load();
+    } on JsonDocumentException {
       throw BackupException(
         'Identity "${record.name}" has unreadable state; fix or clear it first',
       );

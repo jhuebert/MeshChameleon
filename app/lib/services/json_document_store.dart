@@ -82,6 +82,7 @@ class JsonDocumentStore<T> {
     required this.decode,
     required this.encode,
     this.version,
+    this.quarantineOnError = true,
   });
 
   final Future<File> Function() resolveFile;
@@ -93,6 +94,10 @@ class JsonDocumentStore<T> {
   /// A document that declares a newer version is rejected before [decode] runs
   /// so a future layout is never mistaken for valid current data.
   final int? version;
+
+  /// Whether corrupt/newer files are moved aside before the error is thrown.
+  /// Set false for callers that implement their own backup/rollback policy.
+  final bool quarantineOnError;
 
   File? _file;
   JsonFile? _writer;
@@ -129,7 +134,8 @@ class JsonDocumentStore<T> {
       if (value == null) throw const FormatException('invalid document');
       return value;
     } on JsonDocumentVersionException catch (e) {
-      final quarantined = file == null ? null : await _quarantine(file);
+      final quarantined =
+          quarantineOnError && file != null ? await _quarantine(file) : null;
       throw JsonDocumentVersionException(
         path: e.path,
         version: e.version,
@@ -145,7 +151,8 @@ class JsonDocumentStore<T> {
     } on JsonDocumentException {
       rethrow;
     } catch (e) {
-      final quarantined = file == null ? null : await _quarantine(file);
+      final quarantined =
+          quarantineOnError && file != null ? await _quarantine(file) : null;
       throw JsonDocumentException(
         path: file?.path ?? '',
         failure: JsonDocumentFailure.corrupt,

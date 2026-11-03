@@ -1,11 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
 
+import 'json_document_store.dart';
 import 'json_file.dart';
 
 /// Current on-disk identity index schema.
@@ -206,6 +206,25 @@ class IdentityIndexStore {
   File get _backupFile => File('${file.path}.bak');
   late final JsonFile _json = JsonFile(file);
 
+  late final JsonDocumentStore<IdentityIndex> _primaryStore = JsonDocumentStore(
+    resolveFile: () async => file,
+    decode: _decode,
+    encode: (index) => index.toJson(),
+    version: identityIndexVersion,
+    quarantineOnError: false,
+  );
+
+  late final JsonDocumentStore<IdentityIndex> _backupStore = JsonDocumentStore(
+    resolveFile: () async => _backupFile,
+    decode: _decode,
+    encode: (index) => index.toJson(),
+    version: identityIndexVersion,
+    quarantineOnError: false,
+  );
+
+  static IdentityIndex? _decode(Object? json) =>
+      json is Map ? IdentityIndex.fromJson(json.cast<String, Object?>()) : null;
+
   Future<IdentityIndex?> load() async {
     final primary = await _readOrNull(file);
     if (primary != null) return primary;
@@ -247,18 +266,14 @@ class IdentityIndexStore {
 
   Future<IdentityIndex?> _read(File source) async {
     try {
-      if (!await source.exists()) return null;
-      final raw = await source.readAsString();
-      if (raw.trim().isEmpty) return null;
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return null;
-      return IdentityIndex.fromJson(decoded.cast<String, Object?>());
-    } on IdentityIndexException {
-      rethrow;
-    } on FormatException {
-      return null;
-    } on FileSystemException {
-      return null;
+      return await (source.path == file.path ? _primaryStore : _backupStore)
+          .load();
+    } on JsonDocumentVersionException catch (e) {
+      throw IdentityIndexException(
+        'unsupported identity index version ${e.version}',
+      );
+    } on JsonDocumentException catch (e) {
+      throw IdentityIndexException(e.message);
     }
   }
 
