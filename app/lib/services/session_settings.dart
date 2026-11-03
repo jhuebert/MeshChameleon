@@ -1,5 +1,6 @@
 import 'package:mesh_protocol/mesh_protocol.dart';
 
+import 'json_document_store.dart';
 import 'network_address.dart';
 import 'session_store.dart';
 
@@ -32,7 +33,12 @@ class SessionSettings {
   /// A missing session clears the resume and shutdown flags but leaves the
   /// port at its current value.
   Future<void> load() async {
-    final session = await store.load();
+    SessionConfig? session;
+    try {
+      session = await store.load();
+    } on JsonDocumentException catch (e) {
+      onLog('Could not load the saved session: ${e.message}');
+    }
     _lastSession = session;
     if (session != null) {
       port = session.proxyPort;

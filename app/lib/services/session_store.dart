@@ -152,6 +152,7 @@ class SessionStore {
     decode: (json) =>
         json is Map<String, dynamic> ? SessionConfig.fromJson(json) : null,
     encode: (config) => config.toJson(),
+    version: sessionConfigVersion,
   );
 
   Future<File> _resolveFile() async {

@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:meshchameleon/services/json_document_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
@@ -110,11 +112,35 @@ void main() {
     expect(restored.proxyPort, 5200);
   });
 
-  test('SessionStore ignores a corrupt file', () async {
+  test('SessionStore quarantines a corrupt file and throws', () async {
     final dir = await Directory.systemTemp.createTemp('meshchameleon_bad');
     addTearDown(() => dir.delete(recursive: true));
     final file = File('${dir.path}/session.json');
     await file.writeAsString('{ not json');
-    expect(await SessionStore(file: file).load(), isNull);
+
+    await expectLater(
+      SessionStore(file: file).load(),
+      throwsA(isA<JsonDocumentException>()
+          .having((e) => e.failure, 'failure', JsonDocumentFailure.corrupt)
+          .having((e) => e.quarantinePath, 'quarantinePath', isNotNull)),
+    );
+    expect(await file.exists(), isFalse);
+  });
+
+  test('SessionStore rejects a future version before decoding', () async {
+    final dir = await Directory.systemTemp.createTemp('meshchameleon_future');
+    addTearDown(() => dir.delete(recursive: true));
+    final file = File('${dir.path}/session.json');
+    await file.writeAsString(jsonEncode({
+      'version': sessionConfigVersion + 1,
+      'kind': 'tcp',
+    }));
+
+    await expectLater(
+      SessionStore(file: file).load(),
+      throwsA(isA<JsonDocumentVersionException>()
+          .having((e) => e.version, 'version', sessionConfigVersion + 1)),
+    );
+    expect(await file.exists(), isFalse);
   });
 }

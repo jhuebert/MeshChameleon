@@ -1,5 +1,6 @@
 import 'dart:collection';
 
+import 'json_document_store.dart';
 import 'network_connection_store.dart';
 
 /// Owns the saved TCP target history and its read-modify-write queue.
@@ -24,7 +25,12 @@ class NetworkConnectionHistory {
       UnmodifiableListView(_connections);
 
   Future<void> load() async {
-    _connections = await store.load();
+    try {
+      _connections = await store.load();
+    } on JsonDocumentException catch (e) {
+      onLog('Could not load network connection history: ${e.message}');
+      _connections = const [];
+    }
   }
 
   /// Record a successful [host]:[port] connection.

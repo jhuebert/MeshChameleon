@@ -219,9 +219,12 @@ List<SavedNetworkConnection> decodeNetworkConnections(
 
 /// Persists successfully reached TCP companion targets.
 ///
-/// Reads are best-effort and never throw: a missing, corrupt, or unreadable
-/// file yields an empty history. Writes are atomic and serialized; their
-/// failures propagate so callers can decide whether to surface them.
+/// A missing file yields an empty history. Corrupt, unreadable, or newer-version
+/// files throw [JsonDocumentException]; corrupt and newer-version files are
+/// quarantined first so a later save cannot silently replace them. Callers that
+/// want best-effort behavior (for example [NetworkConnectionHistory]) log the
+/// error and continue. Writes are atomic and serialized; their failures
+/// propagate so callers can decide whether to surface them.
 class NetworkConnectionStore {
   NetworkConnectionStore({File? file}) : _file = file;
 
@@ -232,6 +235,7 @@ class NetworkConnectionStore {
     resolveFile: _resolveFile,
     decode: (json) => json is Map ? decodeNetworkConnections(json) : null,
     encode: encodeNetworkConnections,
+    version: networkConnectionHistoryVersion,
   );
 
   Future<File> _resolveFile() async {

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:meshchameleon/services/json_document_store.dart';
 import 'package:meshchameleon/services/network_connection_store.dart';
 
 SavedNetworkConnection _connection(
@@ -213,10 +214,15 @@ void main() {
     expect(loaded.single.lastConnectedAt, 300);
   });
 
-  test('corrupt JSON and unsupported versions yield an empty history',
-      () async {
+  test('corrupt JSON and newer versions throw after quarantine', () async {
     await file.writeAsString('{broken');
-    expect(await store.load(), isEmpty);
+    await expectLater(
+      store.load(),
+      throwsA(isA<JsonDocumentException>()
+          .having((e) => e.failure, 'failure', JsonDocumentFailure.corrupt)
+          .having((e) => e.quarantinePath, 'quarantinePath', isNotNull)),
+    );
+    expect(await file.exists(), isFalse);
 
     await file.writeAsString(jsonEncode({
       'version': networkConnectionHistoryVersion + 1,
@@ -224,7 +230,14 @@ void main() {
         {'host': 'valid.example', 'port': 5000, 'last_connected_at': 200},
       ],
     }));
-    expect(await store.load(), isEmpty);
+    await expectLater(
+      store.load(),
+      throwsA(isA<JsonDocumentVersionException>().having(
+        (e) => e.version,
+        'version',
+        networkConnectionHistoryVersion + 1,
+      )),
+    );
   });
 
   test('remove persists and restore keeps the original timestamp', () async {

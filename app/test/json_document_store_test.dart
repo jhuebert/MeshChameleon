@@ -32,12 +32,49 @@ void main() {
     expect(await subject.load(), 42);
   });
 
-  test('corrupt or non-object documents load as null', () async {
+  test('corrupt documents throw and are quarantined', () async {
     await file.writeAsString('{');
-    expect(await store().load(), isNull);
+    await expectLater(
+      store().load(),
+      throwsA(isA<JsonDocumentException>()
+          .having((e) => e.failure, 'failure', JsonDocumentFailure.corrupt)
+          .having((e) => e.quarantinePath, 'quarantinePath', isNotNull)),
+    );
+    expect(await file.exists(), isFalse);
+    expect(
+      await dir
+          .list()
+          .where((entry) => entry.path.contains('.quarantine-'))
+          .length,
+      1,
+    );
 
     await file.writeAsString('[1, 2, 3]');
-    expect(await store().load(), isNull);
+    await expectLater(
+      store().load(),
+      throwsA(isA<JsonDocumentException>()
+          .having((e) => e.failure, 'failure', JsonDocumentFailure.corrupt)),
+    );
+  });
+
+  test('a future schema version throws before decode and is quarantined',
+      () async {
+    JsonDocumentStore<int> versioned() => JsonDocumentStore<int>(
+          resolveFile: () async => file,
+          decode: (json) => json is Map ? json['value'] as int? : null,
+          encode: (value) => {'value': value},
+          version: 1,
+        );
+    await file.writeAsString(jsonEncode({'version': 2, 'value': 1}));
+
+    await expectLater(
+      versioned().load(),
+      throwsA(isA<JsonDocumentVersionException>()
+          .having((e) => e.version, 'version', 2)
+          .having((e) => e.supported, 'supported', 1)
+          .having((e) => e.quarantinePath, 'quarantinePath', isNotNull)),
+    );
+    expect(await file.exists(), isFalse);
   });
 
   test('delete removes the document', () async {

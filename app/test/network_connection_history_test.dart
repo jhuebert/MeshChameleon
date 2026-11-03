@@ -47,6 +47,15 @@ void main() {
     expect(history.connections.single.host, '192.168.1.2');
   });
 
+  test('a corrupt history is logged and treated as empty', () async {
+    await File('${dir.path}/connections.json').writeAsString('{bad');
+
+    await history.load();
+
+    expect(history.connections, isEmpty);
+    expect(logs.single, contains('Could not load network connection history'));
+  });
+
   test('records, removes, and restores targets', () async {
     await history.record('192.168.1.2', 5000);
     final saved = history.connections.single;

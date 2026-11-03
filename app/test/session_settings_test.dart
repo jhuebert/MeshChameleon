@@ -46,6 +46,17 @@ void main() {
     expect(settings.intentionallyOff, isTrue);
   });
 
+  test('a corrupt session is logged and treated as missing', () async {
+    await File('${dir.path}/session.json').writeAsString('{bad');
+    settings.port = 5100;
+
+    await settings.load();
+
+    expect(settings.lastSession, isNull);
+    expect(settings.port, 5100);
+    expect(logs.single, contains('Could not load the saved session'));
+  });
+
   test('a missing session clears resume and shutdown flags', () async {
     settings.port = 5100;
     await settings.setAutoResume(true);
