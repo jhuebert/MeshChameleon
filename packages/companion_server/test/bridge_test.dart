@@ -14,6 +14,16 @@ void main() {
         .having((e) => e.code, 'code', errCodeUnsupportedCmd),
   );
 
+  test('the bridge exposes every capability interface', () {
+    expect(bridge, isA<ContactHost>());
+    expect(bridge, isA<MessageHost>());
+    expect(bridge, isA<RadioConfigHost>());
+    expect(bridge, isA<IdentityHost>());
+    expect(bridge, isA<CompanionCliHost>());
+    expect(bridge, isA<StatsHost>());
+    expect(bridge, isA<LifecycleHost>());
+  });
+
   test('push sink can be attached and cleared', () {
     expect(bridge.pushSink, isNull);
     final sink = NoopCompanionPushSink();

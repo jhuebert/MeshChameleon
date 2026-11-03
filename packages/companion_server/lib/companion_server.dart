@@ -2,6 +2,7 @@
 library;
 
 export 'src/bridge.dart';
+export 'src/capabilities.dart';
 export 'src/command_spec.dart';
 export 'src/mesh_stats.dart';
 export 'src/metrics.dart';
