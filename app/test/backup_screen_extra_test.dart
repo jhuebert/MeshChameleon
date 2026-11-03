@@ -74,7 +74,7 @@ void main() {
     app.dispose();
   });
 
-  Widget wrap() => ChangeNotifierProvider<AppState>.value(
+  Widget wrap() => ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: BackupScreen()),
       );

@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/main.dart';
-import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:provider/provider.dart';
 
 import 'support/fake_app_state.dart';
@@ -20,7 +19,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider(
+      ChangeNotifierProvider<AppViewState>(
         create: (_) => AppState(),
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -55,7 +54,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider(
+      ChangeNotifierProvider<AppViewState>(
         create: (_) => AppState(),
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -82,7 +81,7 @@ void main() {
 
     final app = AppState()..batteryOptimizationsIgnored = false;
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -108,7 +107,7 @@ void main() {
 
     final app = AppState()..batteryOptimizationsIgnored = true;
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -156,7 +155,7 @@ void _extraHomeTests() {
       ..port = 5000;
 
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -187,7 +186,7 @@ void _extraHomeTests() {
     _homeView(tester);
     final app = FakeAppState()..busy = true;
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -209,7 +208,7 @@ void _extraHomeTests() {
     _homeView(tester);
     final app = FakeAppState()..port = 5000;
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -242,7 +241,7 @@ void _extraHomeTests() {
     _homeView(tester);
     final app = FakeAppState()..batteryOptimizationsIgnored = false;
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -263,7 +262,7 @@ void _extraHomeTests() {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     try {
       await tester.pumpWidget(
-        ChangeNotifierProvider<AppState>(
+        ChangeNotifierProvider<AppViewState>(
           create: (_) => FakeAppState(),
           child: const MaterialApp(home: HomeScreen()),
         ),

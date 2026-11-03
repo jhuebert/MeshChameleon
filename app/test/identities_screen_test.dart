@@ -10,8 +10,6 @@ import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/main.dart';
 import 'package:meshchameleon/screens/identities_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
-import 'package:meshchameleon/services/identity_index.dart';
-import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/network_connection_store.dart';
@@ -55,7 +53,7 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  Widget wrap(Widget child) => ChangeNotifierProvider<AppState>.value(
+  Widget wrap(Widget child) => ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: MaterialApp(home: child),
       );
@@ -383,7 +381,7 @@ void main() {
     addTearDown(corruptApp.dispose);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: corruptApp,
         child: const MaterialApp(home: IdentitiesScreen()),
       ),
@@ -652,8 +650,8 @@ void _clearSnackBars(WidgetTester tester) {
   ScaffoldMessenger.of(context).clearSnackBars();
 }
 
-Widget _wrapFake(AppState app, Widget child) =>
-    ChangeNotifierProvider<AppState>.value(
+Widget _wrapFake(AppViewState app, Widget child) =>
+    ChangeNotifierProvider<AppViewState>.value(
       value: app,
       child: MaterialApp(home: child),
     );

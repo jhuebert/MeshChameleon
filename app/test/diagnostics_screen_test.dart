@@ -21,7 +21,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider(
+      ChangeNotifierProvider<AppViewState>(
         create: (_) => AppState(),
         child: const MaterialApp(home: DiagnosticsScreen()),
       ),
@@ -55,7 +55,7 @@ void main() {
       diagnosticsBuilder: () => _richSnapshot(now),
     );
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: DiagnosticsScreen()),
       ),
@@ -120,7 +120,7 @@ void main() {
           _richSnapshot(DateTime.utc(2026, 1, 2, 3, 4, 5)),
     );
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: DiagnosticsScreen()),
       ),
@@ -151,7 +151,7 @@ void main() {
       },
     );
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: DiagnosticsScreen()),
       ),

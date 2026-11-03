@@ -81,7 +81,7 @@ void main() {
 
     final screen = ConnectScreen(capabilities: capabilities);
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: MaterialApp(
           home: push

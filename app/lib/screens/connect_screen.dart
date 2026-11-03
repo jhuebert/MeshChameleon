@@ -5,11 +5,10 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:provider/provider.dart';
 
-import '../app_state.dart';
+import '../app_view_state.dart';
 import '../services/ble_device_link.dart';
 import '../services/device_capabilities.dart';
 import '../services/network_connection_store.dart';
-import '../services/session_store.dart';
 import '../widgets/app_snack_bar.dart';
 import '../widgets/device_target_icon.dart';
 
@@ -49,7 +48,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   @override
   void initState() {
     super.initState();
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     final lastKind = app.lastSession?.kind;
     _tabs = [
       if (_capabilities.supportsBle) _ConnectTab.bluetooth,
@@ -81,7 +80,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     super.dispose();
   }
 
-  void _setInitialTarget(AppState app) {
+  void _setInitialTarget(AppViewState app) {
     final saved = app.savedNetworkConnections;
     if (saved.isNotEmpty) {
       _hostController.text = saved.first.host;
@@ -158,7 +157,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Future<void> _connectTcp() async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     if (!(_formKey.currentState?.validate() ?? false)) return;
     final host = _hostController.text.trim();
     final port = int.parse(_portController.text.trim());
@@ -178,7 +177,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Future<void> _deleteSaved(SavedNetworkConnection connection) async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     final ok = await app.removeSavedNetworkConnection(connection);
     if (!mounted) return;
     if (!ok) {
@@ -197,7 +196,7 @@ class _ConnectScreenState extends State<ConnectScreen>
 
   Future<void> _restoreSaved(SavedNetworkConnection connection) async {
     if (!mounted) return;
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     final ok = await app.restoreSavedNetworkConnection(connection);
     if (!ok && mounted) {
       _showFailure('Could not restore the saved connection.');
@@ -205,7 +204,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Future<void> _connectBle(ScanResult result) async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     final name = bleCompanionDisplayName(result);
     await _stopScan();
     final ok = await app.connectBle(result.device, displayName: name);
@@ -216,7 +215,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Future<void> _connectSimulated() async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     final ok = await app.connectSimulated();
     _finishConnection(
       ok,
@@ -237,7 +236,7 @@ class _ConnectScreenState extends State<ConnectScreen>
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
+    final app = context.watch<AppViewState>();
     return PopScope<void>(
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) unawaited(app.cancelPendingConnection());
@@ -272,13 +271,13 @@ class _ConnectScreenState extends State<ConnectScreen>
     );
   }
 
-  Widget _buildTab(AppState app, _ConnectTab tab) => switch (tab) {
+  Widget _buildTab(AppViewState app, _ConnectTab tab) => switch (tab) {
         _ConnectTab.bluetooth => _buildBluetoothTab(app),
         _ConnectTab.network => _buildNetworkTab(app),
         _ConnectTab.simulated => _buildSimulatedTab(app),
       };
 
-  Widget _buildBluetoothTab(AppState app) {
+  Widget _buildBluetoothTab(AppViewState app) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -329,7 +328,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     );
   }
 
-  Widget _buildNetworkTab(AppState app) {
+  Widget _buildNetworkTab(AppViewState app) {
     final saved = app.savedNetworkConnections;
     return ListView(
       padding: const EdgeInsets.all(16),
@@ -386,7 +385,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     );
   }
 
-  Widget _buildSimulatedTab(AppState app) {
+  Widget _buildSimulatedTab(AppViewState app) {
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
@@ -461,7 +460,7 @@ String _ago(int value, String unit) =>
 class _ConnectedDeviceCard extends StatelessWidget {
   const _ConnectedDeviceCard({required this.app});
 
-  final AppState app;
+  final AppViewState app;
 
   @override
   Widget build(BuildContext context) {

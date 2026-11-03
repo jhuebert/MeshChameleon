@@ -5,9 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_file_dialog/flutter_file_dialog.dart';
 import 'package:provider/provider.dart';
 
-import '../app_state.dart';
+import '../app_view_state.dart';
 import '../services/backup_codec.dart';
-import '../services/backup_service.dart';
 import '../widgets/app_snack_bar.dart';
 
 /// User-facing backup and restore, reachable from the Home screen.
@@ -41,7 +40,7 @@ class _BackupScreenState extends State<BackupScreen> {
 
     setState(() => _working = true);
     try {
-      final bytes = await context.read<AppState>().createBackup(passphrase);
+      final bytes = await context.read<AppViewState>().createBackup(passphrase);
       final name = 'meshchameleon-${_dateStamp()}.mcbackup';
       final path = await FlutterFileDialog.saveFile(
         params: SaveFileDialogParams(data: bytes, fileName: name),
@@ -92,7 +91,7 @@ class _BackupScreenState extends State<BackupScreen> {
 
     setState(() => _working = true);
     try {
-      final preview = await context.read<AppState>().inspectBackup(
+      final preview = await context.read<AppViewState>().inspectBackup(
             bytes,
             passphrase,
           );
@@ -103,7 +102,8 @@ class _BackupScreenState extends State<BackupScreen> {
       );
       if (confirmed != true || !mounted) return;
 
-      final restored = await context.read<AppState>().restoreBackup(preview);
+      final restored =
+          await context.read<AppViewState>().restoreBackup(preview);
       if (!mounted) return;
       if (restored) {
         showAppSnackBar(context, 'Backup restored', replace: false);

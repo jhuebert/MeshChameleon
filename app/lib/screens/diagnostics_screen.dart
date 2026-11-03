@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../app_state.dart';
+import '../app_view_state.dart';
 import '../services/diagnostics_snapshot.dart';
 import '../widgets/app_snack_bar.dart';
 
@@ -22,7 +22,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   @override
   void initState() {
     super.initState();
-    _snapshot = ValueNotifier(context.read<AppState>().diagnosticsSnapshot());
+    _snapshot =
+        ValueNotifier(context.read<AppViewState>().diagnosticsSnapshot());
     _startPeriodicRefresh();
   }
 
@@ -41,7 +42,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
 
   void _refresh() {
     if (!mounted) return;
-    _snapshot.value = context.read<AppState>().diagnosticsSnapshot();
+    _snapshot.value = context.read<AppViewState>().diagnosticsSnapshot();
   }
 
   void _pauseRefresh() {
@@ -59,7 +60,8 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
   }
 
   Future<void> _copyDiagnostics() async {
-    final report = context.read<AppState>().diagnosticsSnapshot().toReport();
+    final report =
+        context.read<AppViewState>().diagnosticsSnapshot().toReport();
     await Clipboard.setData(ClipboardData(text: report));
     if (!mounted) return;
     showAppSnackBar(context, 'Diagnostics copied', replace: false);

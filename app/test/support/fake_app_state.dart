@@ -1,18 +1,19 @@
 import 'dart:async';
-import 'dart:typed_data';
 
-import 'package:meshchameleon/app_state.dart';
-import 'package:meshchameleon/services/backup_service.dart';
+import 'package:device_link/device_link.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:meshchameleon/app_view_state.dart';
+import 'package:meshchameleon/services/build_info.dart';
 import 'package:meshchameleon/services/diagnostics_snapshot.dart';
-import 'package:meshchameleon/services/identity_index.dart';
-import 'package:meshchameleon/services/identity_runtime.dart';
+import 'package:mesh_protocol/mesh_protocol.dart';
 
-/// The shared widget-test double for [AppState].
+/// The shared widget-test double for [AppViewState].
 ///
-/// Screens receive this through `ChangeNotifierProvider<AppState>`; tests set
-/// the fields or callbacks for the workflow under test instead of subclassing
-/// the production composition root.
-class FakeAppState extends AppState {
+/// Screens receive this through `ChangeNotifierProvider<AppViewState>`; tests
+/// set the fields or callbacks for the workflow under test instead of
+/// constructing the real composition root and its storage graph.
+class FakeAppState extends ChangeNotifier implements AppViewState {
   FakeAppState({this.diagnosticsBuilder});
 
   // Identity catalog.
@@ -52,6 +53,39 @@ class FakeAppState extends AppState {
   // Diagnostics.
   final DiagnosticsSnapshot Function()? diagnosticsBuilder;
   int refreshes = 0;
+
+  @override
+  final List<String> logs = [];
+
+  @override
+  final BuildInfo buildInfo = BuildInfo.fallback();
+
+  @override
+  ProxyStatus proxyStatus = ProxyStatus.stopped;
+
+  @override
+  String? deviceLabel;
+
+  @override
+  bool deviceConnected = false;
+
+  @override
+  bool busy = false;
+
+  @override
+  int port = defaultCompanionPort;
+
+  @override
+  bool autoResume = false;
+
+  @override
+  SessionConfig? lastSession;
+
+  @override
+  bool? batteryOptimizationsIgnored;
+
+  @override
+  final List<SavedNetworkConnection> savedNetworkConnections = [];
 
   @override
   List<IdentitySummary> get identities => summaries;
@@ -107,9 +141,31 @@ class FakeAppState extends AppState {
   }
 
   @override
+  Future<bool> connectTcp({required String host, int? tcpPort}) async => false;
+
+  @override
+  Future<bool> connectBle(
+    BluetoothDevice device, {
+    String? displayName,
+  }) async =>
+      false;
+
+  @override
+  Future<bool> connectSimulated({RadioLink? simulatedLink}) async => false;
+
+  @override
+  Future<void> cancelPendingConnection() async {}
+
+  @override
   Future<void> stopProxy() async {
     stopProxyCalls++;
     proxyStatus = ProxyStatus.stopped;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> startProxy({int? serverPort}) async {
+    proxyStatus = ProxyStatus.running;
     notifyListeners();
   }
 
@@ -121,9 +177,43 @@ class FakeAppState extends AppState {
   }
 
   @override
+  Future<bool> setProxyPort(int value) async {
+    port = value;
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  Future<void> setAutoResume(bool value) async {
+    autoResume = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<bool> removeSavedNetworkConnection(
+    SavedNetworkConnection connection,
+  ) async {
+    savedNetworkConnections.remove(connection);
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  Future<bool> restoreSavedNetworkConnection(
+    SavedNetworkConnection connection,
+  ) async {
+    savedNetworkConnections.add(connection);
+    notifyListeners();
+    return true;
+  }
+
+  @override
   Future<void> refreshBatteryOptimizationStatus() async {
     batteryRefreshes++;
   }
+
+  @override
+  Future<void> openBatteryOptimizationSettings() async {}
 
   @override
   Future<Uint8List> createBackup(String passphrase) async {

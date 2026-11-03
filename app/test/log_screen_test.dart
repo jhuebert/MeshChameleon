@@ -21,7 +21,7 @@ void main() {
         .setMockMethodCallHandler(SystemChannels.platform, null));
 
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: LogScreen()),
       ),

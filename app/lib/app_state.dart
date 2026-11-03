@@ -8,6 +8,7 @@ import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
+import 'app_view_state.dart';
 import 'services/backup_codec.dart';
 import 'services/backup_service.dart';
 import 'services/ble_device_link.dart';
@@ -15,7 +16,6 @@ import 'services/build_info.dart';
 import 'services/device_capabilities.dart';
 import 'services/diagnostics_snapshot.dart';
 import 'services/foreground_service.dart';
-import 'services/identity_index.dart';
 import 'services/identity_manager.dart';
 import 'services/identity_repository.dart';
 import 'services/identity_runtime.dart';
@@ -23,10 +23,10 @@ import 'services/identity_store.dart';
 import 'services/network_connection_history.dart';
 import 'services/network_connection_store.dart';
 import 'services/notification_content.dart';
-import 'services/proxy_status.dart';
 import 'services/session_settings.dart';
 import 'services/session_store.dart';
 
+export 'app_view_state.dart';
 export 'services/notification_content.dart';
 export 'services/proxy_status.dart';
 
@@ -41,7 +41,7 @@ typedef TcpDeviceLinkFactory = RadioLink Function(
 
 /// Owns the device session, identity manager, proxy server, and backup state,
 /// and exposes them to the UI.
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier implements AppViewState {
   AppState({
     IdentityRepository? repository,
     IdentityStore? identityStore,
@@ -74,6 +74,7 @@ class AppState extends ChangeNotifier {
   final TcpDeviceLinkFactory _tcpLinkFactory;
 
   /// Installed build identity shown in the footer and diagnostics.
+  @override
   final BuildInfo buildInfo;
 
   /// Wall-clock start used for the session uptime shown in diagnostics.
@@ -100,6 +101,7 @@ class AppState extends ChangeNotifier {
 
   /// Build the presentation-safe diagnostics view. Cheap and synchronous:
   /// packet counters are already cached inside each live [MeshNode].
+  @override
   DiagnosticsSnapshot diagnosticsSnapshot() {
     final nodes = <String, MeshNode?>{
       for (final runtime in _manager?.runtimes ?? const <IdentityRuntime>[])
@@ -186,11 +188,16 @@ class AppState extends ChangeNotifier {
   RadioLink? link;
   CompanionServer? server;
 
+  @override
   int get port => _sessionSettings.port;
   set port(int value) => _sessionSettings.port = value;
+  @override
   ProxyStatus proxyStatus = ProxyStatus.stopped;
+  @override
   String? deviceLabel;
+  @override
   bool deviceConnected = false;
+  @override
   bool busy = false;
 
   /// True after a physical shutdown until the user explicitly connects again.
@@ -221,7 +228,9 @@ class AppState extends ChangeNotifier {
 
   /// Last device session (device link + proxy port), restored on launch when
   /// [autoResume] is on.
+  @override
   SessionConfig? get lastSession => _sessionSettings.lastSession;
+  @override
   bool get autoResume => _sessionSettings.autoResume;
 
   /// Successful network targets, newest first.
@@ -232,11 +241,13 @@ class AppState extends ChangeNotifier {
     onChanged: notifyListeners,
   );
 
+  @override
   List<SavedNetworkConnection> get savedNetworkConnections =>
       _networkHistory.connections;
 
   /// Whether the OS exempts the app from battery optimizations (null until
   /// queried; always null on non-Android platforms).
+  @override
   bool? batteryOptimizationsIgnored;
 
   /// Diagnostic age/staleness for the radio's last good voltage sample.
@@ -244,6 +255,7 @@ class AppState extends ChangeNotifier {
   bool get batteryStale => node?.batteryStale ?? true;
   String? get batteryDiagnostic => node?.batteryDiagnostic;
 
+  @override
   final List<String> logs = [];
   bool _disposed = false;
 
@@ -251,9 +263,13 @@ class AppState extends ChangeNotifier {
   // Identity-facing state
   // -------------------------------------------------------------------------
 
+  @override
   List<IdentitySummary> get identities => _manager?.summaries ?? const [];
+  @override
   IdentitySummary? get activeIdentity => _manager?.activeSummary;
+  @override
   String? get identityDatabaseError => _manager?.databaseError;
+  @override
   bool get identitiesLoaded => _manager?.loaded ?? false;
 
   /// The active virtual identity exposed to the companion client.
@@ -319,6 +335,7 @@ class AppState extends ChangeNotifier {
   ///
   /// A fresh install auto-creates and activates one identity. A corrupt
   /// catalog is surfaced through [identityDatabaseError] rather than replaced.
+  @override
   Future<void> loadIdentities({bool resume = true}) async {
     try {
       final backup = await _ensureBackupService();
@@ -336,6 +353,7 @@ class AppState extends ChangeNotifier {
     if (resume) await _maybeResumeSession();
   }
 
+  @override
   Future<String> suggestIdentityName() async {
     final manager = await _ensureManager();
     return manager.suggestName();
@@ -343,6 +361,7 @@ class AppState extends ChangeNotifier {
 
   /// Create an additional identity. It is inactive; the active selection does
   /// not change.
+  @override
   Future<IdentityRecord?> createIdentity({String? name}) async {
     if (busy) return null;
     if (identityDatabaseError != null) return null;
@@ -364,6 +383,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Make [id] the identity served to the MeshCore app.
+  @override
   Future<bool> activateIdentity(String id) async {
     if (busy) return false;
     final manager = _manager;
@@ -394,6 +414,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Enable or disable an identity. The active identity cannot be disabled.
+  @override
   Future<bool> setIdentityEnabled(String id, bool enabled) async {
     if (busy) return false;
     final manager = _manager;
@@ -419,6 +440,7 @@ class AppState extends ChangeNotifier {
 
   /// Delete an inactive identity. The manager and repository enforce the
   /// active/last-identity rules.
+  @override
   Future<bool> deleteIdentity(String id) async {
     if (busy) return false;
     final manager = _manager;
@@ -441,6 +463,7 @@ class AppState extends ChangeNotifier {
 
   /// Clear contacts, channels, messages, advert paths, and non-name prefs for
   /// one identity while keeping its key and current name.
+  @override
   Future<bool> clearLocalData(String id) async {
     if (busy) return false;
     final manager = _manager;
@@ -484,6 +507,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Capture all local data into a passphrase-encrypted backup file.
+  @override
   Future<Uint8List> createBackup(String passphrase) async {
     final service = await _ensureBackupService();
     final payload = await service.capture();
@@ -495,6 +519,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Decrypt and validate a backup without changing local data.
+  @override
   Future<BackupPreview> inspectBackup(
     Uint8List bytes,
     String passphrase,
@@ -504,6 +529,7 @@ class AppState extends ChangeNotifier {
   }
 
   /// Replace all local data with a validated backup.
+  @override
   Future<bool> restoreBackup(BackupPreview preview) async {
     if (busy) return false;
     busy = true;
@@ -541,6 +567,7 @@ class AppState extends ChangeNotifier {
   ///
   /// Returns true only when the link attached and the session was recorded.
   /// Failed history writes are logged without failing the connection.
+  @override
   Future<bool> connectTcp({required String host, int? tcpPort}) =>
       _runConnectionTransition(() => _connectTcp(host: host, tcpPort: tcpPort));
 
@@ -571,6 +598,7 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  @override
   Future<bool> connectBle(BluetoothDevice device, {String? displayName}) =>
       _runConnectionTransition(
         () => _connectBle(device, displayName: displayName),
@@ -613,6 +641,7 @@ class AppState extends ChangeNotifier {
   /// Exercises every live identity, the companion server, and the UI without
   /// any radio: [FakeDeviceLink] answers device queries and radio-parameter
   /// requests, and its transmissions never leave the process.
+  @override
   Future<bool> connectSimulated({RadioLink? simulatedLink}) =>
       _runConnectionTransition(
         () => _connectSimulated(simulatedLink: simulatedLink),
@@ -638,6 +667,7 @@ class AppState extends ChangeNotifier {
 
   /// Remove a saved target. The in-memory list changes only after the file
   /// write succeeds, so a failed delete leaves the card visible.
+  @override
   Future<bool> removeSavedNetworkConnection(
     SavedNetworkConnection connection,
   ) =>
@@ -646,6 +676,7 @@ class AppState extends ChangeNotifier {
   /// Restore a removed target with its original timestamp.
   ///
   /// A newer entry for the same key wins if the user reconnected before Undo.
+  @override
   Future<bool> restoreSavedNetworkConnection(
     SavedNetworkConnection connection,
   ) =>
@@ -740,6 +771,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  @override
   Future<void> cancelPendingConnection() async {
     final pending = _connectingLink;
     if (pending == null) return;
@@ -751,6 +783,7 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  @override
   Future<bool> setProxyPort(int value) async {
     if (!isValidTcpPort(value) || proxyStatus == ProxyStatus.running) {
       return false;
@@ -772,6 +805,7 @@ class AppState extends ChangeNotifier {
 
   /// Toggle automatic session restore (reconnect the last device and restart the
   /// proxy when the app opens).
+  @override
   Future<void> setAutoResume(bool value) async {
     await _sessionSettings.setAutoResume(value);
     notifyListeners();
@@ -827,6 +861,7 @@ class AppState extends ChangeNotifier {
 
   /// Refresh whether the OS currently exempts the app from battery
   /// optimizations. No-op off Android.
+  @override
   Future<void> refreshBatteryOptimizationStatus() async {
     if (!_foreground.isSupported) return;
     try {
@@ -841,6 +876,7 @@ class AppState extends ChangeNotifier {
   /// Open the system battery-optimization settings so the user can set
   /// MeshChameleon to unrestricted. The status is re-checked when the app
   /// returns to the foreground.
+  @override
   Future<void> openBatteryOptimizationSettings() async {
     if (!_foreground.isSupported) return;
     try {
@@ -957,6 +993,7 @@ class AppState extends ChangeNotifier {
   Future<void> _queueNodePoweredOff() =>
       _runConnectionTransition(_onNodePoweredOff);
 
+  @override
   Future<void> disconnectDevice() =>
       _runConnectionTransition(_disconnectDevice);
 
@@ -1053,6 +1090,7 @@ class AppState extends ChangeNotifier {
     return run;
   }
 
+  @override
   Future<void> startProxy({int? serverPort}) =>
       _runProxyTransition(() => _startProxy(serverPort));
 
@@ -1088,6 +1126,7 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  @override
   Future<void> stopProxy() => _runProxyTransition(_stopProxy);
 
   Future<void> _stopProxy() async {

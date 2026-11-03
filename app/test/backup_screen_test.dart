@@ -13,7 +13,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider(
+      ChangeNotifierProvider<AppViewState>(
         create: (_) => AppState(),
         child: const MaterialApp(home: HomeScreen()),
       ),
@@ -36,7 +36,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(
-      ChangeNotifierProvider(
+      ChangeNotifierProvider<AppViewState>(
         create: (_) => AppState(),
         child: const MaterialApp(home: BackupScreen()),
       ),

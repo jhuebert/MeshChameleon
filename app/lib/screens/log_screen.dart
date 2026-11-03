@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
-import '../app_state.dart';
+import '../app_view_state.dart';
 import '../widgets/app_snack_bar.dart';
 
 class LogScreen extends StatelessWidget {
@@ -16,7 +16,7 @@ class LogScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final logs = context.watch<AppState>().logs;
+    final logs = context.watch<AppViewState>().logs;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Log'),

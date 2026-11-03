@@ -5,8 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:provider/provider.dart';
 
-import '../app_state.dart';
-import '../services/identity_runtime.dart';
+import '../app_view_state.dart';
 import '../widgets/app_snack_bar.dart';
 
 class IdentitiesScreen extends StatefulWidget {
@@ -18,7 +17,7 @@ class IdentitiesScreen extends StatefulWidget {
 
 class _IdentitiesScreenState extends State<IdentitiesScreen> {
   Future<void> _activate(IdentitySummary summary) async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     if (app.busy || summary.active || !summary.keyAvailable) return;
     if (!summary.enabled) {
       _snack('Enable ${summary.name} before activating it');
@@ -34,7 +33,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
   }
 
   Future<void> _setEnabled(IdentitySummary summary, bool enabled) async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     if (app.busy || summary.enabled == enabled) return;
     final ok = await app.setIdentityEnabled(summary.id, enabled);
     if (!mounted) return;
@@ -44,7 +43,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
   }
 
   Future<void> _create() async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     if (app.busy || app.identityDatabaseError != null) return;
     final String suggestion;
     try {
@@ -69,7 +68,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
       );
 
   Future<void> _clear(IdentitySummary summary) async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     if (app.busy) return;
     final confirmed = await _confirm(
       title: 'Clear local data?',
@@ -88,7 +87,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
   }
 
   Future<void> _delete(IdentitySummary summary) async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     if (app.busy || summary.active) return;
     final confirmed = await _confirm(
       title: 'Delete identity?',
@@ -137,7 +136,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
+    final app = context.watch<AppViewState>();
     final error = app.identityDatabaseError;
     if (error != null) {
       return Scaffold(

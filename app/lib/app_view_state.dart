@@ -1,0 +1,83 @@
+import 'package:device_link/device_link.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+
+import 'services/backup_service.dart';
+import 'services/build_info.dart';
+import 'services/diagnostics_snapshot.dart';
+import 'services/identity_index.dart';
+import 'services/identity_runtime.dart';
+import 'services/network_connection_store.dart';
+import 'services/proxy_status.dart';
+import 'services/session_store.dart';
+
+export 'services/backup_service.dart' show BackupPreview;
+export 'services/identity_index.dart' show IdentityRecord;
+export 'services/identity_runtime.dart' show IdentitySummary;
+export 'services/network_connection_store.dart' show SavedNetworkConnection;
+export 'services/proxy_status.dart';
+export 'services/session_store.dart' show DeviceTargetKind, SessionConfig;
+
+/// The read/write surface screens use from the application state.
+///
+/// [AppState] implements this as the composition root; widget tests provide a
+/// fake that implements only this interface instead of extending the real
+/// storage graph. Keep this list to what screens actually need: application
+/// services and platform adapters stay off it.
+abstract class AppViewState extends ChangeNotifier {
+  List<String> get logs;
+
+  BuildInfo get buildInfo;
+
+  DiagnosticsSnapshot diagnosticsSnapshot();
+
+  // Identity catalog.
+  List<IdentitySummary> get identities;
+  IdentitySummary? get activeIdentity;
+  bool get identitiesLoaded;
+  String? get identityDatabaseError;
+
+  Future<void> loadIdentities({bool resume = true});
+  Future<String> suggestIdentityName();
+  Future<IdentityRecord?> createIdentity({String? name});
+  Future<bool> activateIdentity(String id);
+  Future<bool> setIdentityEnabled(String id, bool enabled);
+  Future<bool> deleteIdentity(String id);
+  Future<bool> clearLocalData(String id);
+
+  // Backup and restore.
+  Future<Uint8List> createBackup(String passphrase);
+  Future<BackupPreview> inspectBackup(Uint8List bytes, String passphrase);
+  Future<bool> restoreBackup(BackupPreview preview);
+
+  // Device session.
+  ProxyStatus get proxyStatus;
+  bool get busy;
+  String? get deviceLabel;
+  bool get deviceConnected;
+  int get port;
+  bool get autoResume;
+  SessionConfig? get lastSession;
+
+  Future<bool> connectTcp({required String host, int? tcpPort});
+  Future<bool> connectBle(BluetoothDevice device, {String? displayName});
+  Future<bool> connectSimulated({RadioLink? simulatedLink});
+  Future<void> cancelPendingConnection();
+  Future<void> disconnectDevice();
+  Future<bool> setProxyPort(int value);
+  Future<void> setAutoResume(bool value);
+  Future<void> startProxy({int? serverPort});
+  Future<void> stopProxy();
+
+  // Saved network targets.
+  List<SavedNetworkConnection> get savedNetworkConnections;
+  Future<bool> removeSavedNetworkConnection(SavedNetworkConnection connection);
+  Future<bool> restoreSavedNetworkConnection(
+    SavedNetworkConnection connection,
+  );
+
+  // Battery optimization state.
+  bool? get batteryOptimizationsIgnored;
+  Future<void> refreshBatteryOptimizationStatus();
+  Future<void> openBatteryOptimizationSettings();
+}

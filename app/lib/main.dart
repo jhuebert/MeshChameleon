@@ -26,7 +26,7 @@ class ProxyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
+    return ChangeNotifierProvider<AppViewState>(
       create: (_) => AppState(buildInfo: buildInfo)..loadIdentities(),
       child: MaterialApp(
         title: 'MeshChameleon',
@@ -52,7 +52,7 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
+    final app = context.watch<AppViewState>();
     final active = app.activeIdentity;
     return Scaffold(
       appBar: AppBar(
@@ -235,7 +235,7 @@ class _ProxyPortCardState extends State<_ProxyPortCard> {
   }
 
   Future<void> _save() async {
-    final app = context.read<AppState>();
+    final app = context.read<AppViewState>();
     final value = int.tryParse(_controller.text.trim());
     if (value == null ||
         !isValidTcpPort(value) ||
@@ -254,7 +254,7 @@ class _ProxyPortCardState extends State<_ProxyPortCard> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppState>();
+    final app = context.watch<AppViewState>();
     final enabled = app.proxyStatus == ProxyStatus.stopped && !app.busy;
     return Card(
       child: Padding(
@@ -307,7 +307,9 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<AppState>().refreshBatteryOptimizationStatus();
+      if (mounted) {
+        context.read<AppViewState>().refreshBatteryOptimizationStatus();
+      }
     });
   }
 
@@ -322,7 +324,7 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
     // The user may toggle the exemption in system settings, so re-check on
     // return to the foreground.
     if (state == AppLifecycleState.resumed && mounted) {
-      context.read<AppState>().refreshBatteryOptimizationStatus();
+      context.read<AppViewState>().refreshBatteryOptimizationStatus();
     }
   }
 
@@ -331,7 +333,7 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
     if (defaultTargetPlatform != TargetPlatform.android) {
       return const SizedBox.shrink();
     }
-    final app = context.watch<AppState>();
+    final app = context.watch<AppViewState>();
     final ignored = app.batteryOptimizationsIgnored;
     return Card(
       child: ListTile(
@@ -382,7 +384,7 @@ class _BackupCard extends StatelessWidget {
 class _StatusCard extends StatelessWidget {
   const _StatusCard({required this.app, required this.identityLabel});
 
-  final AppState app;
+  final AppViewState app;
   final String identityLabel;
 
   @override
