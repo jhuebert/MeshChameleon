@@ -366,7 +366,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     // its target instead of replacing the saved list.
     await _networkHistory.load();
     notifyListeners();
-    if (resume) await _maybeResumeSession();
+    if (resume) await _connection.resumeSession();
   }
 
   @override
@@ -523,50 +523,6 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     notifyListeners();
   }
 
-  /// Reconnect the saved device and restart the proxy after a launch, if the
-  /// user enabled [autoResume]. Best-effort: failures are logged, not fatal.
-  Future<void> _maybeResumeSession() async {
-    final session = lastSession;
-    if (session == null ||
-        !autoResume ||
-        identities.isEmpty ||
-        identityDatabaseError != null ||
-        deviceConnected) {
-      return;
-    }
-    if (session.intentionallyOff) {
-      log('Last session ended with an intentional shutdown; not auto-resuming');
-      return;
-    }
-    log('Resuming last device session ...');
-    try {
-      switch (session.kind) {
-        case DeviceTargetKind.tcp:
-          final host = session.host;
-          if (host == null) return;
-          await connectTcp(host: host, tcpPort: session.devicePort);
-        case DeviceTargetKind.ble:
-          if (!capabilities.supportsBle) {
-            log('Saved session used BLE, which this build does not support');
-            return;
-          }
-          final remoteId = session.bleRemoteId;
-          if (remoteId == null) return;
-          await connectBle(
-            BluetoothDevice.fromId(remoteId),
-            displayName: session.bleName,
-          );
-        case DeviceTargetKind.simulated:
-          await connectSimulated();
-      }
-      if (deviceConnected) {
-        await startProxy(serverPort: session.proxyPort);
-      }
-    } catch (e) {
-      log('Session resume failed: $e');
-    }
-  }
-
   // -------------------------------------------------------------------------
   // Background reliability
   // -------------------------------------------------------------------------
@@ -603,6 +559,10 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
 
   @override
   bool get proxyRunning => _proxy.running;
+
+  @override
+  bool get identityCatalogReady =>
+      identities.isNotEmpty && identityDatabaseError == null;
 
   @override
   Future<void> startForegroundService() => _foreground.start();

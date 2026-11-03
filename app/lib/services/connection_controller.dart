@@ -37,6 +37,10 @@ abstract class ConnectionHost {
 
   bool get proxyRunning;
   Future<void> stopProxy();
+  Future<void> startProxy({int? serverPort});
+
+  /// True when the identity catalog is loaded and usable.
+  bool get identityCatalogReady;
 
   Future<void> startForegroundService();
   Future<void> stopForegroundService();
@@ -283,6 +287,51 @@ class ConnectionController {
       _connectCancelled = false;
       host.busy = false;
       host.notify();
+    }
+  }
+
+  /// Reconnect the saved device and restart the proxy after a launch, if the
+  /// user enabled auto-resume. Best-effort: failures are logged, not fatal.
+  Future<void> resumeSession() async {
+    final session = sessionSettings.lastSession;
+    if (session == null ||
+        !sessionSettings.autoResume ||
+        !host.identityCatalogReady ||
+        deviceConnected) {
+      return;
+    }
+    if (session.intentionallyOff) {
+      host.log(
+          'Last session ended with an intentional shutdown; not auto-resuming');
+      return;
+    }
+    host.log('Resuming last device session ...');
+    try {
+      switch (session.kind) {
+        case DeviceTargetKind.tcp:
+          final hostName = session.host;
+          if (hostName == null) return;
+          await connectTcp(host: hostName, tcpPort: session.devicePort);
+        case DeviceTargetKind.ble:
+          if (!capabilities.supportsBle) {
+            host.log(
+                'Saved session used BLE, which this build does not support');
+            return;
+          }
+          final remoteId = session.bleRemoteId;
+          if (remoteId == null) return;
+          await connectBle(
+            BluetoothDevice.fromId(remoteId),
+            displayName: session.bleName,
+          );
+        case DeviceTargetKind.simulated:
+          await connectSimulated();
+      }
+      if (deviceConnected) {
+        await host.startProxy(serverPort: session.proxyPort);
+      }
+    } catch (e) {
+      host.log('Session resume failed: $e');
     }
   }
 
