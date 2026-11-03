@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../app_view_state.dart';
 import '../widgets/app_snack_bar.dart';
+import '../widgets/app_surfaces.dart';
 
 class IdentitiesScreen extends StatefulWidget {
   const IdentitiesScreen({super.key});
@@ -107,30 +108,14 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
     required String title,
     required String detail,
     required String action,
-  }) async {
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(title),
-        content: Text(detail),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(action),
-          ),
-        ],
-      ),
-    );
-    return result ?? false;
-  }
+  }) =>
+      showConfirmDialog(
+        context,
+        title: title,
+        message: detail,
+        confirmLabel: action,
+        destructive: true,
+      );
 
   void _snack(String message) =>
       showAppSnackBar(context, message, replace: false);
@@ -145,21 +130,11 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.storage, size: 48),
-                const SizedBox(height: 16),
-                const Text('Identity database unavailable',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                const SizedBox(height: 8),
-                Text(error, textAlign: TextAlign.center),
-                const SizedBox(height: 16),
-                FilledButton(
-                  onPressed: app.busy ? null : app.loadIdentities,
-                  child: const Text('Retry'),
-                ),
-              ],
+            child: ErrorBanner(
+              title: 'Identity database unavailable',
+              message: error,
+              actionLabel: 'Retry',
+              onAction: app.busy ? null : app.loadIdentities,
             ),
           ),
         ),
@@ -182,7 +157,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
       ),
       body: Column(
         children: [
-          if (app.busy) const LinearProgressIndicator(),
+          if (app.busy) const BusyStrip(padding: EdgeInsets.zero),
           Expanded(
             child: identities.isEmpty
                 ? _EmptyState(onCreate: app.busy ? null : _create)

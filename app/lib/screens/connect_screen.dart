@@ -10,6 +10,7 @@ import '../services/ble_device_link.dart';
 import '../services/device_capabilities.dart';
 import '../services/network_connection_store.dart';
 import '../widgets/app_snack_bar.dart';
+import '../widgets/app_surfaces.dart';
 import '../widgets/device_target_icon.dart';
 
 enum _ConnectTab {
@@ -256,7 +257,7 @@ class _ConnectScreenState extends State<ConnectScreen>
                 for (final tab in _tabs) Tab(text: tab.label),
               ],
             ),
-            if (app.busy) const LinearProgressIndicator(),
+            if (app.busy) const BusyStrip(padding: EdgeInsets.zero),
             Expanded(
               child: TabBarView(
                 controller: _tabController,
@@ -303,7 +304,7 @@ class _ConnectScreenState extends State<ConnectScreen>
             ],
           ),
           const SizedBox(height: 8),
-          const LinearProgressIndicator(),
+          const BusyStrip(),
           const SizedBox(height: 8),
           StreamBuilder<List<ScanResult>>(
             stream: _scanResults,
@@ -423,20 +424,18 @@ class _SavedConnectionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final localizations = MaterialLocalizations.of(context);
-    return Card(
-      child: ListTile(
-        title: Text(connection.displayAddress),
-        subtitle: Text(
-          'Last connected '
+    return ActionTile(
+      icon: Icons.lan_outlined,
+      title: connection.displayAddress,
+      subtitle: 'Last connected '
           '${_relativeTime(connection.lastConnectedAt, localizations)}',
-        ),
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_outline),
-          tooltip: 'Remove saved connection',
-          onPressed: busy ? null : onDelete,
-        ),
-        onTap: busy ? null : onTap,
+      trailing: IconButton(
+        icon: const Icon(Icons.delete_outline),
+        tooltip: 'Remove saved connection',
+        onPressed: busy ? null : onDelete,
       ),
+      onTap: onTap,
+      enabled: !busy,
     );
   }
 }
@@ -464,16 +463,15 @@ class _ConnectedDeviceCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: Icon(deviceTargetIcon(app.lastSession?.kind)),
-        title: Text(app.deviceLabel ?? 'Connected device'),
-        subtitle: const Text('Connected'),
-        trailing: TextButton(
-          onPressed: app.busy ? null : app.disconnectDevice,
-          child: const Text('Disconnect'),
-        ),
+    return ActionTile(
+      icon: deviceTargetIcon(app.lastSession?.kind),
+      title: app.deviceLabel ?? 'Connected device',
+      subtitle: 'Connected',
+      trailing: TextButton(
+        onPressed: app.busy ? null : app.disconnectDevice,
+        child: const Text('Disconnect'),
       ),
+      enabled: false,
     );
   }
 }

@@ -11,6 +11,7 @@ import 'screens/log_screen.dart';
 import 'services/build_info.dart';
 import 'services/network_connection_store.dart';
 import 'widgets/app_snack_bar.dart';
+import 'widgets/app_surfaces.dart';
 import 'widgets/device_target_icon.dart';
 
 void main() async {
@@ -93,41 +94,31 @@ class HomeScreen extends StatelessWidget {
                 : '${active.name} (#${active.prefixHex})',
           ),
           const SizedBox(height: 12),
-          Card(
-            child: ListTile(
-              leading: Icon(
-                deviceTargetIcon(
-                  app.deviceConnected ? app.lastSession?.kind : null,
-                ),
-              ),
-              title: const Text('Device link'),
-              subtitle: Text(app.deviceLabel ?? 'Not connected'),
-              trailing: app.deviceConnected
-                  ? TextButton(
-                      onPressed: app.busy ? null : app.disconnectDevice,
-                      child: const Text('Disconnect'),
-                    )
-                  : const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ConnectScreen())),
+          ActionTile(
+            icon: deviceTargetIcon(
+              app.deviceConnected ? app.lastSession?.kind : null,
+            ),
+            title: 'Device link',
+            subtitle: app.deviceLabel ?? 'Not connected',
+            trailing: app.deviceConnected
+                ? TextButton(
+                    onPressed: app.busy ? null : app.disconnectDevice,
+                    child: const Text('Disconnect'),
+                  )
+                : null,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ConnectScreen()),
             ),
           ),
-          Card(
-            child: ListTile(
-              leading: Icon(
-                active == null ? Icons.key_off : Icons.key,
-              ),
-              title: Text(active?.name ?? 'No identity'),
-              subtitle: Text(
-                active == null
-                    ? 'Create an identity'
-                    : '#${active.prefixHex}'
-                        '${active.live ? ' · Live' : ''}',
-              ),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const IdentitiesScreen()),
-              ),
+          ActionTile(
+            icon: active == null ? Icons.key_off : Icons.key,
+            title: active?.name ?? 'No identity',
+            subtitle: active == null
+                ? 'Create an identity'
+                : '#${active.prefixHex}'
+                    '${active.live ? ' · Live' : ''}',
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const IdentitiesScreen()),
             ),
           ),
           _ProxyPortCard(port: app.port),
@@ -365,17 +356,13 @@ class _BackupCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: ListTile(
-        leading: const Icon(Icons.settings_backup_restore),
-        title: const Text('Backup & restore'),
-        subtitle: const Text(
+    return ActionTile(
+      icon: Icons.settings_backup_restore,
+      title: 'Backup & restore',
+      subtitle:
           'Save or restore identities, contacts, channels, messages, and settings',
-        ),
-        trailing: const Icon(Icons.chevron_right),
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const BackupScreen()),
-        ),
+      onTap: () => Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const BackupScreen()),
       ),
     );
   }
@@ -389,23 +376,19 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Identity: $identityLabel',
-                style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 4),
-            Text('Identities: ${app.identities.length}'
-                ' (${app.identities.where((summary) => summary.live).length} live)'),
-            Text(
-                'Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
-            Text('Proxy: ${app.proxyStatus.name}'
-                '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),
-          ],
-        ),
+    return StatusCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Identity: $identityLabel',
+              style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          Text('Identities: ${app.identities.length}'
+              ' (${app.identities.where((summary) => summary.live).length} live)'),
+          Text('Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
+          Text('Proxy: ${app.proxyStatus.name}'
+              '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),
+        ],
       ),
     );
   }

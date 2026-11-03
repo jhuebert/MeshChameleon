@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../app_view_state.dart';
 import '../services/backup_codec.dart';
 import '../widgets/app_snack_bar.dart';
+import '../widgets/app_surfaces.dart';
 
 /// User-facing backup and restore, reachable from the Home screen.
 ///
@@ -122,18 +123,10 @@ class _BackupScreenState extends State<BackupScreen> {
 
   void _showError(String message) {
     if (!mounted) return;
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Backup & restore'),
-        content: Text(message),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('OK'),
-          ),
-        ],
-      ),
+    showErrorDialog(
+      context,
+      title: 'Backup & restore',
+      message: message,
     );
   }
 
@@ -145,30 +138,27 @@ class _BackupScreenState extends State<BackupScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.lock_outline,
-                    size: 32,
-                    color: theme.colorScheme.primary,
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    'One encrypted file',
-                    style: theme.textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Save your identities, contacts, channels, messages, and '
-                    'settings in one file. You choose the passphrase; without '
-                    'it the file cannot be opened.',
-                  ),
-                ],
-              ),
+          StatusCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.lock_outline,
+                  size: 32,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'One encrypted file',
+                  style: theme.textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Save your identities, contacts, channels, messages, and '
+                  'settings in one file. You choose the passphrase; without '
+                  'it the file cannot be opened.',
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 16),
@@ -183,10 +173,7 @@ class _BackupScreenState extends State<BackupScreen> {
             icon: const Icon(Icons.restore),
             label: const Text('Restore from backup'),
           ),
-          if (_working) ...[
-            const SizedBox(height: 16),
-            const LinearProgressIndicator(),
-          ],
+          if (_working) const BusyStrip(),
           const SizedBox(height: 24),
           Text(
             'Keep the file and passphrase safe',
