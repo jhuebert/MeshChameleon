@@ -40,13 +40,18 @@
       ]
     },
     {
+      "description": "The Flutter plugin loader ships inside the Flutter SDK includeBuild, not a Maven repository",
+      "matchManagers": ["gradle"],
+      "matchDepNames": ["dev.flutter.flutter-plugin-loader"],
+      "enabled": false
+    },
+    {
       "description": "Group the Android Gradle toolchain",
       "groupName": "Android Gradle toolchain",
       "matchManagers": ["gradle", "gradle-wrapper"],
       "matchPackageNames": [
         "com.android.application",
         "org.jetbrains.kotlin.android",
-        "dev.flutter.flutter-plugin-loader",
         "gradle"
       ]
     },
