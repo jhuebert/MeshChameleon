@@ -9,6 +9,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'identity_index.dart';
 import 'identity_repository.dart';
 import 'identity_runtime.dart';
+import 'identity_runtime_builder.dart';
 import 'local_mesh_router.dart';
 
 /// Owns the identity catalog, all live runtimes, the shared radio hub, and the
@@ -207,6 +208,23 @@ class IdentityManager {
     _notifyNow();
   }
 
+  IdentityRuntimeBuilder _runtimeBuilder() => IdentityRuntimeBuilder(
+        repository: repository,
+        router: _router,
+        devicePublicKey: _devicePublicKey,
+        onLog: onLog,
+        onRuntimeCreated: (runtime) {
+          _runtimes.add(runtime);
+          _runtimeById[runtime.record.id] = runtime;
+        },
+        onIdentityChanged: _handleIdentityChanged,
+        onStateChanged: _handleStateChanged,
+        onPhysicalConfigChanged: _handlePhysicalConfigChanged,
+        onPoweredOff: onPoweredOff,
+        validateImportedKey: _validateImportedKey,
+        onRecordChanged: _replaceRecord,
+      );
+
   Future<void> _startRuntime(
     IdentityRecord record, {
     required SharedRadioHub hub,
@@ -214,114 +232,18 @@ class IdentityManager {
     required RadioParams radioParams,
     required TuningParams? tuning,
     required Set<String> seenKeys,
-  }) async {
-    if (!record.enabled) return;
-    final runtime = IdentityRuntime(record);
-    _runtimes.add(runtime);
-    _runtimeById[record.id] = runtime;
-
-    final identity = await repository.loadKey(record.id);
-    if (identity == null) {
-      runtime.unavailableReason = 'Key unavailable';
-      return;
-    }
-    final publicHex = bytesToHex(identity.publicKey);
-    if (_devicePublicKey != null &&
-        bytesToHex(_devicePublicKey!) == publicHex) {
-      runtime.unavailableReason = 'Conflicts with the attached companion';
-      onLog?.call('Identity ${record.id} conflicts with the attached radio');
-      return;
-    }
-    if (!seenKeys.add(publicHex)) {
-      runtime.unavailableReason = 'Duplicate identity key';
-      onLog?.call('Identity ${record.id} duplicates another identity key');
-      return;
-    }
-
-    var effectiveRecord = record;
-    if (!bytesEqual(record.publicKey, identity.publicKey)) {
-      try {
-        effectiveRecord = await repository.updatePublicKey(
-          record.id,
-          identity.publicKey,
-          attachedDeviceKeyHex:
-              _devicePublicKey == null ? null : bytesToHex(_devicePublicKey!),
-        );
-        _replaceRecord(effectiveRecord);
-        onLog?.call('Reconciled public key for identity ${record.id}');
-      } catch (e) {
-        runtime.unavailableReason = 'Identity key conflict';
-        onLog?.call('Could not reconcile identity key: $e');
-        return;
-      }
-    }
-
-    // Quarantine a corrupt state file before the node's lenient store load
-    // would otherwise start fresh silently. A future schema is not corrupt:
-    // keep the file and mark this runtime unavailable until the app is updated.
-    try {
-      await repository.loadState(record.id);
-    } on NodeStateVersionException catch (e) {
-      runtime.unavailableReason = e.message;
-      onLog?.call(
-        'Could not start identity ${record.id}: ${e.message}',
-      );
-      return;
-    }
-    final store = repository.openNodeStore(record.id);
-    final linkView = hub.viewFor(record.id);
-    final MeshNode node;
-    try {
-      node = MeshNode(
-        identity: identity,
-        link: linkView,
+  }) =>
+      _runtimeBuilder().start(
+        record,
+        hub: hub,
         physical: physical,
-        store: store,
-        prefs: NodePrefs(nodeName: effectiveRecord.name),
-        identityPersistence: repository.persistenceFor(
-          record.id,
-          validate: (candidate) => _validateImportedKey(record.id, candidate),
-        ),
-        onIdentityChanged: (changed) =>
-            _handleIdentityChanged(runtime, changed),
-        onStateChanged: _handleStateChanged,
-        onPhysicalConfigChanged: () => _handlePhysicalConfigChanged(runtime),
-        onPoweredOff: onPoweredOff,
-        localRouter: _router,
-        attachedDevicePublicKey: _devicePublicKey,
+        radioParams: radioParams,
+        tuning: tuning,
+        seenKeys: seenKeys,
       );
-      await node.load();
-      node.adoptPhysicalCapabilities(physical);
-      node.syncRadioParams(radioParams);
-      if (tuning != null) node.syncPhysicalState(tuning: tuning);
-    } catch (e) {
-      runtime.unavailableReason = 'Could not load identity state';
-      onLog?.call('Could not start identity ${record.id}: $e');
-      return;
-    }
 
-    runtime
-      ..identity = identity
-      ..node = node
-      ..unavailableReason = null;
-    await _reconcileName(runtime);
-    node.start();
-    onLog?.call('Started identity ${runtime.record.name} (${record.id})');
-  }
-
-  Future<void> _reconcileName(IdentityRuntime runtime) async {
-    final node = runtime.node;
-    if (node == null) return;
-    final name = node.prefs.nodeName;
-    if (name == runtime.record.name) return;
-    try {
-      final updated = await repository.updateName(runtime.record.id, name);
-      runtime.record = updated;
-      _replaceRecord(updated);
-    } catch (e) {
-      onLog?.call('Could not cache identity name: $e');
-    }
-  }
+  Future<void> _reconcileName(IdentityRuntime runtime) =>
+      _runtimeBuilder().reconcileName(runtime);
 
   void _replaceRecord(IdentityRecord record) {
     final index = _index;

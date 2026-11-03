@@ -37,6 +37,15 @@ class IdentitySummary {
   final int queuedChannel;
   final String? unavailableReason;
 
+  /// Whether this identity can be selected as the active virtual identity.
+  bool get canActivate => enabled && keyAvailable && unavailableReason == null;
+
+  /// The active identity cannot be disabled from the list.
+  bool get canDisable => !active;
+
+  /// The active identity cannot be deleted from the list.
+  bool get canDelete => !active;
+
   /// First 4 public-key bytes (8 hex characters).
   String get prefixHex => bytesToHex(
         publicKey.sublist(0, publicKey.length < 4 ? publicKey.length : 4),

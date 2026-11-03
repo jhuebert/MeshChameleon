@@ -18,11 +18,12 @@ class IdentitiesScreen extends StatefulWidget {
 class _IdentitiesScreenState extends State<IdentitiesScreen> {
   Future<void> _activate(IdentitySummary summary) async {
     final app = context.read<AppViewState>();
-    if (app.busy || summary.active || !summary.keyAvailable) return;
+    if (app.busy || summary.active) return;
     if (!summary.enabled) {
       _snack('Enable ${summary.name} before activating it');
       return;
     }
+    if (!summary.canActivate) return;
     final ok = await app.activateIdentity(summary.id);
     if (!mounted) return;
     if (ok) {
@@ -193,8 +194,8 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
                       return _IdentityCard(
                         summary: summary,
                         busy: app.busy,
-                        canDelete: !summary.active && identities.length > 1,
-                        canDisable: !summary.active,
+                        canDelete: summary.canDelete && identities.length > 1,
+                        canDisable: summary.canDisable,
                         onTap: () => _activate(summary),
                         onToggle: () => _setEnabled(summary, !summary.enabled),
                         onClear: () => _clear(summary),
