@@ -500,6 +500,27 @@ in the main isolate, which Android does not start at boot; the proxy cannot come
 back automatically after a reboot until the user opens the app. Boot resume would
 require a shape-B engine-in-task-isolate design.
 
+## App state and screen boundary
+
+`AppState` is the composition root: it owns storage, the identity manager, and
+the workflow controllers, and implements `AppViewState`, the narrow interface
+that screens and widget tests use. Controllers own one workflow each:
+
+- `ConnectionController` — TCP/BLE/simulated attach, reconnect backoff/
+  watchdog, and power-off suppression;
+- `SessionSettings` and `NetworkConnectionHistory` — saved session/port/
+  auto-resume and the TCP target history;
+- `IdentityController` — catalog create/activate/enable/delete/clear;
+- `BackupController` — capture, inspect, restore, and interrupted-restore
+  recovery;
+- `ProxyController` — companion-server start/stop and status;
+- `ForegroundController` — foreground-service lifecycle, notification copy,
+  and battery-optimization settings.
+
+Screens read `AppViewState` through `ChangeNotifierProvider`; `FakeAppState`
+implements that interface instead of constructing the real repository,
+secure-storage, and manager graph.
+
 ## Device connection history
 
 Successful TCP targets are stored separately from `session.json` in
