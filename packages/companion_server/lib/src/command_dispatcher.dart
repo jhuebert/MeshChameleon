@@ -373,17 +373,11 @@ class CompanionCommandDispatcher {
     }
     host.sendFrame(Uint8List.fromList([
       respCodeCliReply,
-      ..._boundedCliReply(utf8.encode(text)),
+      ...truncateUtf8Bytes(
+        utf8.encode(text),
+        maxCompanionPayloadSize - 1,
+      ),
     ]));
-  }
-
-  List<int> _boundedCliReply(List<int> bytes) {
-    if (bytes.length <= maxCompanionPayloadSize - 1) return bytes;
-    var end = maxCompanionPayloadSize - 1 - 3;
-    while (end > 0 && end < bytes.length && (bytes[end] & 0xC0) == 0x80) {
-      end--;
-    }
-    return [...bytes.sublist(0, end), ...utf8.encode('...')];
   }
 
   // -------------------------------------------------------------------------

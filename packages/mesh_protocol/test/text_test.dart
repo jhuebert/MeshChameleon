@@ -86,4 +86,40 @@ void main() {
       expect(isValidAdvertCoordinateMicros(0, -180000001), isFalse);
     });
   });
+
+  _truncateTests();
+}
+
+void _truncateTests() {
+  group('utf8CutIndex', () {
+    test('backs off a continuation byte', () {
+      final bytes = utf8.encode('aé'); // [0x61, 0xC3, 0xA9]
+      expect(utf8CutIndex(bytes, 2), 1);
+      expect(utf8CutIndex(bytes, 3), 3);
+      expect(utf8CutIndex(bytes, 99), 3);
+      expect(utf8CutIndex(bytes, -1), 0);
+    });
+  });
+
+  group('truncateUtf8Bytes', () {
+    test('leaves a value that already fits unchanged', () {
+      expect(truncateUtf8Bytes(utf8.encode('ok'), 10), utf8.encode('ok'));
+    });
+
+    test('appends the ellipsis within the byte limit', () {
+      final result = truncateUtf8Bytes(utf8.encode('abcdef'), 5);
+      expect(utf8.decode(result), 'ab...');
+      expect(result, hasLength(5));
+    });
+
+    test('does not split a multi-byte code point', () {
+      final result = truncateUtf8Bytes(utf8.encode('aaaaé'), 5);
+      expect(utf8.decode(result), 'aa...');
+    });
+
+    test('handles limits at or below the ellipsis size', () {
+      expect(truncateUtf8Bytes(utf8.encode('abcdef'), 0), isEmpty);
+      expect(utf8.decode(truncateUtf8Bytes(utf8.encode('abcdef'), 2)), '..');
+    });
+  });
 }

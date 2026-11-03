@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 /// Maximum advertised-name length in UTF-8 bytes.
 const int maxAdvertNameBytes = 31;
@@ -62,3 +63,35 @@ bool isValidAdvertCoordinateMicros(int latMicros, int lonMicros) =>
     latMicros <= 90000000 &&
     lonMicros >= -180000000 &&
     lonMicros <= 180000000;
+
+/// Index at which [bytes] can be cut without splitting a UTF-8 sequence.
+///
+/// [limit] is clamped to the list length; continuation bytes are backed off
+/// until the cut lands on a code-point boundary.
+int utf8CutIndex(List<int> bytes, int limit) {
+  var end = limit < bytes.length ? limit : bytes.length;
+  if (end < 0) end = 0;
+  while (end > 0 && end < bytes.length && (bytes[end] & 0xC0) == 0x80) {
+    end--;
+  }
+  return end;
+}
+
+/// Truncate UTF-8 [bytes] to at most [maxBytes], appending [ellipsis].
+///
+/// The ellipsis is included in the limit. When the limit is smaller than the
+/// ellipsis itself, the ellipsis is cut to fit.
+Uint8List truncateUtf8Bytes(
+  List<int> bytes,
+  int maxBytes, {
+  String ellipsis = '...',
+}) {
+  if (maxBytes <= 0) return Uint8List(0);
+  if (bytes.length <= maxBytes) return Uint8List.fromList(bytes);
+  final marker = utf8.encode(ellipsis);
+  if (maxBytes <= marker.length) {
+    return Uint8List.fromList(marker.sublist(0, maxBytes));
+  }
+  final end = utf8CutIndex(bytes, maxBytes - marker.length);
+  return Uint8List.fromList([...bytes.sublist(0, end), ...marker]);
+}

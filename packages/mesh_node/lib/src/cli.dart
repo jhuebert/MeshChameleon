@@ -1,8 +1,8 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'package:mesh_protocol/mesh_protocol.dart';
 
 /// Maximum companion CLI reply text, including an optional correlation prefix.
-const int maxCliReplyBytes = 175;
+const int maxCliReplyBytes = maxCompanionPayloadSize - 1;
 
 /// Where an allowlisted CLI command is executed.
 enum CliTarget {
@@ -169,21 +169,7 @@ class CliParser {
       return '${marker}Error: response too large';
     }
 
-    final markerBytes = utf8.encode(marker).length;
-    final available = maxCliReplyBytes - markerBytes - 3;
-    if (available <= 0) return marker;
-    final cut = _utf8Boundary(bytes, available);
-    final kept = utf8.decode(bytes.sublist(0, cut));
-    return '$kept...';
-  }
-
-  static int _utf8Boundary(Uint8List bytes, int limit) {
-    var end = limit;
-    if (end > bytes.length) end = bytes.length;
-    while (end > 0 && end < bytes.length && (bytes[end] & 0xC0) == 0x80) {
-      end--;
-    }
-    return end;
+    return utf8.decode(truncateUtf8Bytes(bytes, maxCliReplyBytes));
   }
 }
 
