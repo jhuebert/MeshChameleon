@@ -37,6 +37,7 @@ packages/
   companion_server/ TCP listener + serial framing + command router (app-facing)
   mesh_node/        contacts/channels/messages/adverts/acks and mesh node logic
   device_link/      RadioLink SPI + TCP device client + device simulator
+  test_support/     dev-only framed client, stream queue, and fake scheduler
 app/                Flutter app: UI, foreground service, secure storage
 app/integration_test/  opt-in hardware tests (see its README)
 ```
@@ -75,6 +76,11 @@ and a shared radio bus (`FakeRadioBus`). The highest-value end-to-end test is
 for `meshcore-cli` / `meshcore-open`) connects to the proxy's `CompanionServer`,
 which drives a `MeshNode` over a simulated device link, against a peer node on
 the same simulated bus.
+
+Shared test plumbing lives in `packages/test_support/` (`FramedClient`,
+`StreamQueue`, `FakeScheduler`). `CompanionServer` accepts injected one-shot and
+periodic timer factories, so idle/heartbeat tests advance the fake clock instead
+of sleeping on wall time.
 
 Run everything:
 
