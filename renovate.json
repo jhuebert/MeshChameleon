@@ -21,6 +21,11 @@
       "automerge": true
     },
     {
+      "description": "List major updates in the dependency dashboard until approved",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    },
+    {
       "description": "Keep high-risk native plugin updates manual until hardware tests cover them",
       "matchPackageNames": [
         "flutter_blue_plus",
