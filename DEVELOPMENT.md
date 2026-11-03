@@ -230,6 +230,12 @@ Rules for any change after 0.1.0:
 - Node state v2 no longer writes the unused `client_repeat` preference. An
   existing file that contains it still loads; the field is ignored because the
   live repeat byte comes from the physical device capabilities.
+- `session.json` and `network_connections.json` are read through
+  `JsonDocumentStore`. A missing file is first-run data. A corrupt, unreadable,
+  or newer-version file raises `JsonDocumentException` /
+  `JsonDocumentVersionException`; corrupt and newer-version files are
+  quarantined as `<name>.quarantine-<timestamp>` before any save, and session/
+  history startup logs the error and continues with defaults.
 - Never discard a user's identity catalog or node state because the version is
   unknown. Surface a recovery error instead of silently creating a fresh
   identity.
