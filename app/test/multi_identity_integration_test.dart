@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -8,6 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:test_support/test_support.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
@@ -26,55 +26,6 @@ class _Sink extends NoopCompanionPushSink {
   @override
   void pushSendConfirmed(int ackCrc, {int tripTimeMs = 0}) =>
       confirmed.add(ackCrc);
-}
-
-class _FramedClient {
-  _FramedClient(this.socket) {
-    socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        _controller.add(frame);
-      }
-    });
-  }
-
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  final StreamController<Uint8List> _controller =
-      StreamController<Uint8List>.broadcast();
-  late final _Queue<Uint8List> frames = _Queue(_controller.stream);
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<void> close() async {
-    await _controller.close();
-    try {
-      await socket.close();
-    } catch (_) {}
-  }
-}
-
-class _Queue<T> {
-  _Queue(Stream<T> stream) {
-    stream.listen((value) {
-      if (_waiters.isNotEmpty) {
-        _waiters.removeAt(0).complete(value);
-      } else {
-        _buffer.add(value);
-      }
-    });
-  }
-
-  final List<T> _buffer = [];
-  final List<Completer<T>> _waiters = [];
-
-  Future<T> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final completer = Completer<T>();
-    _waiters.add(completer);
-    return completer.future;
-  }
 }
 
 void main() {
@@ -165,8 +116,8 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  Future<_FramedClient> connectClient() async {
-    final client = _FramedClient(await Socket.connect('127.0.0.1', app.port));
+  Future<FramedClient> connectClient() async {
+    final client = FramedClient(await Socket.connect('127.0.0.1', app.port));
     client.send([cmdDeviceQuery, 3]);
     expect((await client.frames.next())[0], respCodeDeviceInfo);
     final w = BufferWriter()

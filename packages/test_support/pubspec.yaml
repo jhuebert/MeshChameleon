@@ -1,0 +1,15 @@
+name: test_support
+description: Shared test helpers for MeshChameleon protocol and app tests.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  mesh_protocol:
+    path: ../mesh_protocol
+
+dev_dependencies:
+  test: ^1.25.0
+  lints: ^4.0.0

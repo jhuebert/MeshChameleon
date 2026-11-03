@@ -8,69 +8,28 @@ import 'package:device_link/device_link.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:test/test.dart';
+import 'package:test_support/test_support.dart' as support;
 
-/// End-to-end: a meshcore-cli style framed TCP client talks to the proxy,
-/// which uses a MeshNode over a simulated device link, against a peer node on
-/// the same simulated radio bus.
-class FramedClient {
-  FramedClient(this._socket) {
-    _socket.listen((data) {
-      for (final f in _codec.ingest(data)) {
-        _controller.add(f);
-      }
-    });
-  }
+/// End-to-end framed client that hides raw RX log pushes from the test flow.
+class FramedClient extends support.FramedClient {
+  FramedClient(super.socket);
 
-  final Socket _socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  final _controller = StreamController<Uint8List>.broadcast();
-  late final _frames = _Queue(_controller.stream);
   int rawRxFrames = 0;
 
-  void send(List<int> payload) =>
-      _socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-
-  Future<Uint8List> next() async {
+  @override
+  Future<Uint8List> next({
+    bool pushes = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     while (true) {
-      final frame = await _frames.next();
-      if (frame[0] == pushCodeLogRxData) {
+      final frame = await super.next(timeout: timeout);
+      if (frame.isNotEmpty && frame[0] == pushCodeLogRxData) {
         rawRxFrames++;
         continue;
       }
       return frame;
     }
   }
-
-  Future<void> close() async {
-    await _controller.close();
-    await _socket.close();
-  }
-}
-
-class _Queue<T> {
-  _Queue(Stream<T> stream) {
-    _sub = stream.listen(_add);
-  }
-  late final StreamSubscription<T> _sub;
-  final List<T> _buffer = [];
-  final List<Completer<T>> _waiters = [];
-
-  Future<T> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<T>();
-    _waiters.add(c);
-    return c.future;
-  }
-
-  void _add(T value) {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete(value);
-    } else {
-      _buffer.add(value);
-    }
-  }
-
-  Future<void> cancel() => _sub.cancel();
 }
 
 Future<void> pump() => Future<void>.delayed(const Duration(milliseconds: 25));

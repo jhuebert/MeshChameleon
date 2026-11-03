@@ -2,7 +2,6 @@
 //
 //   flutter test integration_test/android_ble_identity_switch_test.dart \
 //     -d <device> --dart-define=BLE_NAME=<advertised name substring>
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -10,6 +9,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:test_support/test_support.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/ble_device_link.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
@@ -103,12 +103,12 @@ void main() {
         .publicKey;
 
     final firstClient =
-        _FramedClient(await Socket.connect('127.0.0.1', _proxyPort));
+        FramedClient(await Socket.connect('127.0.0.1', _proxyPort));
     try {
       firstClient.send([cmdDeviceQuery, appProtocolVersion]);
-      await firstClient.next();
+      await firstClient.next(timeout: const Duration(seconds: 20));
       firstClient.send([cmdAppStart, appProtocolVersion]);
-      final self = await firstClient.next();
+      final self = await firstClient.next(timeout: const Duration(seconds: 20));
       expect(self.sublist(4, 36), hexToBytes(firstKey));
     } finally {
       await firstClient.close();
@@ -118,12 +118,13 @@ void main() {
     expect(app.activeIdentityId, second.id);
     expect(app.proxyStatus, ProxyStatus.running);
     final secondClient =
-        _FramedClient(await Socket.connect('127.0.0.1', _proxyPort));
+        FramedClient(await Socket.connect('127.0.0.1', _proxyPort));
     try {
       secondClient.send([cmdDeviceQuery, appProtocolVersion]);
-      await secondClient.next();
+      await secondClient.next(timeout: const Duration(seconds: 20));
       secondClient.send([cmdAppStart, appProtocolVersion]);
-      final self = await secondClient.next();
+      final self =
+          await secondClient.next(timeout: const Duration(seconds: 20));
       expect(self.sublist(4, 36), secondKey);
     } finally {
       await secondClient.close();
@@ -131,39 +132,4 @@ void main() {
     debugPrint('BLE_IDENTITY_SWITCH_OK first=$firstKey '
         'second=${bytesToHex(secondKey)} live=2');
   }, timeout: const Timeout(Duration(minutes: 2)));
-}
-
-class _FramedClient {
-  _FramedClient(this.socket) {
-    _sub = socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        if (_waiters.isNotEmpty) {
-          _waiters.removeAt(0).complete(frame);
-        } else {
-          _buffer.add(frame);
-        }
-      }
-    });
-  }
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  late final StreamSubscription<List<int>> _sub;
-  final List<Uint8List> _buffer = [];
-  final List<Completer<Uint8List>> _waiters = [];
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<Uint8List> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<Uint8List>();
-    _waiters.add(c);
-    return c.future.timeout(const Duration(seconds: 20));
-  }
-
-  Future<void> close() async {
-    await _sub.cancel();
-    await socket.close();
-  }
 }

@@ -3,7 +3,6 @@
 //
 //   flutter test integration_test/android_ble_identify_test.dart -d <device> \
 //     --dart-define=BLE_NAME=<advertised name substring>
-import 'dart:async';
 import 'dart:io';
 
 import 'package:companion_server/companion_server.dart';
@@ -13,6 +12,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:test_support/test_support.dart';
 
 import 'package:meshchameleon/services/ble_device_link.dart';
 
@@ -97,7 +97,7 @@ void main() {
       );
       await server.start();
       final socket = await Socket.connect('127.0.0.1', server.port!);
-      final client = _FramedClient(socket);
+      final client = FramedClient(socket);
       client.send([cmdDeviceQuery, appProtocolVersion]);
       expect((await client.next())[0], respCodeDeviceInfo);
       client.send([cmdAppStart, appProtocolVersion]);
@@ -115,43 +115,4 @@ void main() {
       await link.disconnect();
     }
   });
-}
-
-class _FramedClient {
-  _FramedClient(this.socket) {
-    _sub = socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        _onFrame(frame);
-      }
-    });
-  }
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  late final StreamSubscription<List<int>> _sub;
-  final List<Uint8List> _buffer = [];
-  final List<Completer<Uint8List>> _waiters = [];
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<Uint8List> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<Uint8List>();
-    _waiters.add(c);
-    return c.future.timeout(const Duration(seconds: 10));
-  }
-
-  Future<void> close() async {
-    await _sub.cancel();
-    await socket.close();
-  }
-
-  void _onFrame(Uint8List frame) {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete(frame);
-    } else {
-      _buffer.add(frame);
-    }
-  }
 }

@@ -10,13 +10,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:test_support/test_support.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/main.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
@@ -70,7 +70,7 @@ Future<void> _pumpUntilFound(
 Future<void> _handshake(int port) async {
   final socket = await Socket.connect('127.0.0.1', port,
       timeout: const Duration(seconds: 5));
-  final client = _FramedClient(socket);
+  final client = FramedClient(socket);
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     expect((await client.next())[0], respCodeDeviceInfo);
@@ -84,7 +84,7 @@ Future<void> _handshake(int port) async {
 Future<String> _cli(int port, String command) async {
   final socket = await Socket.connect('127.0.0.1', port,
       timeout: const Duration(seconds: 5));
-  final client = _FramedClient(socket);
+  final client = FramedClient(socket);
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
@@ -237,40 +237,4 @@ void main() {
     expect(await FlutterForegroundTask.isRunningService, isFalse);
     debugPrint('ANDROID_BLE_UI_OK');
   }, timeout: const Timeout(Duration(minutes: 8)));
-}
-
-class _FramedClient {
-  _FramedClient(this.socket) {
-    _sub = socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        if (_waiters.isNotEmpty) {
-          _waiters.removeAt(0).complete(frame);
-        } else {
-          _buffer.add(frame);
-        }
-      }
-    });
-  }
-
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  late final StreamSubscription<List<int>> _sub;
-  final List<Uint8List> _buffer = [];
-  final List<Completer<Uint8List>> _waiters = [];
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<Uint8List> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<Uint8List>();
-    _waiters.add(c);
-    return c.future.timeout(const Duration(seconds: 10));
-  }
-
-  Future<void> close() async {
-    await _sub.cancel();
-    await socket.close();
-  }
 }

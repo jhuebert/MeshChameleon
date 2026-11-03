@@ -3,7 +3,6 @@
 //
 //   flutter test integration_test/android_ble_battery_test.dart -d <device> \
 //     --dart-define=BLE_NAMES=MeshCore-aaaa,MeshCore-bbbb
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -11,6 +10,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:test_support/test_support.dart';
 import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/services/ble_device_link.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
@@ -57,7 +57,7 @@ Future<ScanResult> _scanFor(String needle) async {
 Future<Uint8List> _batteryFrame(int port) async {
   final socket = await Socket.connect('127.0.0.1', port,
       timeout: const Duration(seconds: 5));
-  final client = _FramedClient(socket);
+  final client = FramedClient(socket);
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
@@ -168,39 +168,4 @@ void main() {
     }
     debugPrint('BLE_BATTERY_OK targets=${targets.length}');
   }, timeout: const Timeout(Duration(minutes: 4)));
-}
-
-class _FramedClient {
-  _FramedClient(this.socket) {
-    _sub = socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        if (_waiters.isNotEmpty) {
-          _waiters.removeAt(0).complete(frame);
-        } else {
-          _buffer.add(frame);
-        }
-      }
-    });
-  }
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  late final StreamSubscription<List<int>> _sub;
-  final List<Uint8List> _buffer = [];
-  final List<Completer<Uint8List>> _waiters = [];
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<Uint8List> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<Uint8List>();
-    _waiters.add(c);
-    return c.future.timeout(const Duration(seconds: 15));
-  }
-
-  Future<void> close() async {
-    await _sub.cancel();
-    await socket.close();
-  }
 }

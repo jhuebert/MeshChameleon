@@ -17,7 +17,6 @@
 // With DO_TX it reports how many transmitted frames were heard back over the
 // raw RX path (a relayed echo), which is a strong signal that the frame really
 // left the radio and was routed by the mesh.
-import 'dart:async';
 import 'dart:io';
 
 import 'package:companion_server/companion_server.dart';
@@ -27,6 +26,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
+import 'package:test_support/test_support.dart';
 
 import 'package:meshchameleon/services/ble_device_link.dart';
 
@@ -133,7 +133,7 @@ void main() {
     await server.start();
     addTearDown(server.stop);
 
-    final client = _FramedClient(
+    final client = FramedClient(
       await Socket.connect('127.0.0.1', server.port!)
         ..setOption(SocketOption.tcpNoDelay, true),
     );
@@ -252,7 +252,7 @@ Future<void> _registerContact(String host, int port, Uint8List pubkey) async {
   final socket =
       await Socket.connect(host, port, timeout: const Duration(seconds: 10));
   socket.setOption(SocketOption.tcpNoDelay, true);
-  final client = _FramedClient(socket);
+  final client = FramedClient(socket);
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
@@ -281,67 +281,4 @@ List<int> _parseHex(String hex) {
     for (var i = 0; i + 1 < clean.length; i += 2)
       int.parse(clean.substring(i, i + 2), radix: 16),
   ];
-}
-
-class _FramedClient {
-  _FramedClient(this._socket) {
-    _socket.listen((data) {
-      for (final f in _codec.ingest(data)) {
-        _controller.add(f);
-      }
-    });
-  }
-
-  final Socket _socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  final _controller = StreamController<Uint8List>.broadcast();
-  late final _Queue<Uint8List> _frames = _Queue(_controller.stream);
-
-  void send(List<int> payload) =>
-      _socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-
-  Future<Uint8List> next() => _frames
-      .next()
-      .timeout(const Duration(seconds: 15), onTimeout: () => Uint8List(0));
-
-  /// Waits for the first frame whose code equals [code], discarding others.
-  Future<bool> awaitCode(int code, Duration timeout) async {
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      final frame = await _frames.next().timeout(
-          deadline.difference(DateTime.now()),
-          onTimeout: () => Uint8List(0));
-      if (frame.isEmpty) return false;
-      if (frame[0] == code) return true;
-    }
-    return false;
-  }
-
-  Future<void> close() async {
-    await _controller.close();
-    await _socket.close();
-  }
-}
-
-class _Queue<T> {
-  _Queue(Stream<T> stream) {
-    stream.listen(_add);
-  }
-  final List<T> _buffer = [];
-  final List<Completer<T>> _waiters = [];
-
-  Future<T> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<T>();
-    _waiters.add(c);
-    return c.future;
-  }
-
-  void _add(T value) {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete(value);
-    } else {
-      _buffer.add(value);
-    }
-  }
 }

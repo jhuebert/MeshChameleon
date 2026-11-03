@@ -40,6 +40,8 @@ class CompanionServer implements CompanionPushSink, CompanionCommandHost {
     this.config = const CompanionServerConfig(),
     this.onLog,
     CompanionMetrics? metrics,
+    this.timerFactory,
+    this.periodicTimerFactory,
   })  : _bridge = bridge,
         metrics = metrics ?? CompanionMetrics();
 
@@ -51,6 +53,14 @@ class CompanionServer implements CompanionPushSink, CompanionCommandHost {
 
   final CompanionServerConfig config;
   final void Function(String message)? onLog;
+
+  /// Optional timer sources for deterministic lifecycle tests.
+  final Timer Function(Duration duration, void Function() callback)?
+      timerFactory;
+  final Timer Function(
+    Duration duration,
+    void Function(Timer timer) callback,
+  )? periodicTimerFactory;
 
   /// Session-only client traffic counters. The app may retain this object
   /// across proxy restarts so its totals survive a stop/start.
@@ -240,17 +250,19 @@ class CompanionServer implements CompanionPushSink, CompanionCommandHost {
   void _resetIdleTimer() {
     _idleTimer?.cancel();
     if (config.clientIdleTimeout <= Duration.zero) return;
-    _idleTimer = Timer(config.clientIdleTimeout, () {
-      _disconnectClient(reason: 'idle timeout', idleTimeout: true);
-    });
+    _idleTimer = (timerFactory ?? Timer.new)(
+      config.clientIdleTimeout,
+      () => _disconnectClient(reason: 'idle timeout', idleTimeout: true),
+    );
   }
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
     if (config.heartbeatInterval <= Duration.zero) return;
-    _heartbeatTimer = Timer.periodic(config.heartbeatInterval, (_) {
-      _sendPushFrame(encodeCurrTime(bridge.getTime()));
-    });
+    _heartbeatTimer = (periodicTimerFactory ?? Timer.periodic)(
+      config.heartbeatInterval,
+      (_) => _sendPushFrame(encodeCurrTime(bridge.getTime())),
+    );
   }
 
   // -------------------------------------------------------------------------

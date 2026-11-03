@@ -14,35 +14,11 @@ import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
+import 'package:test_support/test_support.dart';
 
 const _capabilities = DeviceCapabilities(
   supportsBle: false,
 );
-
-class _FramedClient {
-  _FramedClient(this.socket) {
-    socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        _controller.add(frame);
-      }
-    });
-  }
-
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  final StreamController<Uint8List> _controller =
-      StreamController<Uint8List>.broadcast();
-  late final StreamQueue<Uint8List> frames = StreamQueue(_controller.stream);
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<void> close() async {
-    await _controller.close();
-    await socket.close();
-  }
-}
 
 class _GateStore extends NetworkConnectionStore {
   _GateStore(File file) : super(file: file);
@@ -86,41 +62,6 @@ class _GateInfoLink extends FakeDeviceLink {
     if (!infoStarted.isCompleted) infoStarted.complete();
     await infoGate.future;
     return super.deviceInfo();
-  }
-}
-
-class StreamQueue<T> {
-  StreamQueue(Stream<T> stream) {
-    stream.listen(_add);
-  }
-  final List<T> _buffer = [];
-  final List<Completer<T>> _waiters = [];
-
-  Future<T> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final c = Completer<T>();
-    _waiters.add(c);
-    return c.future;
-  }
-
-  Future<T?> nextWithin(Duration timeout) async {
-    if (_buffer.isNotEmpty) return _buffer.removeAt(0);
-    final c = Completer<T>();
-    _waiters.add(c);
-    try {
-      return await c.future.timeout(timeout);
-    } on TimeoutException {
-      _waiters.remove(c);
-      return null;
-    }
-  }
-
-  void _add(T value) {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete(value);
-    } else {
-      _buffer.add(value);
-    }
   }
 }
 
@@ -168,7 +109,7 @@ void main() {
     await dir.delete(recursive: true);
   });
 
-  Future<Uint8List> handshake(_FramedClient client) async {
+  Future<Uint8List> handshake(FramedClient client) async {
     final w = BufferWriter()
       ..writeByte(cmdAppStart)
       ..writeByte(appProtocolVersion)
@@ -272,7 +213,7 @@ void main() {
     addTearDown(app.disconnectDevice);
     await app.startProxy(serverPort: 0);
 
-    final client = _FramedClient(await Socket.connect('127.0.0.1', app.port));
+    final client = FramedClient(await Socket.connect('127.0.0.1', app.port));
     addTearDown(client.close);
     await handshake(client);
 
@@ -300,7 +241,7 @@ void main() {
     await app.startProxy(serverPort: 0);
 
     final firstClient =
-        _FramedClient(await Socket.connect('127.0.0.1', app.port));
+        FramedClient(await Socket.connect('127.0.0.1', app.port));
     addTearDown(firstClient.close);
     final firstKey = await handshake(firstClient);
     expect(firstKey, app.identity!.publicKey);
@@ -309,7 +250,7 @@ void main() {
     expect(app.server!.hasClient, isFalse);
 
     final secondClient =
-        _FramedClient(await Socket.connect('127.0.0.1', app.port));
+        FramedClient(await Socket.connect('127.0.0.1', app.port));
     addTearDown(secondClient.close);
     final secondKey = await handshake(secondClient);
     expect(secondKey, app.manager!.activeIdentity!.publicKey);
@@ -370,7 +311,7 @@ void main() {
       publicKey: (await LocalIdentity.generate()).publicKey,
       name: 'Peer',
     ));
-    final client = _FramedClient(await Socket.connect('127.0.0.1', app.port));
+    final client = FramedClient(await Socket.connect('127.0.0.1', app.port));
     addTearDown(client.close);
     await handshake(client);
     final keyBefore = Uint8List.fromList(node.identity.publicKey);

@@ -4,12 +4,12 @@
 // This reboots the radio.
 //   flutter test integration_test/tcp_lifecycle_test.dart -d linux \
 //     --dart-define=DEVICE_HOST=<host> [--dart-define=DEVICE_PORT=5000]
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:test_support/test_support.dart' as support;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
@@ -23,28 +23,16 @@ import 'package:meshchameleon/services/session_store.dart';
 const _deviceHost = String.fromEnvironment('DEVICE_HOST');
 const _devicePort = int.fromEnvironment('DEVICE_PORT', defaultValue: 5000);
 
-class _Client {
-  _Client(this.socket) {
-    socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        _controller.add(frame);
-      }
-    });
-  }
+class _Client extends support.FramedClient {
+  _Client(super.socket);
 
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  final StreamController<Uint8List> _controller =
-      StreamController<Uint8List>.broadcast();
-  late final _Queue<Uint8List> frames = _Queue(_controller.stream);
-
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<Uint8List> next({bool pushes = false}) async {
+  @override
+  Future<Uint8List> next({
+    bool pushes = false,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
     while (true) {
-      final frame = await frames.next();
+      final frame = await super.next(timeout: timeout);
       if (frame.isNotEmpty && frame[0] >= 0x80 && !pushes) continue;
       return frame;
     }
@@ -67,33 +55,6 @@ class _Client {
     ]);
     expect((await next())[0], respCodeSelfInfo);
     return this;
-  }
-
-  Future<void> close() async {
-    await _controller.close();
-    await socket.close();
-  }
-}
-
-class _Queue<T> {
-  _Queue(Stream<T> stream) {
-    stream.listen((value) {
-      if (_waiters.isNotEmpty) {
-        _waiters.removeAt(0).complete(value);
-      } else {
-        _buffer.add(value);
-      }
-    });
-  }
-
-  final List<T> _buffer = [];
-  final List<Completer<T>> _waiters = [];
-
-  Future<T> next() {
-    if (_buffer.isNotEmpty) return Future.value(_buffer.removeAt(0));
-    final completer = Completer<T>();
-    _waiters.add(completer);
-    return completer.future.timeout(const Duration(seconds: 25));
   }
 }
 

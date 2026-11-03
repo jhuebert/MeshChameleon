@@ -4,12 +4,12 @@
 //   flutter test integration_test/android_ble_rf_test.dart -d <device> \
 //     --dart-define=BLE_NAME=<name> --dart-define=PEER_HOST=<host> \
 //     --dart-define=PEER_PUBKEY_HEX=<64-byte hex> [--dart-define=PEER_PORT=9505]
-import 'dart:async';
 import 'dart:io';
 
 import 'package:companion_server/companion_server.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:test_support/test_support.dart' as support;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_node/mesh_node.dart';
@@ -194,58 +194,18 @@ Future<void> _removeContact(String host, int port, Uint8List pubkey) async {
   }
 }
 
-class _FramedClient {
-  _FramedClient(this.socket) {
-    _sub = socket.listen((data) {
-      for (final frame in _codec.ingest(data)) {
-        _onFrame(frame);
-      }
-    });
-  }
-  final Socket socket;
-  final SerialFrameCodec _codec = SerialFrameCodec.bidirectional();
-  late final StreamSubscription<List<int>> _sub;
-  final List<Uint8List> _buffer = [];
-  final List<Completer<Uint8List>> _waiters = [];
+class _FramedClient extends support.FramedClient {
+  _FramedClient(super.socket);
 
-  void send(List<int> payload) {
-    socket.add(_codec.encodeFrame(payload, prefix: frameInboundPrefix));
-  }
-
-  Future<Uint8List> next({bool includePushes = false}) async {
+  @override
+  Future<Uint8List> next({
+    bool pushes = false,
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     while (true) {
-      final frame =
-          _buffer.isNotEmpty ? _buffer.removeAt(0) : await _nextFrame();
-      if (!includePushes && frame.isNotEmpty && frame[0] >= 0x80) continue;
+      final frame = await super.next(timeout: timeout);
+      if (!pushes && frame.isNotEmpty && frame[0] >= 0x80) continue;
       return frame;
-    }
-  }
-
-  Future<Uint8List> _nextFrame() {
-    final c = Completer<Uint8List>();
-    _waiters.add(c);
-    return c.future.timeout(const Duration(seconds: 20));
-  }
-
-  Future<bool> awaitCode(int code, Duration timeout) async {
-    final deadline = DateTime.now().add(timeout);
-    while (DateTime.now().isBefore(deadline)) {
-      final frame = await next(includePushes: true);
-      if (frame.isNotEmpty && frame[0] == code) return true;
-    }
-    return false;
-  }
-
-  Future<void> close() async {
-    await _sub.cancel();
-    await socket.close();
-  }
-
-  void _onFrame(Uint8List frame) {
-    if (_waiters.isNotEmpty) {
-      _waiters.removeAt(0).complete(frame);
-    } else {
-      _buffer.add(frame);
     }
   }
 }
