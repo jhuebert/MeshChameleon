@@ -6,6 +6,7 @@ coverage/
 .flutter-plugins
 .flutter-plugins-dependencies
 pubspec.lock
+!app/pubspec.lock
 
 # IDE
 .idea/

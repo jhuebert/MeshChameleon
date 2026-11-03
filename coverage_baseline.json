@@ -1,13 +1,165 @@
 {
   "format": 1,
   "files": {
+    "app/lib/app_state.dart": {
+      "covered": 247,
+      "total": 269
+    },
+    "app/lib/main.dart": {
+      "covered": 139,
+      "total": 158
+    },
+    "app/lib/screens/backup_screen.dart": {
+      "covered": 161,
+      "total": 162
+    },
+    "app/lib/screens/connect_screen.dart": {
+      "covered": 193,
+      "total": 231
+    },
+    "app/lib/screens/diagnostics_screen.dart": {
+      "covered": 212,
+      "total": 213
+    },
+    "app/lib/screens/identities_screen.dart": {
+      "covered": 204,
+      "total": 205
+    },
+    "app/lib/screens/log_screen.dart": {
+      "covered": 18,
+      "total": 18
+    },
+    "app/lib/services/backup_codec.dart": {
+      "covered": 100,
+      "total": 105
+    },
+    "app/lib/services/backup_controller.dart": {
+      "covered": 24,
+      "total": 24
+    },
+    "app/lib/services/backup_service.dart": {
+      "covered": 175,
+      "total": 192
+    },
+    "app/lib/services/backup_validator.dart": {
+      "covered": 51,
+      "total": 54
+    },
+    "app/lib/services/ble_device_link.dart": {
+      "covered": 184,
+      "total": 191
+    },
+    "app/lib/services/build_info.dart": {
+      "covered": 61,
+      "total": 63
+    },
+    "app/lib/services/connection_controller.dart": {
+      "covered": 193,
+      "total": 232
+    },
+    "app/lib/services/device_capabilities.dart": {
+      "covered": 3,
+      "total": 3
+    },
+    "app/lib/services/diagnostics_snapshot.dart": {
+      "covered": 154,
+      "total": 157
+    },
+    "app/lib/services/foreground_controller.dart": {
+      "covered": 35,
+      "total": 37
+    },
+    "app/lib/services/foreground_service.dart": {
+      "covered": 38,
+      "total": 38
+    },
+    "app/lib/services/identity_controller.dart": {
+      "covered": 65,
+      "total": 69
+    },
+    "app/lib/services/identity_index.dart": {
+      "covered": 111,
+      "total": 116
+    },
+    "app/lib/services/identity_manager.dart": {
+      "covered": 276,
+      "total": 294
+    },
+    "app/lib/services/identity_repository.dart": {
+      "covered": 164,
+      "total": 188
+    },
+    "app/lib/services/identity_runtime.dart": {
+      "covered": 13,
+      "total": 13
+    },
+    "app/lib/services/identity_runtime_builder.dart": {
+      "covered": 49,
+      "total": 61
+    },
+    "app/lib/services/identity_store.dart": {
+      "covered": 33,
+      "total": 35
+    },
+    "app/lib/services/json_document_store.dart": {
+      "covered": 48,
+      "total": 59
+    },
+    "app/lib/services/json_file.dart": {
+      "covered": 24,
+      "total": 25
+    },
+    "app/lib/services/local_mesh_router.dart": {
+      "covered": 8,
+      "total": 9
+    },
+    "app/lib/services/network_address.dart": {
+      "covered": 7,
+      "total": 7
+    },
+    "app/lib/services/network_connection_history.dart": {
+      "covered": 34,
+      "total": 35
+    },
+    "app/lib/services/network_connection_store.dart": {
+      "covered": 97,
+      "total": 101
+    },
+    "app/lib/services/notification_content.dart": {
+      "covered": 13,
+      "total": 13
+    },
+    "app/lib/services/proxy_controller.dart": {
+      "covered": 34,
+      "total": 42
+    },
+    "app/lib/services/session_settings.dart": {
+      "covered": 40,
+      "total": 40
+    },
+    "app/lib/services/session_store.dart": {
+      "covered": 61,
+      "total": 62
+    },
+    "app/lib/widgets/app_snack_bar.dart": {
+      "covered": 4,
+      "total": 4
+    },
+    "app/lib/widgets/app_surfaces.dart": {
+      "covered": 62,
+      "total": 62
+    },
+    "app/lib/widgets/device_target_icon.dart": {
+      "covered": 5,
+      "total": 5
+    },
     "packages/companion_server/lib/src/bridge.dart": {
-      "covered": 130,
-      "total": 130
+      "covered": 149,
+      "total": 149
     },
     "packages/companion_server/lib/src/command_dispatcher.dart": {
-      "covered": 618,
-      "total": 622
+      "covered": 572,
+      "total": 575
     },
     "packages/companion_server/lib/src/command_spec.dart": {
       "covered": 1,
@@ -18,16 +170,16 @@
       "total": 1
     },
     "packages/companion_server/lib/src/metrics.dart": {
-      "covered": 37,
-      "total": 38
+      "covered": 38,
+      "total": 39
     },
     "packages/companion_server/lib/src/push_codec.dart": {
       "covered": 165,
       "total": 165
     },
     "packages/companion_server/lib/src/server.dart": {
-      "covered": 165,
-      "total": 175
+      "covered": 167,
+      "total": 177
     },
     "packages/device_link/lib/src/backoff.dart": {
       "covered": 15,
@@ -62,27 +214,27 @@
       "total": 40
     },
     "packages/mesh_node/lib/src/advert_path_cache.dart": {
-      "covered": 20,
-      "total": 20
+      "covered": 21,
+      "total": 21
     },
     "packages/mesh_node/lib/src/battery_service.dart": {
       "covered": 56,
       "total": 60
     },
     "packages/mesh_node/lib/src/cli.dart": {
-      "covered": 193,
-      "total": 201
+      "covered": 185,
+      "total": 192
     },
     "packages/mesh_node/lib/src/cli_runtime.dart": {
-      "covered": 98,
-      "total": 98
+      "covered": 94,
+      "total": 94
     },
     "packages/mesh_node/lib/src/connection_sessions.dart": {
       "covered": 41,
       "total": 44
     },
     "packages/mesh_node/lib/src/contact_table.dart": {
-      "covered": 107,
+      "covered": 108,
       "total": 108
     },
     "packages/mesh_node/lib/src/flood_scope.dart": {
@@ -98,36 +250,36 @@
       "total": 10
     },
     "packages/mesh_node/lib/src/mesh_node.dart": {
-      "covered": 599,
-      "total": 614
+      "covered": 618,
+      "total": 632
     },
     "packages/mesh_node/lib/src/mesh_rx.dart": {
-      "covered": 492,
-      "total": 514
+      "covered": 494,
+      "total": 513
     },
     "packages/mesh_node/lib/src/message_queue.dart": {
-      "covered": 18,
-      "total": 18
+      "covered": 9,
+      "total": 9
     },
     "packages/mesh_node/lib/src/message_sender.dart": {
-      "covered": 185,
-      "total": 202
+      "covered": 188,
+      "total": 205
     },
     "packages/mesh_node/lib/src/node_store.dart": {
-      "covered": 248,
-      "total": 253
+      "covered": 256,
+      "total": 261
     },
     "packages/mesh_node/lib/src/packet_deduper.dart": {
       "covered": 25,
       "total": 27
     },
     "packages/mesh_node/lib/src/packet_transport.dart": {
-      "covered": 75,
-      "total": 79
+      "covered": 78,
+      "total": 82
     },
     "packages/mesh_node/lib/src/physical_radio.dart": {
-      "covered": 209,
-      "total": 211
+      "covered": 210,
+      "total": 212
     },
     "packages/mesh_node/lib/src/request_tracker.dart": {
       "covered": 64,
@@ -136,6 +288,10 @@
     "packages/mesh_node/lib/src/reset.dart": {
       "covered": 10,
       "total": 10
+    },
+    "packages/mesh_node/lib/src/runtime_guard.dart": {
+      "covered": 19,
+      "total": 19
     },
     "packages/mesh_node/lib/src/scheduler.dart": {
       "covered": 4,
@@ -150,8 +306,8 @@
       "total": 7
     },
     "packages/mesh_node/lib/src/state_persistence.dart": {
-      "covered": 44,
-      "total": 47
+      "covered": 52,
+      "total": 55
     },
     "packages/mesh_node/lib/src/virtual_clock.dart": {
       "covered": 11,
@@ -165,9 +321,17 @@
       "covered": 81,
       "total": 81
     },
+    "packages/mesh_protocol/lib/src/channel_codec.dart": {
+      "covered": 8,
+      "total": 8
+    },
     "packages/mesh_protocol/lib/src/constants.dart": {
       "covered": 11,
       "total": 11
+    },
+    "packages/mesh_protocol/lib/src/contact_codec.dart": {
+      "covered": 36,
+      "total": 36
     },
     "packages/mesh_protocol/lib/src/crypto.dart": {
       "covered": 150,
@@ -182,24 +346,48 @@
       "total": 73
     },
     "packages/mesh_protocol/lib/src/models.dart": {
-      "covered": 128,
-      "total": 128
+      "covered": 171,
+      "total": 171
     },
     "packages/mesh_protocol/lib/src/packet.dart": {
       "covered": 62,
       "total": 62
     },
     "packages/mesh_protocol/lib/src/packet_builder.dart": {
-      "covered": 224,
-      "total": 226
+      "covered": 225,
+      "total": 227
+    },
+    "packages/mesh_protocol/lib/src/path_hash_mode.dart": {
+      "covered": 2,
+      "total": 2
+    },
+    "packages/mesh_protocol/lib/src/path_return_codec.dart": {
+      "covered": 19,
+      "total": 19
     },
     "packages/mesh_protocol/lib/src/paths.dart": {
       "covered": 11,
       "total": 13
     },
+    "packages/mesh_protocol/lib/src/telemetry_codec.dart": {
+      "covered": 5,
+      "total": 5
+    },
     "packages/mesh_protocol/lib/src/text.dart": {
+      "covered": 39,
+      "total": 39
+    },
+    "packages/mesh_protocol/lib/src/trace_codec.dart": {
+      "covered": 20,
+      "total": 20
+    },
+    "packages/test_support/lib/fake_scheduler.dart": {
       "covered": 26,
-      "total": 26
+      "total": 30
+    },
+    "packages/test_support/lib/framed_client.dart": {
+      "covered": 33,
+      "total": 41
     }
   }
 }

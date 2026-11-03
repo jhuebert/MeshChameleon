@@ -191,8 +191,23 @@ Future<void> _collectFile(File file, Map<String, _FileCoverage> files) async {
   if (file.path.endsWith('.vm.json')) {
     _mergeVmJson(await file.readAsString(), files);
   } else if (file.path.endsWith('.info')) {
-    _mergeLcov(await file.readAsString(), files);
+    _mergeLcov(
+      await file.readAsString(),
+      files,
+      baseDir: _lcovBaseDir(file),
+    );
   }
+}
+
+Directory _lcovBaseDir(File file) {
+  final parent = file.parent;
+  final segments = parent.uri.pathSegments
+      .where((segment) => segment.isNotEmpty)
+      .toList();
+  if (segments.isNotEmpty && segments.last == 'coverage') {
+    return parent.parent;
+  }
+  return parent;
 }
 
 void _mergeVmJson(String raw, Map<String, _FileCoverage> files) {
@@ -215,11 +230,18 @@ void _mergeVmJson(String raw, Map<String, _FileCoverage> files) {
   }
 }
 
-void _mergeLcov(String raw, Map<String, _FileCoverage> files) {
+void _mergeLcov(
+  String raw,
+  Map<String, _FileCoverage> files, {
+  required Directory baseDir,
+}) {
   String? currentPath;
   for (final line in const LineSplitter().convert(raw)) {
     if (line.startsWith('SF:')) {
-      currentPath = _productionPathFor(line.substring(3).trim());
+      currentPath = _productionPathFor(
+        line.substring(3).trim(),
+        baseDir: baseDir,
+      );
       continue;
     }
     final path = currentPath;
@@ -274,7 +296,7 @@ Future<void> _loadPackageConfigs() async {
   }
 }
 
-String? _productionPathFor(String source) {
+String? _productionPathFor(String source, {Directory? baseDir}) {
   String path;
   if (source.startsWith('package:')) {
     final uri = Uri.parse(source);
@@ -290,6 +312,13 @@ String? _productionPathFor(String source) {
     }
   } else if (source.startsWith('/')) {
     path = source;
+  } else if (baseDir != null) {
+    // LCOV paths from `flutter test --coverage` are relative to the package
+    // root, e.g. `lib/services/identity_store.dart`.
+    final base = baseDir.path;
+    final separator =
+        base.endsWith(Platform.pathSeparator) ? '' : Platform.pathSeparator;
+    path = '$base$separator$source';
   } else {
     return null;
   }

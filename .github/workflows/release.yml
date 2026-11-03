@@ -13,8 +13,10 @@ name: Release
 # Play upload stays manual for 1.0. The build number is reserved from the shared
 # BUILD_NUMBER repository variable before the release starts.
 #
-# If `main` is protected, allow this workflow (or its actor) to bypass the
-# protection, or switch to a release pull request; otherwise the push fails.
+# `main` is protected by the `main-protection` ruleset, which requires the CI
+# `check` status and bypasses the repository-admin role. The push step uses
+# `REPO_AUTOMATION_TOKEN`, so that token must belong to an admin and have
+# Contents: write access.
 
 on:
   workflow_dispatch:
@@ -383,13 +385,31 @@ jobs:
         if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ inputs.version }}
+          PUSH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
+          if [[ -z "${PUSH_TOKEN:-}" ]]; then
+            echo "::error::REPO_AUTOMATION_TOKEN is required to bypass the main-protection ruleset"
+            exit 1
+          fi
           git fetch origin main
           if [[ "$(git rev-parse origin/main)" != "$BASE_SHA" ]]; then
             echo "::error::main moved during the release; rerun the workflow"
             exit 1
           fi
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local --unset-all credential.helper || true
+          askpass="$RUNNER_TEMP/git-askpass.sh"
+          cat > "$askpass" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s\n' x-access-token ;;
+            *Password*) printf '%s\n' "$PUSH_TOKEN" ;;
+          esac
+          EOF
+          chmod +x "$askpass"
+          export GIT_ASKPASS="$askpass"
+          export GIT_TERMINAL_PROMPT=0
           git push origin HEAD:main
           git tag -a "v$VERSION" -m "MeshChameleon $VERSION"
           git push origin "v$VERSION"

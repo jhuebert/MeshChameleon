@@ -157,10 +157,11 @@ differences from a bare physical companion are intentional and are not bugs:
 - Decoders reject truncated/oversized/unsafe values rather than reproducing
   `atoi`/`atof` acceptance. Persistence failures return honest errors.
 
-Other deliberate limits: no dependency upgrades, no iOS/USB transport work, no
-virtual repeater routing/forwarding, no mandatory authentication redesign, and
-no sensor-node implementation. Pre-0.1.0 single-identity development data is
-outside the migration baseline; see
+Other deliberate limits: no iOS/USB transport work, no virtual repeater
+routing/forwarding, no mandatory authentication redesign, and no sensor-node
+implementation. Routine dependency updates are handled by Renovate; do not
+bundle them into unrelated changes. Pre-0.1.0 single-identity development data
+is outside the migration baseline; see
 [Persistence versions and migrations](#persistence-versions-and-migrations).
 
 ## Multi-identity runtime
@@ -570,11 +571,42 @@ Rules:
   show these adjusted values; the AAB and universal APK keep `+N`.
 
 `.github/workflows/ci.yml` runs `scripts/check.sh`, the lockfile and store-asset
-checks, and a debug APK build on every pull request and push to `main`. It pins
-Flutter 3.47.7 and Temurin Java 17; keep the release workflow on the same
-versions. Both workflows use the `ubuntu-latest` runner.
-`.github/workflows/release.yml` is the manual signed release; see the
-workflow header for the keystore and secret prerequisites.
+checks, and debug and release APK builds on every pull request and push to
+`main`. `scripts/coverage.sh` enforces per-file line coverage for package and
+app code. The app lockfile is tracked and Renovate updates it alongside
+`app/pubspec.yaml`, so PRs are tested against the exact resolved set; the
+lockfile check fails if dependency resolution rewrites it. CI pins Flutter
+3.47.7 and Temurin Java 17; keep the release workflow on the same versions.
+Both workflows use the `ubuntu-latest` runner.
+`.github/workflows/release.yml` is the manual signed release; see the workflow
+header for the keystore and secret prerequisites. `main` is protected by the
+`main-protection` ruleset, which requires the `check` status. The release
+workflow bypasses it with `REPO_AUTOMATION_TOKEN`; that token must belong to an
+admin and have Contents: write access.
+
+Dependency updates are configured in `renovate.json` and require the Renovate
+GitHub App to be installed on the repository; Renovate reads the config from
+`main`. It opens PRs against `main` at any time, but waits seven days after a
+release before proposing it. Patch and minor updates auto-merge through
+Renovate's own status-check gate (`platformAutomerge` is off), so they merge
+only after the full `ci.yml` check passes. The `main-protection` ruleset also
+requires that `check` status for any other merge to `main`. All other update
+types, including majors, stay open for review. High-risk native plugins
+(`flutter_blue_plus`, `flutter_foreground_task`, `flutter_secure_storage`, and
+`flutter_file_dialog`) stay manual even for patch/minor updates because CI
+cannot exercise their native BLE, secure-storage, or background paths; run the
+relevant hardware integration test when they change. OSV vulnerability alerts
+are enabled, and `:configMigration` keeps the config current. Related updates
+are grouped for the Android Gradle toolchain, GitHub Actions, Dart dev tooling,
+the cryptography stack, and Flutter Blue Plus. Renovate also creates and
+maintains the single **Dependency Dashboard** GitHub issue
+(`dependencyDashboard: true`), which lists pending updates and accepts manual
+approval requests. The Flutter SDK pin in the workflow `env` blocks is updated
+by a custom manager because `subosito/flutter-action` receives it through
+`${{ env.FLUTTER_VERSION }}`.
+`BUNDLETOOL_VERSION` stays manual because its download checksum must change with
+the version. Validate config edits with
+`npx --package renovate -- renovate-config-validator`.
 
 The app uses built-in Kotlin (`android.builtInKotlin=true`). Flutter still warns
 that `flutter_file_dialog` 3.3.3 applies the Kotlin Gradle Plugin because that

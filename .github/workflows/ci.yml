@@ -57,8 +57,7 @@ jobs:
       - name: Check coverage
         run: ./scripts/coverage.sh
 
-      # When app/pubspec.lock is tracked, this fails if dependency
-      # resolution rewrote it. It is a no-op while the lockfile is ignored.
+      # The app lockfile is tracked; fail if dependency resolution rewrote it.
       - name: Check the app lockfile is unchanged
         run: git diff --exit-code -- app/pubspec.lock
 
@@ -67,3 +66,8 @@ jobs:
 
       - name: Build debug APK
         run: ./scripts/build.sh apk --debug
+
+      # No key.properties in CI, so this uses the debug signing key while still
+      # exercising the release AOT/R8 build path.
+      - name: Build release APK
+        run: ./scripts/build.sh apk --release

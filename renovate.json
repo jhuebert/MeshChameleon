@@ -1,0 +1,95 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "helpers:pinGitHubActionDigests",
+    ":configMigration"
+  ],
+  "baseBranchPatterns": ["main"],
+  "schedule": ["at any time"],
+  "minimumReleaseAge": "7 days",
+  "osvVulnerabilityAlerts": true,
+  "dependencyDashboard": true,
+  "automerge": false,
+  "platformAutomerge": false,
+  "packageRules": [
+    {
+      "description": "Auto-merge patch and minor updates after the full CI check passes",
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Keep high-risk native plugin updates manual until hardware tests cover them",
+      "matchPackageNames": [
+        "flutter_blue_plus",
+        "flutter_blue_plus_platform_interface",
+        "flutter_foreground_task",
+        "flutter_secure_storage",
+        "flutter_file_dialog"
+      ],
+      "automerge": false
+    },
+    {
+      "description": "Group Flutter Blue Plus with its platform interface",
+      "groupName": "Flutter Blue Plus",
+      "matchPackageNames": [
+        "flutter_blue_plus",
+        "flutter_blue_plus_platform_interface"
+      ]
+    },
+    {
+      "description": "Group the Android Gradle toolchain",
+      "groupName": "Android Gradle toolchain",
+      "matchManagers": ["gradle", "gradle-wrapper"],
+      "matchPackageNames": [
+        "com.android.application",
+        "org.jetbrains.kotlin.android",
+        "dev.flutter.flutter-plugin-loader",
+        "gradle"
+      ]
+    },
+    {
+      "description": "Group GitHub Actions updates",
+      "groupName": "GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["action"],
+      "matchUpdateTypes": ["patch", "minor"]
+    },
+    {
+      "description": "Group Dart development tooling updates",
+      "groupName": "Dart dev tooling",
+      "matchDepTypes": ["dev_dependencies"],
+      "matchPackageNames": [
+        "flutter_lints",
+        "lints",
+        "test",
+        "flutter_launcher_icons",
+        "flutter_native_splash"
+      ],
+      "matchUpdateTypes": ["patch", "minor"]
+    },
+    {
+      "description": "Group the cryptography stack",
+      "groupName": "Cryptography",
+      "matchPackageNames": ["crypto", "pointycastle", "cryptography"],
+      "matchUpdateTypes": ["patch", "minor"]
+    },
+    {
+      "description": "Update the Flutter SDK pin with the custom manager, not the action input",
+      "matchManagers": ["github-actions"],
+      "matchDepTypes": ["uses-with"],
+      "matchDepNames": ["flutter"],
+      "enabled": false
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Update the Flutter SDK pinned for CI and release builds",
+      "managerFilePatterns": ["/^\\.github/workflows/[^/]+\\.ya?ml$/"],
+      "matchStrings": ["FLUTTER_VERSION:\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)"],
+      "depNameTemplate": "flutter",
+      "datasourceTemplate": "flutter-version"
+    }
+  ]
+}
