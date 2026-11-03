@@ -9,8 +9,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'app_view_state.dart';
-import 'services/backup_codec.dart';
-import 'services/backup_service.dart';
+import 'services/backup_controller.dart';
 import 'services/ble_device_link.dart';
 import 'services/build_info.dart';
 import 'services/device_capabilities.dart';
@@ -169,7 +168,6 @@ class AppState extends ChangeNotifier implements AppViewState {
 
   IdentityRepository? _repository;
   IdentityManager? _manager;
-  BackupService? _backupService;
 
   IdentityManager? get manager => _manager;
 
@@ -225,6 +223,15 @@ class AppState extends ChangeNotifier implements AppViewState {
   late final SessionSettings _sessionSettings = SessionSettings(
     store: sessionStore,
     onLog: log,
+  );
+
+  late final BackupController _backup = BackupController(
+    repository: _ensureRepository,
+    identityStore: identityStore,
+    sessionStore: sessionStore,
+    networkConnectionStore: networkConnectionStore,
+    appVersion: () => buildInfo.version,
+    log: log,
   );
 
   late final IdentityController _identityController = IdentityController(
@@ -350,8 +357,7 @@ class AppState extends ChangeNotifier implements AppViewState {
   @override
   Future<void> loadIdentities({bool resume = true}) async {
     try {
-      final backup = await _ensureBackupService();
-      await backup.recoverInterruptedRestore();
+      await _backup.recoverInterruptedRestore();
     } catch (e) {
       log('Could not recover an interrupted backup restore: $e');
     }
@@ -398,42 +404,18 @@ class AppState extends ChangeNotifier implements AppViewState {
   // Backup and restore
   // -------------------------------------------------------------------------
 
-  Future<BackupService> _ensureBackupService() async {
-    final existing = _backupService;
-    if (existing != null) return existing;
-    final repository = await _ensureRepository();
-    final created = BackupService(
-      repository: repository,
-      identityStore: identityStore,
-      sessionStore: sessionStore,
-      networkConnectionStore: networkConnectionStore,
-      onLog: log,
-    );
-    _backupService = created;
-    return created;
-  }
-
   /// Capture all local data into a passphrase-encrypted backup file.
   @override
-  Future<Uint8List> createBackup(String passphrase) async {
-    final service = await _ensureBackupService();
-    final payload = await service.capture();
-    return BackupCodec.seal(
-      payload: payload,
-      passphrase: passphrase,
-      appVersion: buildInfo.version,
-    );
-  }
+  Future<Uint8List> createBackup(String passphrase) =>
+      _backup.create(passphrase);
 
   /// Decrypt and validate a backup without changing local data.
   @override
   Future<BackupPreview> inspectBackup(
     Uint8List bytes,
     String passphrase,
-  ) async {
-    final service = await _ensureBackupService();
-    return service.inspect(bytes: bytes, passphrase: passphrase);
-  }
+  ) =>
+      _backup.inspect(bytes, passphrase);
 
   /// Replace all local data with a validated backup.
   @override
@@ -447,8 +429,7 @@ class AppState extends ChangeNotifier implements AppViewState {
       }
       await _manager?.dispose();
       _manager = null;
-      final service = await _ensureBackupService();
-      await service.restore(preview);
+      await _backup.restore(preview);
       await loadIdentities(resume: false);
       log('Restored backup');
       return true;
