@@ -125,9 +125,18 @@ Future<void> main(List<String> args) async {
     final before = entry.value.percent;
     final after = current.percent;
     if (after + tolerance < before) {
+      final uncovered =
+          current._lines.entries
+              .where((entry) => entry.value == 0)
+              .map((entry) => entry.key)
+              .toList()
+            ..sort();
+      final detail = uncovered.isEmpty
+          ? ''
+          : ' (uncovered lines: ${uncovered.join(', ')})';
       regressions.add(
         '${entry.key}: '
-        '${_percent(before)}% -> ${_percent(after)}%',
+        '${_percent(before)}% -> ${_percent(after)}%$detail',
       );
     }
   }
