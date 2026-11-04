@@ -38,6 +38,7 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   // Connection and notification controls.
   int stopProxyCalls = 0;
   int disconnectCalls = 0;
+  int rearmCalls = 0;
   int batteryRefreshes = 0;
 
   // Backup workflow.
@@ -68,6 +69,9 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
 
   @override
   bool deviceConnected = false;
+
+  @override
+  bool deviceReconnecting = false;
 
   @override
   bool busy = false;
@@ -173,7 +177,13 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   Future<void> disconnectDevice() async {
     disconnectCalls++;
     deviceConnected = false;
+    deviceReconnecting = false;
     notifyListeners();
+  }
+
+  @override
+  Future<void> rearmAfterLinkLoss() async {
+    rearmCalls++;
   }
 
   @override

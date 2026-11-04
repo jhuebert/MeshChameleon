@@ -280,6 +280,16 @@ A request timeout therefore drops the link instead of leaving it open, so a late
 `OK`/`DEVICE_INFO`/`CLI_REPLY` cannot be mistaken for the next request's reply;
 the app reconnects through its normal link watcher.
 
+The link watcher retries a dropped device and reports "Reconnecting…" while the
+proxy stays up, so a transient drop does not evict the MeshCore client. After
+three consecutive failed reconnect cycles (each using the normal connect
+backoff) it ends the session: live identities stop, the companion server and
+foreground service stop, and the MeshCore app sees its proxy connection close.
+This prevents the UI from showing a live companion while the radio is out of
+range or powered off. Returning MeshChameleon to the foreground retries the
+saved device after such a give-up (when **Resume on launch** is enabled) and
+restarts the proxy on success; there is no all-day background retry loop.
+
 Direct-route semantic delivery requires a consumed zero-hop route; flooded or
 still-in-transit packets are raw-logged but not executed locally. This is not a
 repeater: no packet forwarding is implemented.

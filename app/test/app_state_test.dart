@@ -65,6 +65,19 @@ class _GateInfoLink extends FakeDeviceLink {
   }
 }
 
+/// Reconnects at the link level but fails the post-connect handshake.
+class _HandshakeFailLink extends FakeDeviceLink {
+  _HandshakeFailLink({super.deviceInfo_});
+
+  bool failHandshake = false;
+
+  @override
+  Future<DeviceInfo> deviceInfo() async {
+    if (failHandshake) throw StateError('device gone');
+    return super.deviceInfo();
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -656,6 +669,93 @@ void main() {
     await resumed.loadIdentities();
     expect(resumed.deviceConnected, isFalse);
     expect(resumed.logs.join('\n'), contains('intentional shutdown'));
+  });
+
+  test('every drop is watched, including one after a reconnect', () async {
+    final link = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    await app.connectSimulated(simulatedLink: link);
+    addTearDown(app.disconnectDevice);
+    int connects() => link.calls.where((c) => c == 'connect').length;
+    expect(connects(), 1);
+
+    link.simulateDrop();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(connects(), 2);
+    expect(app.deviceConnected, isTrue);
+    expect(app.logs.join('\n'), contains('Device link reconnected'));
+
+    // Regression: a fired reconnect timer used to stay non-null, so this drop
+    // was ignored and the session kept reporting a live link forever.
+    link.simulateDrop();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(connects(), 3);
+    expect(app.deviceConnected, isTrue);
+  });
+
+  test('disconnecting cancels a scheduled reconnect', () async {
+    final link = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    await app.connectSimulated(simulatedLink: link);
+    addTearDown(app.disconnectDevice);
+
+    link.simulateDrop();
+    await app.disconnectDevice();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(app.deviceConnected, isFalse);
+    expect(app.logs.join('\n'), isNot(contains('Reconnecting device ...')));
+  });
+
+  test('failed reconnects stop the proxy and end the session', () async {
+    final link = _HandshakeFailLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    await app.connectSimulated(simulatedLink: link);
+    addTearDown(app.disconnectDevice);
+    await app.startProxy(serverPort: 0);
+    expect(app.proxyStatus, ProxyStatus.running);
+
+    link.failHandshake = true;
+    link.simulateDrop();
+    await Future<void>.delayed(Duration.zero);
+    expect(app.deviceReconnecting, isTrue);
+
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(app.deviceConnected, isFalse);
+    expect(app.deviceReconnecting, isFalse);
+    expect(app.proxyStatus, ProxyStatus.stopped);
+    expect(app.logs.join('\n'), contains('stopping the session'));
+  });
+
+  test('a foreground resume re-arms the link after a give-up', () async {
+    await app.setAutoResume(true);
+    final link = _HandshakeFailLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    await app.connectSimulated(simulatedLink: link);
+    addTearDown(app.disconnectDevice);
+    await app.startProxy(serverPort: 0);
+    expect(app.proxyStatus, ProxyStatus.running);
+
+    link.failHandshake = true;
+    link.simulateDrop();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(app.deviceConnected, isFalse);
+    expect(app.proxyStatus, ProxyStatus.stopped);
+
+    // The companion is back in range; a foreground resume retries the saved
+    // session and restarts the proxy.
+    link.failHandshake = false;
+    await app.rearmAfterLinkLoss();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+
+    expect(app.deviceConnected, isTrue);
+    expect(app.proxyStatus, ProxyStatus.running);
+    expect(app.logs.join('\n'), contains('retrying the saved device'));
   });
 
   test('clearing data without a device updates persisted summaries', () async {

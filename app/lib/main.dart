@@ -48,8 +48,33 @@ class ProxyApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // The companion may be back in range after the session gave up on it.
+      context.read<AppViewState>().rearmAfterLinkLoss();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -99,7 +124,9 @@ class HomeScreen extends StatelessWidget {
               app.deviceConnected ? app.lastSession?.kind : null,
             ),
             title: 'Device link',
-            subtitle: app.deviceLabel ?? 'Not connected',
+            subtitle: app.deviceReconnecting
+                ? 'Reconnecting…'
+                : app.deviceLabel ?? 'Not connected',
             trailing: app.deviceConnected
                 ? TextButton(
                     onPressed: app.busy ? null : app.disconnectDevice,
@@ -376,6 +403,11 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final deviceStatus = app.deviceReconnecting
+        ? 'reconnecting'
+        : app.deviceConnected
+            ? 'connected'
+            : 'disconnected';
     return StatusCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -385,7 +417,7 @@ class _StatusCard extends StatelessWidget {
           const SizedBox(height: 4),
           Text('Identities: ${app.identities.length}'
               ' (${app.identities.where((summary) => summary.live).length} live)'),
-          Text('Device: ${app.deviceConnected ? 'connected' : 'disconnected'}'),
+          Text('Device: $deviceStatus'),
           Text('Proxy: ${app.proxyStatus.name}'
               '${app.proxyStatus == ProxyStatus.running ? ' (port ${app.port})' : ''}'),
         ],

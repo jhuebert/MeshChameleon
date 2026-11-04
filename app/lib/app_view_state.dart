@@ -55,6 +55,10 @@ abstract class AppViewState extends ChangeNotifier {
   bool get busy;
   String? get deviceLabel;
   bool get deviceConnected;
+
+  /// True while an unexpected drop is being retried. The proxy stays up during
+  /// this window, but the UI should show the link as reconnecting.
+  bool get deviceReconnecting;
   int get port;
   bool get autoResume;
   SessionConfig? get lastSession;
@@ -64,6 +68,9 @@ abstract class AppViewState extends ChangeNotifier {
   Future<bool> connectSimulated({RadioLink? simulatedLink});
   Future<void> cancelPendingConnection();
   Future<void> disconnectDevice();
+
+  /// Retry the saved device after the session ended from link loss.
+  Future<void> rearmAfterLinkLoss();
   Future<bool> setProxyPort(int value);
   Future<void> setAutoResume(bool value);
   Future<void> startProxy({int? serverPort});

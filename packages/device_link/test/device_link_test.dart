@@ -163,6 +163,19 @@ void main() {
     expect(link.initialRadioParams.frequencyHz, 915000000);
   });
 
+  test('FakeDeviceLink.simulateDrop reports a disconnected state', () async {
+    final link = FakeDeviceLink();
+    await link.connect();
+    final states = <LinkState>[];
+    link.state.listen(states.add);
+
+    link.simulateDrop();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(link.currentState, LinkState.disconnected);
+    expect(states, [LinkState.disconnected]);
+  });
+
   test('connectWithBackoff retries transient failures', () async {
     final link = FakeDeviceLink(connectFailures: 2);
     await connectWithBackoff(

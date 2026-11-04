@@ -466,7 +466,7 @@ class _ConnectedDeviceCard extends StatelessWidget {
     return ActionTile(
       icon: deviceTargetIcon(app.lastSession?.kind),
       title: app.deviceLabel ?? 'Connected device',
-      subtitle: 'Connected',
+      subtitle: app.deviceReconnecting ? 'Reconnecting…' : 'Connected',
       trailing: TextButton(
         onPressed: app.busy ? null : app.disconnectDevice,
         child: const Text('Disconnect'),

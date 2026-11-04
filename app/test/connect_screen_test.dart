@@ -14,6 +14,8 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
+import 'support/fake_app_state.dart';
+
 const _bleCapabilities = DeviceCapabilities(
   supportsBle: true,
 );
@@ -410,6 +412,28 @@ void main() {
     expect(find.text('Connected'), findsOneWidget);
     expect(find.text('Disconnect'), findsOneWidget);
     expect(find.text('Simulated companion'), findsNWidgets(2));
+  });
+
+  testWidgets('the connected banner shows a reconnecting link', (tester) async {
+    final app = FakeAppState()
+      ..deviceConnected = true
+      ..deviceReconnecting = true
+      ..deviceLabel = 'BLE MeshCore-nc3';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(
+          home: ConnectScreen(
+            capabilities: DeviceCapabilities(supportsBle: false),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Reconnecting…'), findsOneWidget);
+    expect(find.text('Connected'), findsNothing);
   });
 
   testWidgets('a busy connection disables actions but keeps tabs usable',

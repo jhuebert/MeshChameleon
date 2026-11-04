@@ -257,6 +257,44 @@ void _extraHomeTests() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('the device link retries after link loss when the app resumes',
+      (tester) async {
+    _homeView(tester);
+    final app = FakeAppState();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.pump();
+    final before = app.rearmCalls;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+
+    expect(app.rearmCalls, greaterThan(before));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a reconnecting link is not shown as connected', (tester) async {
+    _homeView(tester);
+    final app = FakeAppState()
+      ..deviceConnected = true
+      ..deviceReconnecting = true
+      ..deviceLabel = 'BLE MeshCore-nc3';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    expect(find.text('Reconnecting…'), findsOneWidget);
+    expect(find.text('Device: reconnecting'), findsOneWidget);
+  });
+
   testWidgets('the battery card is hidden off Android', (tester) async {
     _homeView(tester);
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;

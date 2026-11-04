@@ -184,6 +184,8 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   String? get deviceLabel => _connection.deviceLabel;
   @override
   bool get deviceConnected => _connection.deviceConnected;
+  @override
+  bool get deviceReconnecting => _connection.deviceReconnecting;
   DeviceInfo? get deviceInfo => _connection.deviceInfo;
   DateTime? get deviceConnectedAt => _connection.deviceConnectedAt;
   int get reconnectAttempts => _connection.reconnectAttempts;
@@ -472,6 +474,9 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
 
   @override
   Future<void> disconnectDevice() => _connection.disconnect();
+
+  @override
+  Future<void> rearmAfterLinkLoss() => _connection.rearmAfterLinkLoss();
 
   @override
   Future<void> recordNetworkConnection(String host, int port) =>

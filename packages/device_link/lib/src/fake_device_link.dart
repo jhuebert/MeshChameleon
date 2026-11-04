@@ -152,6 +152,9 @@ class FakeDeviceLink implements RadioLink {
     _stateController.add(_state);
   }
 
+  /// Simulate an unexpected link drop, as when the radio goes out of range.
+  void simulateDrop() => _dropLink();
+
   @override
   Stream<LinkState> get state => _stateController.stream;
 

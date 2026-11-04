@@ -64,6 +64,7 @@ class ConnectionController {
     required this.sessionSettings,
     required this.networkHistory,
     this.reconnectDelay = const Duration(seconds: 3),
+    this.maxReconnectFailures = 3,
   });
 
   final ConnectionHost host;
@@ -74,9 +75,21 @@ class ConnectionController {
   final NetworkConnectionHistory networkHistory;
   final Duration reconnectDelay;
 
+  /// Consecutive failed reconnects tolerated before the session is torn down.
+  ///
+  /// A dropped radio is retried so a brief out-of-range period can recover. If
+  /// the link cannot be restored, stop serving the client instead of leaving it
+  /// talking to a dead radio; the MeshCore app then sees the proxy disconnect.
+  final int maxReconnectFailures;
+
   RadioLink? link;
   String? deviceLabel;
   bool deviceConnected = false;
+
+  /// True while an unexpected drop is being retried. The proxy stays up during
+  /// this window so a transient drop does not evict the MeshCore client, but
+  /// the UI must not claim the radio is live.
+  bool deviceReconnecting = false;
   DeviceInfo? deviceInfo;
   DateTime? deviceConnectedAt;
   int reconnectAttempts = 0;
@@ -96,6 +109,14 @@ class ConnectionController {
   StreamSubscription<LinkState>? _linkStateSub;
   Timer? _reconnectTimer;
   bool _disconnecting = false;
+  bool _disconnectRequested = false;
+  bool _reconnecting = false;
+  bool _rearming = false;
+  int _reconnectFailures = 0;
+
+  /// Set when the session ended because the physical link could not be
+  /// restored. A foreground resume retries the saved device from here.
+  bool _linkLost = false;
 
   Future<T> _runTransition<T>(Future<T> Function() action) {
     final previous = _tail;
@@ -273,6 +294,7 @@ class ConnectionController {
         await _disconnectDevice();
         return false;
       }
+      _linkLost = false;
       return true;
     } catch (e) {
       if (!_connectCancelled) host.log('Device connection failed: $e');
@@ -352,15 +374,19 @@ class ConnectionController {
     void handle(LinkState state) {
       if (state != LinkState.disconnected ||
           _disconnecting ||
+          _disconnectRequested ||
           sessionSettings.intentionallyOff ||
           _connectCancelled ||
           !deviceConnected ||
+          _reconnecting ||
           _reconnectTimer != null) {
         return;
       }
       metrics.disconnected(unexpected: true);
       deviceConnectedAt = null;
+      deviceReconnecting = true;
       host.log('Device link dropped; scheduling reconnect');
+      host.notify();
       _scheduleReconnect();
     }
 
@@ -373,9 +399,12 @@ class ConnectionController {
   }
 
   void _scheduleReconnect() {
-    if (sessionSettings.intentionallyOff) return;
+    if (sessionSettings.intentionallyOff || _disconnectRequested) return;
     _reconnectTimer?.cancel();
     _reconnectTimer = Timer(reconnectDelay, () {
+      // Clear the handle when it fires: a stale non-null timer would make the
+      // link watcher ignore every later drop after a successful reconnect.
+      _reconnectTimer = null;
       unawaited(_runTransition(_reconnect));
     });
   }
@@ -388,17 +417,26 @@ class ConnectionController {
     if (curLink == null ||
         manager == null ||
         _disconnecting ||
+        _disconnectRequested ||
         sessionSettings.intentionallyOff) {
+      if (!_disconnecting) deviceReconnecting = false;
       return;
     }
+    bool cancelled() =>
+        _disconnectRequested ||
+        _disconnecting ||
+        sessionSettings.intentionallyOff ||
+        !identical(curLink, link);
+    _reconnecting = true;
     reconnectAttempts++;
     try {
       host.log('Reconnecting device ...');
-      await connectWithBackoff(curLink, onLog: host.log);
-      if (!identical(curLink, link) ||
-          _disconnecting ||
-          sessionSettings.intentionallyOff ||
-          curLink.currentState != LinkState.connected) {
+      await connectWithBackoff(
+        curLink,
+        onLog: host.log,
+        shouldCancel: cancelled,
+      );
+      if (cancelled() || curLink.currentState != LinkState.connected) {
         return;
       }
       final deviceInfo = await curLink.deviceInfo();
@@ -411,14 +449,67 @@ class ConnectionController {
         physical: physical,
         radioParams: selfInfo.radioParams,
       );
+      if (cancelled() || curLink.currentState != LinkState.connected) {
+        return;
+      }
       this.deviceInfo = deviceInfo;
       deviceConnectedAt = DateTime.now();
+      _reconnectFailures = 0;
+      deviceReconnecting = false;
       reconnectSuccesses++;
       host.log('Device link reconnected');
       host.notify();
     } catch (e) {
+      if (cancelled()) return;
+      _reconnectFailures++;
       host.log('Reconnect failed: $e');
-      _scheduleReconnect();
+      if (_reconnectFailures >= maxReconnectFailures) {
+        await _abandonSession();
+      } else {
+        _scheduleReconnect();
+      }
+    } finally {
+      _reconnecting = false;
+    }
+  }
+
+  /// Stop serving the client when the physical link cannot be restored.
+  ///
+  /// Tearing the session down (instead of leaving the proxy up) makes the
+  /// MeshCore app notice that the companion is gone rather than sending into a
+  /// dead link that reports success locally.
+  Future<void> _abandonSession() async {
+    host.log(
+      'Device link lost after $_reconnectFailures failed reconnect cycles; '
+      'stopping the session',
+    );
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _linkLost = true;
+    await _disconnectDevice();
+  }
+
+  /// Retry the saved device after a link-loss give-up.
+  ///
+  /// Called when the app returns to the foreground: a radio that was left
+  /// behind may be back in range, and actively retrying all day would waste
+  /// battery. Does nothing unless the last session ended from link loss.
+  Future<void> rearmAfterLinkLoss() async {
+    if (!_linkLost ||
+        _rearming ||
+        deviceConnected ||
+        host.busy ||
+        _reconnecting ||
+        _disconnecting) {
+      return;
+    }
+    if (!sessionSettings.autoResume) return;
+    _rearming = true;
+    host.log('Device link was lost; retrying the saved device on resume ...');
+    try {
+      await resumeSession();
+    } finally {
+      _rearming = false;
     }
   }
 
@@ -433,6 +524,9 @@ class ConnectionController {
     deviceConnectedAt = null;
     deviceInfo = null;
     deviceLabel = null;
+    _reconnectFailures = 0;
+    _linkLost = false;
+    deviceReconnecting = false;
     host.log('Device powered off; automatic reconnect suppressed');
     await offPersisted;
     await host.stopProxy();
@@ -443,7 +537,15 @@ class ConnectionController {
 
   Future<void> handlePoweredOff() => _runTransition(_onNodePoweredOff);
 
-  Future<void> disconnect() => _runTransition(_disconnectDevice);
+  Future<void> disconnect() {
+    // Drop a queued or in-flight reconnect immediately: tapping Disconnect must
+    // not wait for a link retry to fail first.
+    _linkLost = false;
+    _disconnectRequested = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    return _runTransition(_disconnectDevice);
+  }
 
   Future<void> _disconnectDevice() async {
     final wasBusy = host.busy;
@@ -474,6 +576,9 @@ class ConnectionController {
       deviceConnectedAt = null;
       deviceInfo = null;
       deviceLabel = null;
+      _reconnectFailures = 0;
+      _disconnectRequested = false;
+      deviceReconnecting = false;
       await host.stopForegroundService();
       host.resetNotificationState();
       _disconnecting = false;
