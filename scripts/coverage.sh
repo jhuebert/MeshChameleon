@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Run every package/app test with coverage instrumentation and compare the
 # per-file line coverage against coverage_baseline.json.
+#
+# This is the only place CI runs the tests: check.sh --no-tests does the format
+# and analysis work, so the suite does not have to run twice.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -16,7 +19,7 @@ fi
 
 rm -rf coverage app/coverage
 
-for pkg in mesh_protocol companion_server device_link mesh_node; do
+for pkg in mesh_protocol companion_server device_link mesh_node test_support; do
   echo "== coverage packages/$pkg =="
   (
     cd "packages/$pkg"

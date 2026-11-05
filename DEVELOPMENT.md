@@ -90,7 +90,8 @@ Run everything:
 
 The script uses `dart` and `flutter` from `PATH`; set `DART` / `FLUTTER` to
 override them. It enforces `dart format` and runs the analysis/tests for every
-package and the app.
+package and the app. Pass `--no-tests` to run only the format and analysis
+gates; CI uses it because the coverage step below runs the same suite once.
 
 Coverage is a separate gate so local iteration stays fast:
 
@@ -99,10 +100,12 @@ Coverage is a separate gate so local iteration stays fast:
 ```
 
 It runs the same tests with coverage instrumentation and compares per-file line
-coverage against `coverage_baseline.json`. Files that are new to the baseline
-must be at least 80% covered. After an intentional coverage change, refresh the
-baseline with `./scripts/coverage.sh --write-baseline` (and review the JSON diff
-before committing it).
+coverage against `coverage_baseline.json`. A file may lose one covered line
+without failing, because coverage attribution of a single line is not stable
+between runs; a larger loss fails. Files that are new to the baseline must be at
+least 80% covered. After an intentional coverage change, refresh the baseline
+with `./scripts/coverage.sh --write-baseline` (and review the JSON diff before
+committing it).
 
 The same simulator is also reachable without writing a test: from the Linux
 desktop app's **Simulated** tab, or from the headless CLI below.
@@ -580,10 +583,11 @@ Rules:
   `2001` arm64-v8a, `4001` x86_64 for `+1`). The About page and the GitHub APKs
   show these adjusted values; the AAB and universal APK keep `+N`.
 
-`.github/workflows/ci.yml` runs `scripts/check.sh`, the lockfile and store-asset
-checks, and debug and release APK builds on every pull request and push to
-`main`. `scripts/coverage.sh` enforces per-file line coverage for package and
-app code. The app lockfile is tracked and Renovate updates it alongside
+`.github/workflows/ci.yml` runs `scripts/check.sh --no-tests`, the lockfile and
+store-asset checks, and debug and release APK builds on every pull request and
+push to `main`. `scripts/coverage.sh` runs the test suite with instrumentation
+and enforces per-file line coverage for package and app code. The app lockfile
+is tracked and Renovate updates it alongside
 `app/pubspec.yaml`, so PRs are tested against the exact resolved set; the
 lockfile check fails if dependency resolution rewrites it. CI pins Flutter
 3.47.7 and Temurin Java 17; keep the release workflow on the same versions.

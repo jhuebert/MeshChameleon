@@ -51,10 +51,10 @@ jobs:
           flutter --version
           java -version
 
-      - name: Analyze and test
-        run: ./scripts/check.sh
+      - name: Analyze
+        run: ./scripts/check.sh --no-tests
 
-      - name: Check coverage
+      - name: Test and check coverage
         run: ./scripts/coverage.sh
 
       # The app lockfile is tracked; fail if dependency resolution rewrote it.
