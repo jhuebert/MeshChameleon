@@ -696,29 +696,27 @@ class MeshRx {
     Packet packet,
   ) {
     final channelHashByte = packet.payload[0];
-    Channel? channel;
-    var channelIdx = 0;
-    channels.forEach((idx, ch) {
-      if (channelHash(ch.secret) == channelHashByte) {
-        channel = ch;
-        channelIdx = idx;
+    // A one-byte hash can match several configured channels. Try every match
+    // until the MAC validates; keeping only the last match drops all traffic
+    // for the other channels in the collision (the firmware tries up to four).
+    for (final entry in channels.entries) {
+      final ch = entry.value;
+      if (channelHash(ch.secret) != channelHashByte) continue;
+      final secret = channelSecret32(ch.secret);
+      try {
+        return (
+          channelIdx: entry.key,
+          plaintext: CryptoUtils.macThenDecrypt(
+            secret.sublist(0, 16),
+            secret,
+            packet.payload.sublist(1),
+          ),
+        );
+      } catch (_) {
+        continue;
       }
-    });
-    if (channel == null) return null;
-    final ch = channel!;
-    final secret = channelSecret32(ch.secret);
-    try {
-      return (
-        channelIdx: channelIdx,
-        plaintext: CryptoUtils.macThenDecrypt(
-          secret.sublist(0, 16),
-          secret,
-          packet.payload.sublist(1),
-        ),
-      );
-    } catch (_) {
-      return null;
     }
+    return null;
   }
 
   Future<void> _onRequest(Packet packet, int generation) async {

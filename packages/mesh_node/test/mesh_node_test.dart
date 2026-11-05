@@ -353,6 +353,38 @@ void main() {
     expect(msg.channelIdx, 0);
   });
 
+  test('channel text is delivered despite a one-byte channel hash collision',
+      () async {
+    final ncbot = Uint8List.fromList(
+      CryptoUtils.sha256(utf8.encode('#ncbot')).sublist(0, 16),
+    );
+    final selftest = Uint8List.fromList(
+      CryptoUtils.sha256(utf8.encode('#selftest')).sublist(0, 16),
+    );
+    // These two public hashtag channels share the same on-air hash byte, so
+    // receiving must try every matching channel instead of only the last one.
+    expect(channelHash(ncbot), channelHash(selftest));
+
+    await alice.setChannel(1, '#ncbot', ncbot);
+    await bob.setChannel(1, '#ncbot', ncbot);
+    await bob.setChannel(2, '#selftest', selftest);
+
+    await alice.sendChannelMessage(1, 'hello ncbot');
+    await pump();
+    final ncbotMsg = await bob.syncNextMessage();
+    expect(ncbotMsg, isNotNull);
+    expect(ncbotMsg!.channelIdx, 1);
+    expect(ncbotMsg.text, 'alice: hello ncbot');
+
+    await alice.setChannel(2, '#selftest', selftest);
+    await alice.sendChannelMessage(2, 'hello selftest');
+    await pump();
+    final selftestMsg = await bob.syncNextMessage();
+    expect(selftestMsg, isNotNull);
+    expect(selftestMsg!.channelIdx, 2);
+    expect(selftestMsg.text, 'alice: hello selftest');
+  });
+
   test('channel messages preserve the encoded path hash width', () async {
     final packet = PacketBuilder.createGroupText(
       channel: alice.getChannel(0)!,
