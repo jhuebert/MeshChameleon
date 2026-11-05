@@ -16,6 +16,7 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
+import 'support/async_wait.dart';
 import 'support/fake_app_state.dart';
 
 const _channel = MethodChannel('flutter_file_dialog');
@@ -96,6 +97,20 @@ void main() {
         .arguments as Map;
     expect(params['fileName'],
         matches(r'^meshchameleon-\d{4}-\d{2}-\d{2}\.mcbackup$'));
+    expect(find.text('Backup saved'), findsOneWidget);
+  });
+
+  testWidgets('submitting the confirm field starts the backup', (tester) async {
+    await tester.pumpWidget(wrap());
+    await tester.tap(find.text('Back up now'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), 'correct horse');
+    await tester.enterText(find.byType(TextField).at(1), 'correct horse');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(app.createPassphrases, ['correct horse']);
     expect(find.text('Backup saved'), findsOneWidget);
   });
 
@@ -202,7 +217,7 @@ void main() {
     await _openRestore(tester);
     expect(find.text('Enter backup passphrase'), findsOneWidget);
     await tester.enterText(find.byType(TextField), 'correct horse');
-    await _submitPassphrase(tester);
+    await _submitPassphrase(tester, find.text('Restore this backup?'));
 
     expect(app.inspectCalls.single.$2, 'correct horse');
     expect(find.text('Restore this backup?'), findsOneWidget);
@@ -216,7 +231,7 @@ void main() {
     );
 
     await tester.tap(find.text('Replace local data'));
-    await _finishRestore(tester);
+    await _finishRestore(tester, find.text('Backup restored'));
     expect(app.restoreCalls, 1);
     expect(find.text('Backup restored'), findsOneWidget);
   });
@@ -231,9 +246,12 @@ void main() {
 
     await _openRestore(tester);
     await tester.enterText(find.byType(TextField), 'correct horse');
-    await _submitPassphrase(tester);
+    await _submitPassphrase(tester, find.text('Restore this backup?'));
     await tester.tap(find.text('Replace local data'));
-    await _finishRestore(tester);
+    await _finishRestore(
+      tester,
+      find.text('Could not restore the backup. Your previous data was kept.'),
+    );
 
     expect(
         find.text('Could not restore the backup. Your previous data was kept.'),
@@ -248,9 +266,15 @@ void main() {
 
     await _openRestore(tester);
     await tester.enterText(find.byType(TextField), 'correct horse');
-    await _submitPassphrase(tester);
+    await _submitPassphrase(tester, find.text('Restore this backup?'));
     await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
-    await _finishRestore(tester);
+    // The dialog's future resumes on the real event loop; settle the busy strip
+    // before asserting so pumpAndSettle does not chase its animation.
+    await pumpUntil(
+      tester,
+      () => find.text('Restore this backup?').evaluate().isEmpty,
+    );
+    await tester.pumpAndSettle();
 
     expect(app.restoreCalls, 0);
   });
@@ -306,12 +330,10 @@ void main() {
     await _openRestore(tester);
     await tester.enterText(find.byType(TextField), 'correct horse');
     await tester.testTextInput.receiveAction(TextInputAction.done);
-    await tester.pump();
-    await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    await pumpUntil(
+      tester,
+      () => find.text('that file is damaged').evaluate().isNotEmpty,
     );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('that file is damaged'), findsOneWidget);
     await tester.tap(find.text('OK'));
     await tester.pumpAndSettle();
@@ -319,35 +341,28 @@ void main() {
     app.inspectError = StateError('unexpected');
     await _openRestore(tester);
     await tester.enterText(find.byType(TextField), 'correct horse');
-    await _submitPassphrase(tester);
+    await _submitPassphrase(tester, find.text('Could not restore the backup.'));
     expect(find.text('Could not restore the backup.'), findsOneWidget);
   });
 }
 
-Future<void> _finishRestore(WidgetTester tester) async {
-  await tester.pump();
-  await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 100)),
-  );
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 300));
-}
+Future<void> _finishRestore(WidgetTester tester, Finder until) =>
+    pumpUntil(tester, () => until.evaluate().isNotEmpty);
 
-Future<void> _submitPassphrase(WidgetTester tester) async {
-  await tester.tap(find.text('Open backup'));
-  await tester.pump();
-  await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 100)),
-  );
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 300));
+Future<void> _submitPassphrase(WidgetTester tester, Finder until) async {
+  await tester.runAsync(() => tester.tap(find.text('Open backup')));
+  await pumpUntil(tester, () => until.evaluate().isNotEmpty);
+  // Let the passphrase dialog finish leaving the tree so a following tap sees
+  // only one dialog.
+  await pumpUntil(tester, () => find.text('Open backup').evaluate().isEmpty);
 }
 
 Future<void> _openRestore(WidgetTester tester) async {
-  await tester.runAsync(() async {
-    await tester.tap(find.text('Restore from backup'));
-    await Future<void>.delayed(const Duration(milliseconds: 300));
-  });
+  await tester.runAsync(() => tester.tap(find.text('Restore from backup')));
+  await pumpUntil(
+    tester,
+    () => find.byType(AlertDialog).evaluate().isNotEmpty,
+  );
   await tester.pumpAndSettle();
 }
 

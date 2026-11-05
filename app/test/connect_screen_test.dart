@@ -14,6 +14,7 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
+import 'support/async_wait.dart';
 import 'support/fake_app_state.dart';
 
 const _bleCapabilities = DeviceCapabilities(
@@ -268,10 +269,10 @@ void main() {
       networkStore: store,
     );
 
-    await tester.runAsync(() async {
-      await tester.tap(find.byTooltip('Remove saved connection'));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
+    await tester.runAsync(
+      () => tester.tap(find.byTooltip('Remove saved connection')),
+    );
+    await pumpUntil(tester, () => find.text('Undo').evaluate().isNotEmpty);
     await tester.pumpAndSettle();
 
     expect(find.text('delete.example:5000'), findsNothing);
@@ -280,10 +281,11 @@ void main() {
     expect(app.savedNetworkConnections, isEmpty);
     expect(await tester.runAsync(() => store.load()), isEmpty);
 
-    await tester.runAsync(() async {
-      await tester.tap(find.text('Undo'));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
+    await tester.runAsync(() => tester.tap(find.text('Undo')));
+    await pumpUntil(
+      tester,
+      () => find.text('delete.example:5000').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('delete.example:5000'), findsOneWidget);
@@ -313,13 +315,13 @@ void main() {
       push: true,
     );
 
-    await tester.runAsync(() async {
-      await tester.tap(find.text('192.168.1.55:5000'));
-      while (app.busy) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
+    await tester.runAsync(
+      () => tester.tap(find.text('192.168.1.55:5000')),
+    );
+    await pumpUntil(
+      tester,
+      () => find.text('open connect').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     expect(attempts, 1);
@@ -349,13 +351,18 @@ void main() {
       push: true,
     );
 
-    await tester.runAsync(() async {
-      await tester.tap(find.text('192.168.1.55:5000'));
-      while (app.busy) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
+    await tester.runAsync(
+      () => tester.tap(find.text('192.168.1.55:5000')),
+    );
+    await pumpUntil(
+      tester,
+      () => find
+          .text(
+            'Could not connect to 192.168.1.55:5000. See the log for details.',
+          )
+          .evaluate()
+          .isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(ConnectScreen), findsOneWidget);
@@ -481,13 +488,13 @@ void main() {
 
     await tester.tap(find.text('Simulated'));
     await tester.pumpAndSettle();
-    await tester.runAsync(() async {
-      await tester.tap(find.text('Connect simulated companion'));
-      while (app.busy) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
+    await tester.runAsync(
+      () => tester.tap(find.text('Connect simulated companion')),
+    );
+    await pumpUntil(
+      tester,
+      () => find.text('open connect').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     expect(app.deviceConnected, isTrue);

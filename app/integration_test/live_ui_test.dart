@@ -132,7 +132,7 @@ void main() {
     });
     await app.loadIdentities();
     await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
+      ChangeNotifierProvider<AppViewState>.value(
         value: app,
         child: const MaterialApp(home: HomeScreen()),
       ),

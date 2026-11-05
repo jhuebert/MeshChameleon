@@ -142,7 +142,7 @@ void main() {
     });
     _stage('identities loaded');
 
-    await tester.pumpWidget(ChangeNotifierProvider<AppState>.value(
+    await tester.pumpWidget(ChangeNotifierProvider<AppViewState>.value(
       value: app,
       child: const MaterialApp(
         home: HomeScreen(),

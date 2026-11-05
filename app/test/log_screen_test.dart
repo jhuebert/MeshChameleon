@@ -5,6 +5,8 @@ import 'package:meshchameleon/app_state.dart';
 import 'package:meshchameleon/screens/log_screen.dart';
 import 'package:provider/provider.dart';
 
+import 'support/async_wait.dart';
+
 void main() {
   testWidgets('log page renders entries and copies them', (tester) async {
     final app = AppState()..log('hello from the log');
@@ -30,11 +32,9 @@ void main() {
     expect(find.textContaining('hello from the log'), findsOneWidget);
     expect(find.byTooltip('Copy log'), findsOneWidget);
 
-    await tester.runAsync(() async {
-      await tester.tap(find.byTooltip('Copy log'));
-      await Future<void>.delayed(const Duration(milliseconds: 100));
-    });
-    await tester.pump();
+    await tester.runAsync(() => tester.tap(find.byTooltip('Copy log')));
+    await pumpUntil(
+        tester, () => find.text('Log copied').evaluate().isNotEmpty);
 
     expect(find.text('Log copied'), findsOneWidget);
     final copy = calls.where((call) => call.method == 'Clipboard.setData');

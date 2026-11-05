@@ -16,6 +16,7 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:provider/provider.dart';
 
+import 'support/async_wait.dart';
 import 'support/fake_app_state.dart';
 
 const _capabilities = DeviceCapabilities(
@@ -58,12 +59,14 @@ void main() {
         child: MaterialApp(home: child),
       );
 
-  Future<void> tapAsync(WidgetTester tester, Finder finder) async {
-    await tester.runAsync(() async {
-      await tester.tap(finder);
-      await Future<void>.delayed(const Duration(milliseconds: 300));
-    });
-    await tester.pump();
+  /// Taps [finder] and waits until the async work it starts reaches [until].
+  Future<void> tapAsync(
+    WidgetTester tester,
+    Finder finder, {
+    required bool Function() until,
+  }) async {
+    await tester.runAsync(() => tester.tap(finder));
+    await pumpUntil(tester, until);
   }
 
   testWidgets('home card shows the active name and prefix and opens the list',
@@ -151,14 +154,22 @@ void main() {
     await tester.pumpWidget(wrap(const IdentitiesScreen()));
     await tester.pumpAndSettle();
 
-    await tapAsync(tester, find.byType(FloatingActionButton));
+    await tapAsync(
+      tester,
+      find.byType(FloatingActionButton),
+      until: () => find.text('New identity').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
     expect(find.text('New identity'), findsOneWidget);
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.controller!.text, 'MeshChameleon 2');
 
     await tester.enterText(find.byType(TextField), 'Custom Node');
-    await tapAsync(tester, find.text('Create'));
+    await tapAsync(
+      tester,
+      find.text('Create'),
+      until: () => app.identities.length == 3 && !app.busy,
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('Custom Node'), findsOneWidget);
@@ -176,7 +187,11 @@ void main() {
       (tester) async {
     await tester.pumpWidget(wrap(const IdentitiesScreen()));
     await tester.pumpAndSettle();
-    await tapAsync(tester, find.byType(FloatingActionButton));
+    await tapAsync(
+      tester,
+      find.byType(FloatingActionButton),
+      until: () => find.text('New identity').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     expect(find.text('15/31 bytes'), findsOneWidget);
@@ -187,7 +202,11 @@ void main() {
     final field = tester.widget<TextField>(find.byType(TextField));
     expect(field.controller!.text, hasLength(31));
 
-    await tapAsync(tester, find.text('Create'));
+    await tapAsync(
+      tester,
+      find.text('Create'),
+      until: () => app.identities.length == 2 && !app.busy,
+    );
     await tester.pumpAndSettle();
 
     expect(app.identities, hasLength(2));
@@ -201,7 +220,11 @@ void main() {
       (tester) async {
     await tester.pumpWidget(wrap(const IdentitiesScreen()));
     await tester.pumpAndSettle();
-    await tapAsync(tester, find.byType(FloatingActionButton));
+    await tapAsync(
+      tester,
+      find.byType(FloatingActionButton),
+      until: () => find.text('New identity').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'é' * 20);
@@ -215,7 +238,11 @@ void main() {
   testWidgets('create wizard rejects control characters', (tester) async {
     await tester.pumpWidget(wrap(const IdentitiesScreen()));
     await tester.pumpAndSettle();
-    await tapAsync(tester, find.byType(FloatingActionButton));
+    await tapAsync(
+      tester,
+      find.byType(FloatingActionButton),
+      until: () => find.text('New identity').evaluate().isNotEmpty,
+    );
     await tester.pumpAndSettle();
 
     await tester.enterText(find.byType(TextField), 'bad\u0001name');
@@ -239,7 +266,11 @@ void main() {
     await tester.tap(find.widgetWithText(Card, 'MeshChameleon'));
     await tester.pumpAndSettle();
 
-    await tapAsync(tester, find.text('Second'));
+    await tapAsync(
+      tester,
+      find.text('Second'),
+      until: () => app.activeIdentityId == secondId && !app.busy,
+    );
     await tester.pumpAndSettle();
 
     expect(find.byType(HomeScreen), findsOneWidget);
