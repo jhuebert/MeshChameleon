@@ -1,3 +1,4 @@
+import 'device_link_phase.dart';
 import 'identity_repository.dart';
 import 'proxy_status.dart';
 
@@ -20,6 +21,7 @@ class NotificationContent {
 NotificationContent buildNotificationContent({
   required int identityCount,
   String? activeName,
+  required DeviceLinkPhase devicePhase,
   required bool deviceConnected,
   required ProxyStatus proxyStatus,
   required int port,
@@ -35,11 +37,16 @@ NotificationContent buildNotificationContent({
   final linkPart = deviceConnected ? 'device linked' : 'no device';
   final serverPart =
       proxyStatus == ProxyStatus.running ? 'serving :$port' : 'server stopped';
-  final title = proxyStatus == ProxyStatus.running
-      ? 'Proxy running'
-      : deviceConnected
-          ? 'Device linked'
-          : 'MeshChameleon idle';
+  final title = switch (devicePhase) {
+    DeviceLinkPhase.connecting => 'Connecting to companion',
+    DeviceLinkPhase.reconnecting => 'Reconnecting to companion',
+    DeviceLinkPhase.waiting => 'Waiting for companion',
+    DeviceLinkPhase.connected =>
+      proxyStatus == ProxyStatus.running ? 'Proxy running' : 'Device linked',
+    DeviceLinkPhase.idle ||
+    DeviceLinkPhase.disconnecting =>
+      'MeshChameleon idle',
+  };
   return NotificationContent(
     title: title,
     text: '$identityPart · $linkPart · $serverPart',

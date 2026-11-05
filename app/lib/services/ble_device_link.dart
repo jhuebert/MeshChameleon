@@ -40,7 +40,8 @@ String bleCompanionDisplayName(ScanResult result) {
 
 /// [RadioLink] over BLE (NUS). BLE carries raw frames: one GATT write/notify is
 /// one companion frame, with no `'<'`/`'>'` wrapper.
-class BleDeviceLink implements RadioLink {
+class BleDeviceLink
+    implements RadioLink, PassiveConnectLink, CancelableConnect {
   BleDeviceLink({
     required this.device,
     this.requestTimeout = const Duration(seconds: 5),
@@ -63,6 +64,17 @@ class BleDeviceLink implements RadioLink {
   Set<int> _expected = const {};
   Future<void> _lock = Future<void>.value();
 
+  /// True while an OS-level `autoConnect` request is armed.
+  bool _passiveActive = false;
+  bool _handshaking = false;
+
+  /// Invalidates a connection attempt whose handshake is still in flight.
+  ///
+  /// FlutterBluePlus cannot abort an in-flight GATT operation, so [disconnect]
+  /// lets the future unwind and this counter stops a canceled attempt from
+  /// installing notifications or reporting the link as connected.
+  int _attemptGeneration = 0;
+
   @override
   Stream<LinkState> get state => _stateController.stream;
 
@@ -81,62 +93,208 @@ class BleDeviceLink implements RadioLink {
     }
     // A prior connection's platform-wide streams are not tied to the old
     // characteristic object. Cancel them before subscribing again or every
-    // notification is delivered once per reconnect.
+    // notification is delivered once per reconnect. This also removes a
+    // passive request so the two connection paths cannot fight over the device.
+    final hadPassiveRequest = _passiveActive || device.isAutoConnectEnabled;
+    _passiveActive = false;
+    final generation = ++_attemptGeneration;
     await _cancelSubscriptions();
     _rx = null;
     _tx = null;
     _setState(LinkState.connecting);
     try {
-      await device.connect(timeout: const Duration(seconds: 15));
-      try {
-        await device.requestMtu(185);
-      } catch (e) {
-        onLog?.call('[BleDeviceLink] requestMtu failed: $e');
+      // Clear a stale GATT handle left by a killed process, an earlier passive
+      // request, or another app before asking for a fresh connection.
+      if (device.isConnected || hadPassiveRequest) {
+        await device.disconnect(queue: false);
       }
-      final services = await device.discoverServices();
-      final nus = services.firstWhere(
-        (s) => s.uuid == MeshCoreUuids.serviceGuid,
-        orElse: () => throw StateError('NUS service not found'),
-      );
-      _rx = nus.characteristics
-          .firstWhere((c) => c.uuid == Guid(MeshCoreUuids.rx));
-      _tx = nus.characteristics
-          .firstWhere((c) => c.uuid == Guid(MeshCoreUuids.tx));
-      await _tx!.setNotifyValue(true);
-      _notifySub = _tx!.onValueReceived.listen(
-        (data) => _onFrame(Uint8List.fromList(data)),
-      );
-      // Surface an unexpected drop (e.g. the device rebooting) so the app's
-      // link watcher can reconnect.
-      _connSub = device.connectionState.listen((s) {
-        if (s == BluetoothConnectionState.disconnected &&
-            _state == LinkState.connected) {
-          onLog?.call('[BleDeviceLink] device disconnected');
-          _failAll(const DeviceCommandError.disconnected(
-              message: 'BLE disconnected'));
-          _cancelNotifySubscription();
-          _setState(LinkState.disconnected);
-        }
-      });
+      if (generation != _attemptGeneration) return;
+      await device.connect(timeout: const Duration(seconds: 15));
+      if (generation != _attemptGeneration) {
+        await _discardAttempt();
+        return;
+      }
+      await _handshake();
+      if (generation != _attemptGeneration) {
+        await _discardAttempt();
+        return;
+      }
+      _observeConnection();
       _setState(LinkState.connected);
     } catch (e) {
-      await _cancelSubscriptions();
-      _rx = null;
-      _tx = null;
-      _setState(LinkState.disconnected);
+      await _discardAttempt();
+      if (generation == _attemptGeneration) {
+        _setState(LinkState.disconnected);
+      }
       rethrow;
     }
   }
 
   @override
   Future<void> disconnect() async {
+    _passiveActive = false;
+    _attemptGeneration++;
     await _cancelSubscriptions();
     _rx = null;
     _tx = null;
     _failAll(const DeviceCommandError.disconnected(message: 'disconnected'));
     try {
-      await device.disconnect();
+      // `queue: false` skips the platform operation queue, so a Disconnect tap
+      // is not stuck behind an in-flight write, notify setup, or connect.
+      await device.disconnect(queue: false);
     } catch (_) {}
+    _setState(LinkState.disconnected);
+  }
+
+  @override
+  Future<void> cancelInFlightConnect() => disconnect();
+
+  @override
+  Future<void> startPassiveConnect() async {
+    if (_passiveActive || _state == LinkState.connected) return;
+    _passiveActive = true;
+    final generation = ++_attemptGeneration;
+    // Stay disconnected while waiting: the UI and the link watcher must not
+    // treat an armed OS request as an established link.
+    await _cancelSubscriptions();
+    _rx = null;
+    _tx = null;
+    _observePassiveConnection(generation);
+    if (device.isConnected) {
+      await _completePassiveHandshake(generation);
+      return;
+    }
+    try {
+      // FlutterBluePlus requires `mtu: null` with autoConnect; the MTU is
+      // requested after the OS reports the connection.
+      await device.connect(autoConnect: true, mtu: null);
+    } catch (e) {
+      await stopPassiveConnect();
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> stopPassiveConnect() async {
+    _passiveActive = false;
+    _attemptGeneration++;
+    await _cancelSubscriptions();
+    _rx = null;
+    _tx = null;
+    _failAll(const DeviceCommandError.disconnected(message: 'disconnected'));
+    try {
+      await device.disconnect(queue: false);
+    } catch (_) {}
+    _setState(LinkState.disconnected);
+  }
+
+  /// Drop the characteristics and subscriptions of a canceled attempt.
+  Future<void> _discardAttempt() async {
+    await _cancelSubscriptions();
+    _rx = null;
+    _tx = null;
+  }
+
+  /// Discover NUS and install notifications. Shared by the active and passive
+  /// connection paths so their handshakes cannot drift apart.
+  Future<void> _handshake() async {
+    try {
+      await device.requestMtu(185);
+    } catch (e) {
+      onLog?.call('[BleDeviceLink] requestMtu failed: $e');
+    }
+    final services = await device.discoverServices();
+    final nus = services.firstWhere(
+      (s) => s.uuid == MeshCoreUuids.serviceGuid,
+      orElse: () => throw StateError('NUS service not found'),
+    );
+    _rx =
+        nus.characteristics.firstWhere((c) => c.uuid == Guid(MeshCoreUuids.rx));
+    _tx =
+        nus.characteristics.firstWhere((c) => c.uuid == Guid(MeshCoreUuids.tx));
+    await _setNotifyWithRetry(_tx!);
+    _notifySub = _tx!.onValueReceived.listen(
+      (data) => _onFrame(Uint8List.fromList(data)),
+    );
+  }
+
+  Future<void> _setNotifyWithRetry(BluetoothCharacteristic tx) async {
+    const delays = [
+      Duration.zero,
+      Duration(milliseconds: 500),
+      Duration(seconds: 1),
+    ];
+    for (var attempt = 0; attempt < delays.length; attempt++) {
+      if (delays[attempt] > Duration.zero) {
+        await Future<void>.delayed(delays[attempt]);
+      }
+      try {
+        await tx.setNotifyValue(true);
+        return;
+      } catch (e) {
+        if (attempt == delays.length - 1) rethrow;
+        onLog?.call(
+          '[BleDeviceLink] setNotifyValue attempt ${attempt + 1} failed: $e',
+        );
+      }
+    }
+  }
+
+  /// Surface an unexpected drop (e.g. the device rebooting) so the app's link
+  /// watcher can reconnect.
+  void _observeConnection() {
+    unawaited(_connSub?.cancel());
+    _connSub = device.connectionState.listen((s) {
+      if (s == BluetoothConnectionState.disconnected &&
+          _state == LinkState.connected) {
+        _handleDrop();
+      }
+    });
+  }
+
+  void _observePassiveConnection(int generation) {
+    unawaited(_connSub?.cancel());
+    _connSub = device.connectionState.listen((s) {
+      if (!_passiveActive || generation != _attemptGeneration) return;
+      if (s == BluetoothConnectionState.connected) {
+        unawaited(_completePassiveHandshake(generation));
+      } else if (s == BluetoothConnectionState.disconnected &&
+          _state == LinkState.connected) {
+        _handleDrop();
+      }
+    });
+  }
+
+  Future<void> _completePassiveHandshake(int generation) async {
+    if (!_passiveActive ||
+        generation != _attemptGeneration ||
+        _handshaking ||
+        _state == LinkState.connected) {
+      return;
+    }
+    _handshaking = true;
+    try {
+      await _handshake();
+      if (!_passiveActive || generation != _attemptGeneration) {
+        // The request was stopped while the GATT handshake was unwinding; drop
+        // the subscriptions it just installed instead of leaking them.
+        await _discardAttempt();
+        return;
+      }
+      _setState(LinkState.connected);
+    } catch (e) {
+      onLog?.call('[BleDeviceLink] passive handshake failed: $e');
+      if (generation == _attemptGeneration) await stopPassiveConnect();
+    } finally {
+      _handshaking = false;
+    }
+  }
+
+  void _handleDrop() {
+    onLog?.call('[BleDeviceLink] device disconnected');
+    _failAll(
+        const DeviceCommandError.disconnected(message: 'BLE disconnected'));
+    _cancelNotifySubscription();
     _setState(LinkState.disconnected);
   }
 

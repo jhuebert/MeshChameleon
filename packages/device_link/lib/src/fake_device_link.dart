@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'errors.dart';
+import 'passive_connect_link.dart';
 import 'radio_link.dart';
 
 /// An in-memory shared radio bus. Fake links attached to the same bus receive
@@ -46,7 +47,8 @@ class FakeRadioBus {
 /// It answers `DEVICE_QUERY`/`APP_START`/battery requests with configurable
 /// values and treats every `CMD_SEND_RAW_PACKET` as a transmission on the
 /// attached [FakeRadioBus], which delivers it to peers as `LOG_RX_DATA`.
-class FakeDeviceLink implements RadioLink {
+class FakeDeviceLink
+    implements RadioLink, PassiveConnectLink, CancelableConnect {
   FakeDeviceLink({
     this.deviceInfo_ = const DeviceInfo(),
     this.radioParams_ = const RadioParams(
@@ -177,7 +179,41 @@ class FakeDeviceLink implements RadioLink {
   @override
   Future<void> disconnect() async {
     calls.add('disconnect');
+    passiveRequested = false;
     _dropLink();
+  }
+
+  /// True while the test fake is modelling an armed OS-level connect request.
+  bool passiveRequested = false;
+  int passiveStarts = 0;
+  int passiveStops = 0;
+  int cancelCalls = 0;
+
+  @override
+  Future<void> startPassiveConnect() async {
+    calls.add('startPassiveConnect');
+    passiveStarts++;
+    passiveRequested = true;
+  }
+
+  @override
+  Future<void> stopPassiveConnect() async {
+    calls.add('stopPassiveConnect');
+    passiveStops++;
+    passiveRequested = false;
+  }
+
+  @override
+  Future<void> cancelInFlightConnect() async {
+    calls.add('cancelInFlightConnect');
+    cancelCalls++;
+    await disconnect();
+  }
+
+  /// Model the OS restoring the link while a passive request is armed.
+  Future<void> simulatePassiveConnect() async {
+    passiveRequested = false;
+    await connect();
   }
 
   @override

@@ -43,6 +43,36 @@ void main() {
     expect(failing.currentState, LinkState.disconnected);
   });
 
+  test('a canceled connect discards a late socket', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(server.close);
+    final started = Completer<void>();
+    final gate = Completer<void>();
+    final canceled = TcpDeviceLink(
+      host: '127.0.0.1',
+      port: server.port,
+      socketConnector: (host, port, timeout) async {
+        final socket = await Socket.connect(host, port, timeout: timeout);
+        started.complete();
+        await gate.future;
+        return socket;
+      },
+    );
+
+    final pending = canceled.connect();
+    await started.future;
+    await canceled.disconnect();
+    gate.complete();
+    await pending;
+
+    expect(canceled.currentState, LinkState.disconnected);
+    await expectLater(
+      canceled.deviceInfo(),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.disconnected)),
+    );
+  });
+
   test('handshake, stats, tuning, and radio params parse device replies',
       () async {
     device = await _ScriptedDevice.start((frame, socket) {

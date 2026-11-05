@@ -15,6 +15,8 @@ void main() {
       proxyPort: 5100,
       autoResume: true,
       intentionallyOff: true,
+      recoveryPending: true,
+      recoveryServeProxy: true,
     );
     expect(config.toJson()['version'], sessionConfigVersion);
     final restored = SessionConfig.fromJson(config.toJson());
@@ -25,7 +27,25 @@ void main() {
     expect(restored.proxyPort, 5100);
     expect(restored.autoResume, isTrue);
     expect(restored.intentionallyOff, isTrue);
-    expect(restored.copyWith(proxyPort: 5200).intentionallyOff, isTrue);
+    expect(restored.recoveryPending, isTrue);
+    expect(restored.recoveryServeProxy, isTrue);
+    final updated = restored.copyWith(proxyPort: 5200);
+    expect(updated.intentionallyOff, isTrue);
+    expect(updated.recoveryPending, isTrue);
+    expect(updated.recoveryServeProxy, isTrue);
+  });
+
+  test('a version 1 session reads the recovery flags as false', () {
+    final restored = SessionConfig.fromJson({
+      'version': 1,
+      'kind': 'tcp',
+      'host': '10.0.0.5',
+      'proxyPort': 5200,
+    });
+    expect(restored, isNotNull);
+    expect(restored!.proxyPort, 5200);
+    expect(restored.recoveryPending, isFalse);
+    expect(restored.recoveryServeProxy, isFalse);
   });
 
   test('SessionConfig defaults ports when absent', () {
@@ -84,6 +104,8 @@ void main() {
       {'kind': 'ble', 'bleName': 42},
       {'kind': 'tcp', 'autoResume': 'yes'},
       {'kind': 'tcp', 'intentionallyOff': 1},
+      {'kind': 'tcp', 'recoveryPending': 'yes'},
+      {'kind': 'tcp', 'recoveryServeProxy': 1},
     ]) {
       expect(SessionConfig.fromJson(json), isNull, reason: '$json');
     }

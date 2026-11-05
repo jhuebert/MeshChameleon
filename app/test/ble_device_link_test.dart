@@ -296,6 +296,180 @@ void main() {
     expect(link.currentState, LinkState.connected);
   });
 
+  test('passive connect arms autoConnect without reporting connected',
+      () async {
+    final link = newLink();
+    await link.startPassiveConnect();
+
+    expect(platform.connects.single.autoConnect, isTrue);
+    expect(link.currentState, LinkState.disconnected);
+
+    platform.emitConnected(platform.activeRemoteId!);
+    await _flush();
+    await _flush();
+
+    expect(link.currentState, LinkState.connected);
+    expect(platform.notifyCalls, 1);
+  });
+
+  test('passive connect completes immediately when already connected',
+      () async {
+    final device = BluetoothDevice.fromId('AA:BB:CC:DD:EE:$deviceCounter');
+    await device.connect();
+    final link = BleDeviceLink(device: device, onLog: (_) {});
+
+    await link.startPassiveConnect();
+    await _flush();
+
+    expect(link.currentState, LinkState.connected);
+    expect(platform.notifyCalls, 1);
+  });
+
+  test('a failed autoConnect request leaves the link disconnected', () async {
+    final link = newLink();
+    platform.connectError = StateError('adapter busy');
+
+    await expectLater(link.startPassiveConnect(), throwsStateError);
+
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.disconnects, 1);
+  });
+
+  test('a passive connection drop is reported to the link watcher', () async {
+    final link = newLink();
+    await link.startPassiveConnect();
+    platform.emitConnected(platform.activeRemoteId!);
+    await _flush();
+    await _flush();
+    expect(link.currentState, LinkState.connected);
+
+    platform.dropConnection();
+    await _flush();
+
+    expect(link.currentState, LinkState.disconnected);
+  });
+
+  test('cancelInFlightConnect drops the link queue immediately', () async {
+    final link = newLink();
+    await link.connect();
+    await link.cancelInFlightConnect();
+
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.disconnects, 1);
+  });
+
+  test('stopping passive recovery removes the request and ignores late events',
+      () async {
+    final link = newLink();
+    await link.startPassiveConnect();
+    final id = platform.activeRemoteId!;
+
+    await link.stopPassiveConnect();
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.disconnects, 1);
+
+    platform.emitConnected(id);
+    await _flush();
+    expect(link.currentState, LinkState.disconnected);
+  });
+
+  test('canceling an in-flight connect leaves the link disconnected', () async {
+    final link = newLink();
+    platform.deferConnect = true;
+
+    final pending = link.connect();
+    for (var i = 0; i < 20 && platform.connects.isEmpty; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(platform.connects, hasLength(1));
+
+    await link.cancelInFlightConnect();
+    await expectLater(pending, throwsA(anything));
+
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.notifyCalls, 0);
+  });
+
+  test('a canceled connect adopts no late connection event', () async {
+    final link = newLink();
+    platform.deferConnect = true;
+
+    final pending = link.connect();
+    for (var i = 0; i < 20 && platform.connects.isEmpty; i++) {
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(platform.connects, hasLength(1));
+
+    // Queue the connection event, then cancel before the connect future can
+    // resume, so the generation check has to discard the late event.
+    platform.emitConnected(platform.activeRemoteId!);
+    await link.disconnect();
+    await pending;
+
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.notifyCalls, 0);
+  });
+
+  test('active connect replaces a passive request', () async {
+    final link = newLink();
+    await link.startPassiveConnect();
+    await link.connect();
+
+    expect(platform.connects, hasLength(2));
+    expect(platform.connects.first.autoConnect, isTrue);
+    expect(platform.connects.last.autoConnect, isFalse);
+    expect(link.currentState, LinkState.connected);
+  });
+
+  test('a passive handshake failure returns to disconnected', () async {
+    final link = newLink();
+    await link.startPassiveConnect();
+    platform.notifyFailures = 3;
+
+    platform.emitConnected(platform.activeRemoteId!);
+    await _flush();
+    for (var i = 0; i < 25; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.notifyCalls, 3);
+    expect(platform.disconnects, greaterThanOrEqualTo(1));
+  });
+
+  test('setNotifyValue is retried before failing the active connection',
+      () async {
+    final logs = <String>[];
+    final link = newLink(logs: logs);
+    platform.notifyFailures = 2;
+
+    await link.connect();
+    expect(link.currentState, LinkState.connected);
+    expect(platform.notifyCalls, 3);
+    expect(logs, anyElement(contains('setNotifyValue attempt 1 failed')));
+  });
+
+  test('three notify failures leave the active link disconnected', () async {
+    final link = newLink();
+    platform.notifyFailures = 3;
+
+    await expectLater(link.connect(), throwsA(anything));
+    expect(link.currentState, LinkState.disconnected);
+    expect(platform.notifyCalls, 3);
+  });
+
+  test('an active connect clears a stale connected handle first', () async {
+    final device = BluetoothDevice.fromId('AA:BB:CC:DD:EE:$deviceCounter');
+    await device.connect();
+    expect(device.isConnected, isTrue);
+
+    final link = BleDeviceLink(device: device, onLog: (_) {});
+    await link.connect();
+
+    expect(platform.disconnects, greaterThanOrEqualTo(1));
+    expect(link.currentState, LinkState.connected);
+  });
+
   test('platform name is used when the advertisement has no name', () async {
     final link = newLink();
     await link.connect();
@@ -397,6 +571,12 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
   final _names = StreamController<BmNameChanged>.broadcast();
 
   final writes = <List<int>>[];
+  final connects = <BmConnectRequest>[];
+  int disconnects = 0;
+  int notifyCalls = 0;
+  int notifyFailures = 0;
+  Object? connectError;
+  bool deferConnect = false;
   bool includeNus = true;
   bool disabled = false;
   bool silent = false;
@@ -407,12 +587,19 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
 
   void reset() {
     writes.clear();
+    connects.clear();
+    disconnects = 0;
+    notifyCalls = 0;
+    notifyFailures = 0;
+    connectError = null;
+    deferConnect = false;
     includeNus = true;
     disabled = false;
     silent = false;
     errReply = null;
     extraReply = null;
     writeGate = null;
+    activeRemoteId = null;
   }
 
   @override
@@ -436,21 +623,29 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
 
   @override
   Future<bool> connect(BmConnectRequest request) async {
+    connects.add(request);
+    if (connectError != null) throw connectError!;
     activeRemoteId = request.remoteId;
-    scheduleMicrotask(() => _connections.add(BmConnectionStateResponse(
-          remoteId: request.remoteId,
-          connectionState: BmConnectionStateEnum.connected,
-          disconnectReasonCode: null,
-          disconnectReasonString: null,
-        )));
+    // autoConnect registers an OS request; it does not connect immediately.
+    if (!request.autoConnect && !deferConnect) emitConnected(request.remoteId);
     return true;
   }
 
   @override
   Future<bool> disconnect(BmDisconnectRequest request) async {
+    disconnects++;
     activeRemoteId = request.remoteId;
     dropConnection();
     return true;
+  }
+
+  void emitConnected(DeviceIdentifier id) {
+    _connections.add(BmConnectionStateResponse(
+      remoteId: id,
+      connectionState: BmConnectionStateEnum.connected,
+      disconnectReasonCode: null,
+      disconnectReasonString: null,
+    ));
   }
 
   void dropConnection() {
@@ -524,7 +719,14 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
       );
 
   @override
-  Future<bool> setNotifyValue(BmSetNotifyValueRequest request) async => false;
+  Future<bool> setNotifyValue(BmSetNotifyValueRequest request) async {
+    notifyCalls++;
+    if (notifyFailures > 0) {
+      notifyFailures--;
+      throw StateError('simulated notify failure');
+    }
+    return false;
+  }
 
   @override
   Future<bool> writeCharacteristic(BmWriteCharacteristicRequest request) async {

@@ -44,7 +44,8 @@ screens, identities, and troubleshooting with dark-mode screenshots.
   MeshChameleon on `127.0.0.1`; a client on another device can use your local
   network instead.
 - **Leave it running.** MeshChameleon is designed to keep the link alive while
-  you use other apps, and can reconnect on launch.
+  you use other apps. A short drop reconnects transparently; a longer outage
+  parks the proxy and waits for the radio without closing the app.
 
 ## What you can do
 
@@ -60,7 +61,8 @@ does through a companion:
 - use the same identity with a home radio or a portable node
 - back up and restore identities, contacts, channels, messages, and settings in
   one encrypted file
-- reconnect on launch, if **Resume on launch** is enabled
+- reconnect on launch, if **Resume on launch** is enabled, and recover a dropped
+  session while running even when it is off
 - check the installed version and live link statistics in
   **Information**
 
@@ -166,7 +168,10 @@ Short version:
   radio. Do not run another configuration client against the same companion
   during a session.
 - **The phone must stay running.** The service is designed to survive
-  backgrounding, but battery optimizations and Doze can still interrupt it.
+  backgrounding, but battery optimizations and Doze can still interrupt it. If
+  the radio is away for long, the notification changes to **Waiting for
+  companion**; tap **Cancel** to stop waiting. A parked recovery re-arms when
+  you reopen the app after a process kill.
 - **All identities share the connected radio.** Frequency, transmit power, and
   other radio settings are shared; names, contacts, channels, and messages are
   separate.

@@ -443,6 +443,100 @@ void main() {
     expect(find.text('Connected'), findsNothing);
   });
 
+  testWidgets('a connecting attempt shows a cancelable status card',
+      (tester) async {
+    final app = FakeAppState()
+      ..phase = DeviceLinkPhase.connecting
+      ..deviceConnecting = true
+      ..deviceLabel = 'TCP 192.168.1.55:5000'
+      ..busy = true;
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(
+          home: ConnectScreen(
+            capabilities: DeviceCapabilities(supportsBle: false),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('TCP 192.168.1.55:5000'), findsOneWidget);
+    expect(find.text('Connecting…'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(app.cancelCalls, 1);
+  });
+
+  testWidgets('a waiting status card keeps the target controls usable',
+      (tester) async {
+    final app = FakeAppState()
+      ..phase = DeviceLinkPhase.waiting
+      ..deviceWaiting = true
+      ..deviceLabel = 'BLE MeshCore-nc3';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(
+          home: ConnectScreen(
+            capabilities: DeviceCapabilities(supportsBle: false),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('BLE MeshCore-nc3'), findsOneWidget);
+    expect(
+      find.text(
+          'Waiting for the companion. The proxy restarts when it returns.'),
+      findsOneWidget,
+    );
+    expect(find.text('Cancel'), findsOneWidget);
+    final connect = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Connect over TCP'),
+    );
+    expect(connect.onPressed, isNotNull);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(app.cancelCalls, 1);
+  });
+
+  testWidgets('a failed connection already being recovered does not snackbar',
+      (tester) async {
+    final app = FakeAppState()
+      ..phase = DeviceLinkPhase.waiting
+      ..deviceWaiting = true
+      ..deviceLabel = 'BLE MeshCore-nc3';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(
+          home: ConnectScreen(
+            capabilities: DeviceCapabilities(supportsBle: false),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.text('Connect over TCP'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Could not connect to 192.168.1.100:5000. '
+          'See the log for details.'),
+      findsNothing,
+    );
+  });
+
   testWidgets('a busy connection disables actions but keeps tabs usable',
       (tester) async {
     final store = _historyStore(dir);

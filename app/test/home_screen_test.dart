@@ -31,7 +31,7 @@ void main() {
     expect(find.text('Proxy server'), findsOneWidget);
     expect(find.text('Proxy server port'), findsOneWidget);
     expect(
-      find.text('Reconnect the last device and restart the proxy on open'),
+      find.text('Reconnect the last device on launch (cold start only)'),
       findsOneWidget,
     );
     expect(find.text('Backup & restore'), findsOneWidget);
@@ -293,6 +293,64 @@ void _extraHomeTests() {
 
     expect(find.text('Reconnecting…'), findsOneWidget);
     expect(find.text('Device: reconnecting'), findsOneWidget);
+  });
+
+  testWidgets('a waiting link shows the preserved label and Cancel',
+      (tester) async {
+    _homeView(tester);
+    final app = FakeAppState()
+      ..phase = DeviceLinkPhase.waiting
+      ..deviceWaiting = true
+      ..deviceLabel = 'BLE MeshCore-nc3';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    expect(find.text('Waiting for BLE MeshCore-nc3'), findsOneWidget);
+    expect(find.text('Device: waiting'), findsOneWidget);
+    expect(
+      find.text(
+        'Proxy stopped. It will restart automatically when the companion '
+        'returns.',
+      ),
+      findsOneWidget,
+    );
+    final proxySwitch = tester.widget<SwitchListTile>(
+      find.widgetWithText(SwitchListTile, 'Proxy server'),
+    );
+    expect(proxySwitch.onChanged, isNull);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(app.cancelCalls, 1);
+  });
+
+  testWidgets('connecting and reconnecting offer Cancel instead of Disconnect',
+      (tester) async {
+    _homeView(tester);
+    final app = FakeAppState()
+      ..phase = DeviceLinkPhase.connecting
+      ..deviceConnecting = true
+      ..deviceLabel = 'TCP 192.168.1.50:5000';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    expect(find.text('Connecting…'), findsOneWidget);
+    expect(find.text('Cancel'), findsOneWidget);
+    expect(find.text('Disconnect'), findsNothing);
+
+    await tester.tap(find.text('Cancel'));
+    await tester.pump();
+    expect(app.cancelCalls, 1);
   });
 
   testWidgets('the battery card is hidden off Android', (tester) async {

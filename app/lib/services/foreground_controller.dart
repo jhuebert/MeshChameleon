@@ -1,3 +1,4 @@
+import 'device_link_phase.dart';
 import 'foreground_service.dart';
 import 'notification_content.dart';
 import 'proxy_status.dart';
@@ -12,6 +13,7 @@ class ForegroundController {
     required this.service,
     required this.identityCount,
     required this.activeName,
+    required this.devicePhase,
     required this.deviceConnected,
     required this.proxyStatus,
     required this.port,
@@ -21,6 +23,7 @@ class ForegroundController {
   final ForegroundService service;
   final int Function() identityCount;
   final String? Function() activeName;
+  final DeviceLinkPhase Function() devicePhase;
   final bool Function() deviceConnected;
   final ProxyStatus Function() proxyStatus;
   final int Function() port;
@@ -34,6 +37,7 @@ class ForegroundController {
   NotificationContent content() => buildNotificationContent(
         identityCount: identityCount(),
         activeName: activeName(),
+        devicePhase: devicePhase(),
         deviceConnected: deviceConnected(),
         proxyStatus: proxyStatus(),
         port: port(),

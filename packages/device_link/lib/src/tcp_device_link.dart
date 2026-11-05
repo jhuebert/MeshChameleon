@@ -7,6 +7,16 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'errors.dart';
 import 'radio_link.dart';
 
+/// Opens the TCP socket for [TcpDeviceLink].
+typedef TcpSocketConnector = Future<Socket> Function(
+  String host,
+  int port,
+  Duration timeout,
+);
+
+Future<Socket> _connectSocket(String host, int port, Duration timeout) =>
+    Socket.connect(host, port, timeout: timeout);
+
 /// [RadioLink] over TCP using the serial (`'<'`/`'>'`) framing.
 ///
 /// Used for WiFi/Ethernet companion devices and for development against a
@@ -17,12 +27,14 @@ class TcpDeviceLink implements RadioLink {
     this.port = defaultCompanionPort,
     this.requestTimeout = const Duration(seconds: 5),
     this.onLog,
+    this.socketConnector = _connectSocket,
   });
 
   final String host;
   final int port;
   final Duration requestTimeout;
   final void Function(String message)? onLog;
+  final TcpSocketConnector socketConnector;
 
   // A device only sends radio→app (outbound '>') frames.
   final SerialFrameCodec _codec =
@@ -35,6 +47,12 @@ class TcpDeviceLink implements RadioLink {
   Completer<Uint8List>? _pending;
   Set<int> _expected = const {};
   Future<void> _lock = Future<void>.value();
+
+  /// Invalidates an in-flight [Socket.connect] when the connection is canceled.
+  ///
+  /// `dart:io` cannot abort a connecting socket, so a canceled attempt is left
+  /// to unwind and its socket is discarded instead of becoming the live link.
+  int _connectGeneration = 0;
 
   @override
   Stream<LinkState> get state => _stateController.stream;
@@ -50,10 +68,18 @@ class TcpDeviceLink implements RadioLink {
   @override
   Future<void> connect() async {
     if (_state == LinkState.connected) return;
+    final generation = ++_connectGeneration;
     _setState(LinkState.connecting);
     try {
-      final socket = await Socket.connect(host, port,
-          timeout: const Duration(seconds: 10));
+      final socket = await socketConnector(
+        host,
+        port,
+        const Duration(seconds: 10),
+      );
+      if (generation != _connectGeneration) {
+        socket.destroy();
+        return;
+      }
       socket.setOption(SocketOption.tcpNoDelay, true);
       _socket = socket;
       _codec.reset();
@@ -82,13 +108,16 @@ class TcpDeviceLink implements RadioLink {
       );
       _setState(LinkState.connected);
     } catch (e) {
-      _setState(LinkState.disconnected);
+      if (generation == _connectGeneration) {
+        _setState(LinkState.disconnected);
+      }
       rethrow;
     }
   }
 
   @override
   Future<void> disconnect() async {
+    _connectGeneration++;
     final socket = _socket;
     _socket = null;
     _failAll(const DeviceCommandError.disconnected(message: 'disconnected'));

@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'app_view_state.dart';
 import 'services/backup_controller.dart';
+import 'services/ble_device_link.dart';
 import 'services/build_info.dart';
 import 'services/connection_controller.dart';
 import 'services/device_capabilities.dart';
@@ -28,7 +29,8 @@ import 'services/session_settings.dart';
 import 'services/session_store.dart';
 
 export 'app_view_state.dart';
-export 'services/connection_controller.dart' show TcpDeviceLinkFactory;
+export 'services/connection_controller.dart'
+    show BleLinkFactory, RecoveryTimerFactory, TcpDeviceLinkFactory;
 export 'services/notification_content.dart';
 export 'services/proxy_status.dart';
 
@@ -41,6 +43,8 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     SessionStore? sessionStore,
     NetworkConnectionStore? networkConnectionStore,
     TcpDeviceLinkFactory? tcpLinkFactory,
+    BleLinkFactory? bleLinkFactory,
+    RecoveryTimerFactory? recoveryTimerFactory,
     DeviceCapabilities? capabilities,
     BuildInfo? buildInfo,
     CompanionMetrics? companionMetrics,
@@ -54,6 +58,8 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
         networkConnectionStore =
             networkConnectionStore ?? NetworkConnectionStore(),
         _tcpLinkFactory = tcpLinkFactory ?? _defaultTcpLinkFactory,
+        _bleLinkFactory = bleLinkFactory ?? _defaultBleLinkFactory,
+        _recoveryTimerFactory = recoveryTimerFactory,
         _foregroundService = foregroundService ?? ForegroundService(),
         capabilities = capabilities ?? DeviceCapabilities.current(),
         buildInfo = buildInfo ?? BuildInfo.fallback(),
@@ -65,6 +71,8 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   final SessionStore sessionStore;
   final NetworkConnectionStore networkConnectionStore;
   final TcpDeviceLinkFactory _tcpLinkFactory;
+  final BleLinkFactory _bleLinkFactory;
+  final RecoveryTimerFactory? _recoveryTimerFactory;
 
   /// Installed build identity shown in the footer and diagnostics.
   @override
@@ -97,6 +105,11 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
       proxyPort: port,
       deviceConnected: deviceConnected,
       deviceLabel: deviceLabel,
+      devicePhase: devicePhase,
+      recoveryPending: recoveryPending,
+      passiveAttempts: _connection.passiveAttempts,
+      passiveSuccesses: _connection.passiveSuccesses,
+      nextPassiveDelay: _connection.nextPassiveDelay,
       deviceInfo: deviceInfo,
       deviceSessionDuration: deviceSessionDuration,
       reconnectAttempts: reconnectAttempts,
@@ -138,6 +151,12 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     void Function(String message) onLog,
   ) =>
       TcpDeviceLink(host: host, port: port, onLog: onLog);
+
+  static RadioLink _defaultBleLinkFactory(
+    BluetoothDevice device,
+    void Function(String message) onLog,
+  ) =>
+      BleDeviceLink(device: device, onLog: onLog);
 
   /// What this build can do; gates session restore.
   final DeviceCapabilities capabilities;
@@ -183,9 +202,16 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   @override
   String? get deviceLabel => _connection.deviceLabel;
   @override
+  DeviceLinkPhase get devicePhase => _connection.devicePhase;
+  @override
   bool get deviceConnected => _connection.deviceConnected;
   @override
   bool get deviceReconnecting => _connection.deviceReconnecting;
+  @override
+  bool get deviceWaiting => _connection.deviceWaiting;
+  @override
+  bool get deviceConnecting => _connection.deviceConnecting;
+  bool get recoveryPending => _connection.recoveryPending;
   DeviceInfo? get deviceInfo => _connection.deviceInfo;
   DateTime? get deviceConnectedAt => _connection.deviceConnectedAt;
   int get reconnectAttempts => _connection.reconnectAttempts;
@@ -239,11 +265,13 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   late final ConnectionController _connection = ConnectionController(
     host: this,
     tcpLinkFactory: _tcpLinkFactory,
+    bleLinkFactory: _bleLinkFactory,
     capabilities: capabilities,
     metrics: linkMetrics,
     sessionSettings: _sessionSettings,
     networkHistory: _networkHistory,
     reconnectDelay: reconnectDelay,
+    timerFactory: _recoveryTimerFactory ?? Timer.new,
   );
 
   late final ProxyController _proxy = ProxyController(
@@ -262,6 +290,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     service: _foregroundService,
     identityCount: () => identities.length,
     activeName: () => activeIdentity?.name,
+    devicePhase: () => devicePhase,
     deviceConnected: () => deviceConnected,
     proxyStatus: () => proxyStatus,
     port: () => port,
@@ -368,7 +397,12 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     // its target instead of replacing the saved list.
     await _networkHistory.load();
     notifyListeners();
-    if (resume) await _connection.resumeSession();
+    if (!resume) return;
+    if (_sessionSettings.recoveryPending) {
+      await _connection.recoverPendingSession();
+    } else {
+      await _connection.resumeSession();
+    }
   }
 
   @override
@@ -424,13 +458,16 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     busy = true;
     notifyListeners();
     try {
-      if (deviceConnected || proxyStatus == ProxyStatus.running) {
-        await disconnectDevice();
-      }
+      // Also cancels a parked recovery, where the proxy is already stopped and
+      // no device is connected but the controller is still waiting.
+      await cancelDeviceAttempt();
       await _manager?.dispose();
       _manager = null;
       await _backup.restore(preview);
       await loadIdentities(resume: false);
+      // A restored backup may have been captured while a session was parked;
+      // that recovery belongs to the old device/catalog, not this one.
+      await _sessionSettings.clearRecoveryPending();
       log('Restored backup');
       return true;
     } catch (e) {
@@ -471,6 +508,9 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   @override
   Future<void> cancelPendingConnection() =>
       _connection.cancelPendingConnection();
+
+  @override
+  Future<void> cancelDeviceAttempt() => _connection.cancelDeviceAttempt();
 
   @override
   Future<void> disconnectDevice() => _connection.disconnect();

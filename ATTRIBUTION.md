@@ -15,6 +15,8 @@ Original copyright notices are retained below.
 - Companion contact flags, message/push layouts, and response semantics adapted
   from `lib/connector/meshcore_protocol.dart` and
   `lib/connector/meshcore_connector.dart`.
+- BLE reconnect hardening ideas (stale-handle cleanup, notify retries, and
+  disconnect queue bypass) adapted from the connector's BLE transport.
 
 ## openhop_core
 

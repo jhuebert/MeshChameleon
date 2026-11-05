@@ -3,6 +3,7 @@ import 'package:device_link/device_link.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/services/build_info.dart';
+import 'package:meshchameleon/services/device_link_phase.dart';
 import 'package:meshchameleon/services/diagnostics_snapshot.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
@@ -40,6 +41,11 @@ void main() {
       proxyPort: 5000,
       deviceConnected: true,
       deviceLabel: 'TCP 192.168.1.50:5000',
+      devicePhase: DeviceLinkPhase.connected,
+      recoveryPending: true,
+      passiveAttempts: 2,
+      passiveSuccesses: 1,
+      nextPassiveDelay: const Duration(seconds: 30),
       deviceInfo: const DeviceInfo(
         firmwareVerCode: 14,
         manufacturer: 'MeshCore',
@@ -94,6 +100,10 @@ void main() {
     expect(report, contains('Disabled replies: 1'));
     expect(report, contains('Raw TX/RX packets: 1 / 1'));
     expect(report, contains('Physical radio totals are unique'));
+    expect(report, contains('Device phase: connected'));
+    expect(report, contains('Recovery: waiting for the companion'));
+    expect(report, contains('Passive recoveries: 2 attempted, 1 succeeded'));
+    expect(report, contains('Next passive attempt in 30s'));
     expect(report, contains('Battery optimization: Unrestricted'));
     expect(report, contains('MeshChameleon [ABCD1234] (active)'));
     expect(report, contains('semantic TX/RX: 4 / 9'));

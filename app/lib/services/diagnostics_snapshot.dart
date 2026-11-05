@@ -3,6 +3,7 @@ import 'package:device_link/device_link.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'build_info.dart';
+import 'device_link_phase.dart';
 
 /// Cached per-identity packet counters from the live node session stats.
 class MeshPacketStats {
@@ -103,6 +104,11 @@ class DiagnosticsSnapshot {
     required this.proxyPort,
     required this.deviceConnected,
     required this.deviceLabel,
+    this.devicePhase = DeviceLinkPhase.idle,
+    this.recoveryPending = false,
+    this.passiveAttempts = 0,
+    this.passiveSuccesses = 0,
+    this.nextPassiveDelay,
     required this.deviceInfo,
     required this.deviceSessionDuration,
     required this.reconnectAttempts,
@@ -124,6 +130,11 @@ class DiagnosticsSnapshot {
   final int proxyPort;
   final bool deviceConnected;
   final String? deviceLabel;
+  final DeviceLinkPhase devicePhase;
+  final bool recoveryPending;
+  final int passiveAttempts;
+  final int passiveSuccesses;
+  final Duration? nextPassiveDelay;
   final DeviceInfo? deviceInfo;
   final Duration? deviceSessionDuration;
   final int reconnectAttempts;
@@ -143,8 +154,14 @@ class DiagnosticsSnapshot {
   String get proxyLabel =>
       proxyRunning ? 'Listening on :$proxyPort' : 'Stopped';
 
-  String get deviceLabelText =>
-      deviceConnected ? (deviceLabel ?? 'Connected') : 'Not connected';
+  String get deviceLabelText => switch (devicePhase) {
+        DeviceLinkPhase.connected => deviceLabel ?? 'Connected',
+        DeviceLinkPhase.connecting => 'Connecting',
+        DeviceLinkPhase.reconnecting => 'Reconnecting',
+        DeviceLinkPhase.waiting => 'Waiting for companion',
+        DeviceLinkPhase.disconnecting => 'Disconnecting',
+        DeviceLinkPhase.idle => 'Not connected',
+      };
 
   String get batteryOptimizationLabel => switch (batteryOptimizationsIgnored) {
         true => 'Unrestricted',
@@ -175,6 +192,10 @@ class DiagnosticsSnapshot {
     line('App uptime: ${formatDuration(appUptime)}');
     line('Proxy: $proxyLabel');
     line('Device link: $deviceLabelText');
+    line('Device phase: ${devicePhase.name}');
+    if (recoveryPending) {
+      line('Recovery: waiting for the companion');
+    }
     if (deviceSessionDuration != null) {
       line('Device session: ${formatDuration(deviceSessionDuration!)}');
     }
@@ -228,6 +249,11 @@ class DiagnosticsSnapshot {
         '${formatCount(link.unexpectedDrops)}; '
         'reconnects: ${formatCount(reconnectAttempts)} attempted, '
         '${formatCount(reconnectSuccesses)} succeeded');
+    line('Passive recoveries: ${formatCount(passiveAttempts)} attempted, '
+        '${formatCount(passiveSuccesses)} succeeded');
+    if (nextPassiveDelay != null) {
+      line('Next passive attempt in ${formatDuration(nextPassiveDelay!)}');
+    }
     line('Raw TX/RX packets: ${formatCount(link.rawTxPackets)} / '
         '${formatCount(link.rawRxPackets)}');
     line('Raw TX/RX bytes: ${formatBytes(link.rawTxBytes)} / '

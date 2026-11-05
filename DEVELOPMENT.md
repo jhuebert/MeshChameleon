@@ -223,7 +223,7 @@ carries an explicit schema version:
 | Identity catalog | `<app-support>/identities/index.json` | 2 | `identityIndexVersion` |
 | Per-identity node state | `<app-support>/identities/<id>/node_state.json` | 2 | `nodeStateSchemaVersion` |
 | Saved network targets | `<app-support>/network_connections.json` | 1 | `networkConnectionHistoryVersion` |
-| Last session | `<app-support>/session.json` | 1 | `sessionConfigVersion` |
+| Last session | `<app-support>/session.json` | 2 | `sessionConfigVersion` |
 | Secure identity slots | `meshcore_identity_v2/<id>` | 2 (namespace) | `IdentityStore` |
 
 Rules for any change after 0.1.0:
@@ -240,6 +240,11 @@ Rules for any change after 0.1.0:
 - Node state v2 no longer writes the unused `client_repeat` preference. An
   existing file that contains it still loads; the field is ignored because the
   live repeat byte comes from the physical device capabilities.
+- Session schema v2 adds `recoveryPending` and `recoveryServeProxy` so a parked
+  device recovery survives process death. Version 1 (and a versionless file)
+  reads both as `false`; writes always use v2. `recoveryServeProxy` records
+  whether the proxy was running when the session parked, so recovery never
+  restarts a proxy the user stopped themselves.
 - `session.json` and `network_connections.json` are read through
   `JsonDocumentStore`. A missing file is first-run data. A corrupt, unreadable,
   or newer-version file raises `JsonDocumentException` /
@@ -283,15 +288,25 @@ A request timeout therefore drops the link instead of leaving it open, so a late
 `OK`/`DEVICE_INFO`/`CLI_REPLY` cannot be mistaken for the next request's reply;
 the app reconnects through its normal link watcher.
 
-The link watcher retries a dropped device and reports "Reconnecting…" while the
-proxy stays up, so a transient drop does not evict the MeshCore client. After
-three consecutive failed reconnect cycles (each using the normal connect
-backoff) it ends the session: live identities stop, the companion server and
-foreground service stop, and the MeshCore app sees its proxy connection close.
-This prevents the UI from showing a live companion while the radio is out of
-range or powered off. Returning MeshChameleon to the foreground retries the
-saved device after such a give-up (when **Resume on launch** is enabled) and
-restarts the proxy on success; there is no all-day background retry loop.
+Device-link recovery has two stages. A dropped device first enters
+`reconnecting`: the link is retried with the normal connect backoff for three
+cycles while the proxy and live identities stay up, so a short drop does not
+evict the MeshCore client. If every cycle fails, the session parks in `waiting`:
+the proxy stops exactly once (the client sees the disconnect) and the live
+runtimes stop, but the saved target and the foreground service remain. A BLE
+session arms a FlutterBluePlus `autoConnect` request; a TCP session retries after
+30 s, 1 min, 2 min, 5 min, 10 min, then every 15 min. When the radio returns the
+runtimes start from persisted node state and the proxy restarts only if it was
+running when the session parked. Cancel, Disconnect, and physical power-off all
+stop the service and clear the parked state.
+
+Recovery intent is persisted in session schema v2, so a process death during
+`waiting` re-arms on the next launch even when **Resume on launch** is off. A
+cold-start resume that fails (no prior parked session) returns to idle instead of
+parking; only an established session parks. The reference MeshCore TCP client
+does not auto-reconnect: after the proxy restarts the client must reconnect.
+BLE `autoConnect`, long-running foreground-service survival, and TCP background
+retries remain **PENDING** hardware validation.
 
 Direct-route semantic delivery requires a consumed zero-hop route; flooded or
 still-in-transit packets are raw-logged but not executed locally. This is not a
@@ -519,7 +534,11 @@ controls make that reliable:
 - **Resume on launch** — when enabled, the app remembers the last device target
   (TCP host/port or BLE remote id) plus the proxy port in
   `<app-support>/session.json` (`SessionStore`), and reconnects the device and
-  restarts the proxy on the next launch.
+  restarts the proxy on the next launch. A persisted `recoveryPending` session
+  takes precedence: recovery re-arms even without **Resume on launch**, because
+  it represents work already in progress. A parked wait keeps the foreground
+  service and its **Waiting for companion** notification alive; the proxy is
+  intentionally stopped until the radio returns.
 
 This is a *launch* resume, not a true boot resume. With shape A the engine runs
 in the main isolate, which Android does not start at boot; the proxy cannot come
@@ -532,8 +551,10 @@ require a shape-B engine-in-task-isolate design.
 the workflow controllers, and implements `AppViewState`, the narrow interface
 that screens and widget tests use. Controllers own one workflow each:
 
-- `ConnectionController` — TCP/BLE/simulated attach, reconnect backoff/
-  watchdog, and power-off suppression;
+- `ConnectionController` — TCP/BLE/simulated attach, the
+  `DeviceLinkPhase` state machine (connecting/connected/reconnecting/waiting),
+  passive recovery, cancellation, reconnect backoff/watchdog, and power-off
+  suppression;
 - `SessionSettings` and `NetworkConnectionHistory` — saved session/port/
   auto-resume and the TCP target history;
 - `IdentityController` — catalog create/activate/enable/delete/clear;

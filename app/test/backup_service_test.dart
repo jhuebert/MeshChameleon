@@ -68,6 +68,8 @@ void main() {
       devicePort: 5000,
       proxyPort: 5100,
       autoResume: true,
+      recoveryPending: true,
+      recoveryServeProxy: true,
     ));
     await networks.save([
       const SavedNetworkConnection(
@@ -104,6 +106,8 @@ void main() {
     expect(restoredSession!.host, '10.0.0.2');
     expect(restoredSession.proxyPort, 5100);
     expect(restoredSession.autoResume, isTrue);
+    expect(restoredSession.recoveryPending, isTrue);
+    expect(restoredSession.recoveryServeProxy, isTrue);
     final restoredNetworks = await networks.load();
     expect(restoredNetworks.single.host, '10.0.0.9');
     expect(await repository.loadKey(record.id), isNotNull);

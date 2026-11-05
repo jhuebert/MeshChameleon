@@ -36,6 +36,8 @@ void main() {
       proxyPort: 5100,
       autoResume: true,
       intentionallyOff: true,
+      recoveryPending: true,
+      recoveryServeProxy: true,
     ));
 
     await settings.load();
@@ -44,6 +46,8 @@ void main() {
     expect(settings.port, 5100);
     expect(settings.autoResume, isTrue);
     expect(settings.intentionallyOff, isTrue);
+    expect(settings.recoveryPending, isTrue);
+    expect(settings.recoveryServeProxy, isTrue);
   });
 
   test('a corrupt session is logged and treated as missing', () async {
@@ -116,6 +120,38 @@ void main() {
     expect(settings.intentionallyOff, isTrue);
     await persisted;
 
+    expect((await store.load())!.intentionallyOff, isTrue);
+  });
+
+  test('recovery intent round-trips and clears', () async {
+    await settings.record(const SessionConfig(
+      kind: DeviceTargetKind.ble,
+      bleRemoteId: 'AA:BB:CC:DD:EE:FF',
+    ));
+
+    await settings.markRecoveryPending(serveProxy: true);
+    expect(settings.recoveryPending, isTrue);
+    expect(settings.recoveryServeProxy, isTrue);
+    expect((await store.load())!.recoveryPending, isTrue);
+    expect((await store.load())!.recoveryServeProxy, isTrue);
+
+    await settings.clearRecoveryPending();
+    expect(settings.recoveryPending, isFalse);
+    expect(settings.recoveryServeProxy, isFalse);
+    expect((await store.load())!.recoveryPending, isFalse);
+  });
+
+  test('power-off clears a pending recovery', () async {
+    await settings.record(const SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: '10.0.0.5',
+    ));
+    await settings.markRecoveryPending(serveProxy: true);
+
+    await settings.markPoweredOff();
+
+    expect(settings.recoveryPending, isFalse);
+    expect((await store.load())!.recoveryPending, isFalse);
     expect((await store.load())!.intentionallyOff, isTrue);
   });
 

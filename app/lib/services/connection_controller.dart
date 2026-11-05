@@ -1,11 +1,12 @@
 import 'dart:async';
+import 'dart:math' show min;
 
 import 'package:device_link/device_link.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' show BluetoothDevice;
 
-import 'ble_device_link.dart';
 import 'device_capabilities.dart';
+import 'device_link_phase.dart';
 import 'identity_manager.dart';
 import 'network_address.dart';
 import 'network_connection_history.dart';
@@ -20,6 +21,30 @@ typedef TcpDeviceLinkFactory = RadioLink Function(
   int port,
   void Function(String message) onLog,
 );
+
+/// Creates the BLE link used to reach a Bluetooth companion.
+typedef BleLinkFactory = RadioLink Function(
+  BluetoothDevice device,
+  void Function(String message) onLog,
+);
+
+/// Creates the timers used by reconnect and passive-recovery scheduling.
+///
+/// Tests inject a fake clock instead of sleeping on wall time.
+typedef RecoveryTimerFactory = Timer Function(
+  Duration duration,
+  void Function() callback,
+);
+
+/// Capped retry delays for a parked TCP session.
+const passiveTcpDelays = <Duration>[
+  Duration(seconds: 30),
+  Duration(minutes: 1),
+  Duration(minutes: 2),
+  Duration(minutes: 5),
+  Duration(minutes: 10),
+  Duration(minutes: 15),
+];
 
 /// The session-level services the connection controller needs from its owner.
 ///
@@ -59,41 +84,54 @@ class ConnectionController {
   ConnectionController({
     required this.host,
     required this.tcpLinkFactory,
+    required this.bleLinkFactory,
     required this.capabilities,
     required this.metrics,
     required this.sessionSettings,
     required this.networkHistory,
     this.reconnectDelay = const Duration(seconds: 3),
     this.maxReconnectFailures = 3,
+    this.timerFactory = Timer.new,
   });
 
   final ConnectionHost host;
   final TcpDeviceLinkFactory tcpLinkFactory;
+  final BleLinkFactory bleLinkFactory;
   final DeviceCapabilities capabilities;
   final LinkMetrics metrics;
   final SessionSettings sessionSettings;
   final NetworkConnectionHistory networkHistory;
   final Duration reconnectDelay;
 
-  /// Consecutive failed reconnects tolerated before the session is torn down.
+  /// Consecutive failed reconnect cycles tolerated before the session parks.
   ///
   /// A dropped radio is retried so a brief out-of-range period can recover. If
-  /// the link cannot be restored, stop serving the client instead of leaving it
-  /// talking to a dead radio; the MeshCore app then sees the proxy disconnect.
+  /// the link cannot be restored, the proxy stops so the MeshCore client sees
+  /// the disconnect, but the foreground service keeps waiting for the companion.
   final int maxReconnectFailures;
+
+  final RecoveryTimerFactory timerFactory;
 
   RadioLink? link;
   String? deviceLabel;
-  bool deviceConnected = false;
-
-  /// True while an unexpected drop is being retried. The proxy stays up during
-  /// this window so a transient drop does not evict the MeshCore client, but
-  /// the UI must not claim the radio is live.
-  bool deviceReconnecting = false;
   DeviceInfo? deviceInfo;
   DateTime? deviceConnectedAt;
   int reconnectAttempts = 0;
   int reconnectSuccesses = 0;
+
+  DeviceLinkPhase _phase = DeviceLinkPhase.idle;
+
+  DeviceLinkPhase get devicePhase => _phase;
+  bool get deviceConnected => _phase == DeviceLinkPhase.connected;
+  bool get deviceReconnecting => _phase == DeviceLinkPhase.reconnecting;
+  bool get deviceWaiting => _phase == DeviceLinkPhase.waiting;
+  bool get deviceConnecting => _phase == DeviceLinkPhase.connecting;
+
+  int passiveAttempts = 0;
+  int passiveSuccesses = 0;
+
+  bool get recoveryPending => _recoveryPending;
+  Duration? get nextPassiveDelay => _scheduledPassiveDelay;
 
   Duration? get deviceSessionDuration => deviceConnectedAt == null
       ? null
@@ -114,9 +152,19 @@ class ConnectionController {
   bool _rearming = false;
   int _reconnectFailures = 0;
 
-  /// Set when the session ended because the physical link could not be
-  /// restored. A foreground resume retries the saved device from here.
-  bool _linkLost = false;
+  // Passive-recovery state.
+  RadioLink? _passiveLink;
+  Timer? _passiveTimer;
+  Duration? _scheduledPassiveDelay;
+  SessionConfig? _parkedTarget;
+  String? _parkedLabel;
+  bool _proxyWasRunning = false;
+  bool _recoveryPending = false;
+  bool _recovering = false;
+  bool _restoring = false;
+  bool _passiveArmed = false;
+  int _recoveryGeneration = 0;
+  int _nextPassiveDelayIndex = 0;
 
   Future<T> _runTransition<T>(Future<T> Function() action) {
     final previous = _tail;
@@ -130,8 +178,10 @@ class ConnectionController {
     return run;
   }
 
-  Future<bool> connectTcp({required String host, int? tcpPort}) =>
-      _runTransition(() => _connectTcp(host: host, tcpPort: tcpPort));
+  Future<bool> connectTcp({required String host, int? tcpPort}) {
+    _preemptActiveAttempt();
+    return _runTransition(() => _connectTcp(host: host, tcpPort: tcpPort));
+  }
 
   Future<bool> _connectTcp({required String host, int? tcpPort}) async {
     final normalizedHost = host.trim();
@@ -160,8 +210,10 @@ class ConnectionController {
     return true;
   }
 
-  Future<bool> connectBle(BluetoothDevice device, {String? displayName}) =>
-      _runTransition(() => _connectBle(device, displayName: displayName));
+  Future<bool> connectBle(BluetoothDevice device, {String? displayName}) {
+    _preemptActiveAttempt();
+    return _runTransition(() => _connectBle(device, displayName: displayName));
+  }
 
   Future<bool> _connectBle(
     BluetoothDevice device, {
@@ -171,10 +223,8 @@ class ConnectionController {
       host.log('BLE is not available in this build');
       return false;
     }
-    final link = MeteredRadioLink(
-      BleDeviceLink(device: device, onLog: host.log),
-      metrics: metrics,
-    );
+    final raw = bleLinkFactory(device, host.log);
+    final link = MeteredRadioLink(raw, metrics: metrics);
     final preferred = displayName?.trim();
     final advertisedName = device.advName.trim();
     final platformName = device.platformName.trim();
@@ -186,7 +236,11 @@ class ConnectionController {
                 ? platformName
                 : device.remoteId.toString();
     final ok = await _attachLink(link, 'BLE $name');
-    if (!ok) return false;
+    if (!ok) {
+      _passiveLink = null;
+      return false;
+    }
+    _passiveLink = raw is PassiveConnectLink ? raw : null;
     await host.recordSession(SessionConfig(
       kind: DeviceTargetKind.ble,
       bleRemoteId: device.remoteId.str,
@@ -202,10 +256,14 @@ class ConnectionController {
   /// Exercises every live identity, the companion server, and the UI without
   /// any radio: [FakeDeviceLink] answers device queries and radio-parameter
   /// requests, and its transmissions never leave the process.
-  Future<bool> connectSimulated({RadioLink? simulatedLink}) =>
-      _runTransition(() => _connectSimulated(simulatedLink: simulatedLink));
+  Future<bool> connectSimulated({RadioLink? simulatedLink}) {
+    _preemptActiveAttempt();
+    return _runTransition(
+        () => _connectSimulated(simulatedLink: simulatedLink));
+  }
 
   Future<bool> _connectSimulated({RadioLink? simulatedLink}) async {
+    _passiveLink = null;
     final link = MeteredRadioLink(
       simulatedLink ?? FakeDeviceLink(deviceNodeName: 'Simulated companion'),
       metrics: metrics,
@@ -221,59 +279,56 @@ class ConnectionController {
   }
 
   bool _linkReadyForAttach(RadioLink link) =>
-      !_connectCancelled && link.currentState == LinkState.connected;
+      !_connectCancelled &&
+      !_disconnectRequested &&
+      link.currentState == LinkState.connected;
 
   Future<bool> _attachLink(RadioLink link, String label) async {
     host.busy = true;
-    _connectingLink = link;
     _connectCancelled = false;
     host.notify();
     try {
       await _disconnectDevice();
-      if (_connectCancelled) return false;
+      if (_connectCancelled || _disconnectRequested) return false;
       final manager = await host.ensureManager();
       if (!manager.loaded) {
         host.log(manager.databaseError ?? 'Identity database unavailable');
         return false;
       }
+      _connectingLink = link;
+      _phase = DeviceLinkPhase.connecting;
+      deviceLabel = label;
+      // Start the service before the physical attempt so backgrounding the app
+      // mid-connect cannot suspend it.
+      await host.startForegroundService();
+      await host.updateNotification();
       host.log('Connecting to $label ...');
       await connectWithBackoff(
         link,
         onLog: host.log,
-        shouldCancel: () => _connectCancelled,
+        shouldCancel: () => _connectCancelled || _disconnectRequested,
       );
       if (!_linkReadyForAttach(link)) {
-        await link.disconnect();
+        await _disconnectDevice();
         return false;
       }
       this.link = link;
-      deviceLabel = label;
-      deviceConnected = true;
-
-      final deviceInfo = await link.deviceInfo();
-      final selfInfo = await link.selfInfo();
-      if (!_linkReadyForAttach(link)) {
+      final started = await _startLiveRuntimes(
+        link,
+        isCancelled: () => !_linkReadyForAttach(link),
+      );
+      if (!started || !_linkReadyForAttach(link)) {
         await _disconnectDevice();
         return false;
       }
-      final physical = PhysicalCapabilities.fromDeviceInfo(
-        deviceInfo,
-        maxTxPower: selfInfo.maxTxPower,
-      );
-      host.log('Device: fw ${deviceInfo.firmwareVerCode}, '
-          '${deviceInfo.manufacturer} ${deviceInfo.version}');
-      await manager.startLive(
-        base: link,
-        physical: physical,
-        radioParams: selfInfo.radioParams,
-        devicePublicKey: selfInfo.publicKey,
-      );
-      if (!_linkReadyForAttach(link)) {
-        await _disconnectDevice();
-        return false;
-      }
-      this.deviceInfo = deviceInfo;
-      deviceConnectedAt = DateTime.now();
+      _phase = DeviceLinkPhase.connected;
+      _reconnectFailures = 0;
+      _recoveryPending = false;
+      _proxyWasRunning = false;
+      _parkedTarget = null;
+      _parkedLabel = null;
+      _nextPassiveDelayIndex = 0;
+      await sessionSettings.clearRecoveryPending();
       final liveCount =
           manager.runtimes.where((runtime) => runtime.live).length;
       if (manager.activeNode == null) {
@@ -284,25 +339,17 @@ class ConnectionController {
         host.log('Device link ready; $liveCount identities live');
       }
       _watchLink(link);
-      await host.startForegroundService();
-      if (_connectCancelled) {
-        await _disconnectDevice();
-        return false;
-      }
       await host.updateNotification();
-      if (_connectCancelled) {
+      if (!_linkReadyForAttach(link)) {
         await _disconnectDevice();
         return false;
       }
-      _linkLost = false;
       return true;
     } catch (e) {
       if (!_connectCancelled) host.log('Device connection failed: $e');
-      if (identical(this.link, link)) {
-        await _disconnectDevice();
-      } else {
-        await link.disconnect();
-      }
+      // Also stops the foreground service and resets the phase when the
+      // failure happened before this.link was assigned.
+      await _disconnectDevice();
       return false;
     } finally {
       _connectingLink = null;
@@ -310,6 +357,40 @@ class ConnectionController {
       host.busy = false;
       host.notify();
     }
+  }
+
+  /// Read the device snapshot and bring every identity runtime live.
+  ///
+  /// Shared by the initial attach and passive recovery so their ordering stays
+  /// the same: physical snapshot first, then [IdentityManager.startLive].
+  Future<bool> _startLiveRuntimes(
+    RadioLink link, {
+    bool Function()? isCancelled,
+  }) async {
+    final manager = await host.ensureManager();
+    if (!manager.loaded) {
+      host.log(manager.databaseError ?? 'Identity database unavailable');
+      return false;
+    }
+    final deviceInfo = await link.deviceInfo();
+    final selfInfo = await link.selfInfo();
+    if (isCancelled?.call() ?? false) return false;
+    final physical = PhysicalCapabilities.fromDeviceInfo(
+      deviceInfo,
+      maxTxPower: selfInfo.maxTxPower,
+    );
+    host.log('Device: fw ${deviceInfo.firmwareVerCode}, '
+        '${deviceInfo.manufacturer} ${deviceInfo.version}');
+    await manager.startLive(
+      base: link,
+      physical: physical,
+      radioParams: selfInfo.radioParams,
+      devicePublicKey: selfInfo.publicKey,
+    );
+    if (isCancelled?.call() ?? false) return false;
+    this.deviceInfo = deviceInfo;
+    deviceConnectedAt = DateTime.now();
+    return true;
   }
 
   /// Reconnect the saved device and restart the proxy after a launch, if the
@@ -329,27 +410,7 @@ class ConnectionController {
     }
     host.log('Resuming last device session ...');
     try {
-      switch (session.kind) {
-        case DeviceTargetKind.tcp:
-          final hostName = session.host;
-          if (hostName == null) return;
-          await connectTcp(host: hostName, tcpPort: session.devicePort);
-        case DeviceTargetKind.ble:
-          if (!capabilities.supportsBle) {
-            host.log(
-                'Saved session used BLE, which this build does not support');
-            return;
-          }
-          final remoteId = session.bleRemoteId;
-          if (remoteId == null) return;
-          await connectBle(
-            BluetoothDevice.fromId(remoteId),
-            displayName: session.bleName,
-          );
-        case DeviceTargetKind.simulated:
-          await connectSimulated();
-      }
-      if (deviceConnected) {
+      if (await _attachSavedSession(session)) {
         await host.startProxy(serverPort: session.proxyPort);
       }
     } catch (e) {
@@ -357,35 +418,180 @@ class ConnectionController {
     }
   }
 
-  Future<void> cancelPendingConnection() async {
-    final pending = _connectingLink;
-    if (pending == null) return;
-    _connectCancelled = true;
+  /// Resume a session that was parked by an earlier process.
+  ///
+  /// This runs even when Resume on launch is off: it represents a recovery that
+  /// had already started, not a cold-start preference. A failed cold-start
+  /// [resumeSession] returns to idle; this path parks and waits instead.
+  Future<void> recoverPendingSession() async {
+    final session = sessionSettings.lastSession;
+    if (session == null || !host.identityCatalogReady || deviceConnected) {
+      return;
+    }
+    if (session.intentionallyOff) {
+      await sessionSettings.clearRecoveryPending();
+      return;
+    }
+    final serveProxy = sessionSettings.recoveryServeProxy;
+    _proxyWasRunning = serveProxy;
+    _recoveryPending = true;
+    _recovering = true;
+    host.log('Recovering a dropped device session ...');
     try {
-      await pending.disconnect();
+      if (await _attachSavedSession(session)) {
+        _recoveryPending = false;
+        _proxyWasRunning = false;
+        await sessionSettings.clearRecoveryPending();
+        if (serveProxy) {
+          await host.startProxy(serverPort: session.proxyPort);
+        }
+        return;
+      }
+    } catch (e) {
+      host.log('Session recovery failed: $e');
+    } finally {
+      // Keep the persisted intent through the attach itself: a process death
+      // before the attach settles must still re-arm on the next launch.
+      _recovering = false;
+    }
+    if (deviceConnected || _phase == DeviceLinkPhase.waiting) return;
+    // A failed attach tears the session down; restore the persisted intent
+    // before parking so the proxy is still restarted when the link returns.
+    _proxyWasRunning = serveProxy;
+    _recoveryPending = true;
+    await _runTransition(_parkSession);
+  }
+
+  Future<bool> _attachSavedSession(SessionConfig session) async {
+    switch (session.kind) {
+      case DeviceTargetKind.tcp:
+        final hostName = session.host;
+        if (hostName == null) return false;
+        return connectTcp(host: hostName, tcpPort: session.devicePort);
+      case DeviceTargetKind.ble:
+        if (!capabilities.supportsBle) {
+          host.log('Saved session used BLE, which this build does not support');
+          return false;
+        }
+        final remoteId = session.bleRemoteId;
+        if (remoteId == null) return false;
+        return connectBle(
+          BluetoothDevice.fromId(remoteId),
+          displayName: session.bleName,
+        );
+      case DeviceTargetKind.simulated:
+        return connectSimulated();
+    }
+  }
+
+  /// Cancel an initial connect, an active reconnect, or a passive wait.
+  ///
+  /// Idempotent: an idle controller is untouched.
+  Future<void> cancelDeviceAttempt() async {
+    if (_phase == DeviceLinkPhase.idle) return;
+    final wasConnecting = _phase == DeviceLinkPhase.connecting;
+    _cancelActiveWork();
+    _disconnectRequested = true;
+    final cleanup = _runTransition(_disconnectDevice);
+    // An initial attach can be inside an uncancelable handshake. Mark the
+    // attempt canceled and let it unwind; waiting here would leave the UI
+    // stuck on a Cancel that appears to do nothing.
+    if (wasConnecting) {
+      unawaited(cleanup);
+      return;
+    }
+    await cleanup;
+  }
+
+  /// Kept for callers that only model an initial attach.
+  Future<void> cancelPendingConnection() => cancelDeviceAttempt();
+
+  /// Stop an in-flight attempt before a new connect is queued.
+  ///
+  /// Without this, the serialized transition queue would make the new request
+  /// wait for the old attempt to finish on its own.
+  void _preemptActiveAttempt() {
+    if (_phase != DeviceLinkPhase.connecting &&
+        _phase != DeviceLinkPhase.reconnecting &&
+        _phase != DeviceLinkPhase.waiting) {
+      return;
+    }
+    _cancelActiveWork();
+  }
+
+  void _cancelActiveWork() {
+    _connectCancelled = true;
+    _recovering = false;
+    _recoveryGeneration++;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _passiveTimer?.cancel();
+    _passiveTimer = null;
+    _scheduledPassiveDelay = null;
+    _passiveArmed = false;
+    final pending = _connectingLink;
+    if (pending != null) unawaited(_cancelRawLink(pending));
+    final passive = _passiveLink;
+    if (passive != null) unawaited(_cancelRawLink(passive));
+    // An active reconnect owns the link rather than _connectingLink; closing it
+    // here lets BLE abort the in-flight connect instead of waiting for it.
+    final active = link;
+    if (active != null) unawaited(_cancelRawLink(active));
+  }
+
+  Future<void> _cancelRawLink(RadioLink link) async {
+    try {
+      final cancelable =
+          link is CancelableConnect ? link as CancelableConnect : null;
+      if (cancelable != null) {
+        await cancelable.cancelInFlightConnect();
+      } else {
+        await link.disconnect();
+      }
     } catch (e) {
       host.log('Connection cancellation failed: $e');
     }
   }
 
-  /// Watch [link] for unexpected drops so the session can be restored.
+  /// Watch [link] for unexpected drops and passive restores.
   void _watchLink(RadioLink link) {
     _linkStateSub?.cancel();
     void handle(LinkState state) {
+      if (state == LinkState.connected) {
+        if (_phase == DeviceLinkPhase.waiting && !_restoring) {
+          // Capture the generation at event time: a cancel that lands before
+          // the queued transition runs must invalidate this restore.
+          final generation = _recoveryGeneration;
+          unawaited(_runTransition(() => _restoreFromPassive(generation)));
+        }
+        return;
+      }
       if (state != LinkState.disconnected ||
           _disconnecting ||
           _disconnectRequested ||
           sessionSettings.intentionallyOff ||
-          _connectCancelled ||
-          !deviceConnected ||
+          _connectCancelled) {
+        return;
+      }
+      if (_phase == DeviceLinkPhase.waiting) {
+        // A passive BLE handshake failed after the request was armed: re-arm on
+        // the capped schedule instead of leaving a half-connected link.
+        if (_passiveArmed) {
+          _passiveArmed = false;
+          _schedulePassiveAttempt(_recoveryGeneration);
+        }
+        return;
+      }
+      if (_phase != DeviceLinkPhase.connected ||
           _reconnecting ||
           _reconnectTimer != null) {
         return;
       }
       metrics.disconnected(unexpected: true);
       deviceConnectedAt = null;
-      deviceReconnecting = true;
+      _phase = DeviceLinkPhase.reconnecting;
       host.log('Device link dropped; scheduling reconnect');
+      unawaited(host.updateNotification());
       host.notify();
       _scheduleReconnect();
     }
@@ -401,7 +607,7 @@ class ConnectionController {
   void _scheduleReconnect() {
     if (sessionSettings.intentionallyOff || _disconnectRequested) return;
     _reconnectTimer?.cancel();
-    _reconnectTimer = Timer(reconnectDelay, () {
+    _reconnectTimer = timerFactory(reconnectDelay, () {
       // Clear the handle when it fires: a stale non-null timer would make the
       // link watcher ignore every later drop after a successful reconnect.
       _reconnectTimer = null;
@@ -416,17 +622,18 @@ class ConnectionController {
     final manager = host.manager;
     if (curLink == null ||
         manager == null ||
+        _phase != DeviceLinkPhase.reconnecting ||
         _disconnecting ||
         _disconnectRequested ||
         sessionSettings.intentionallyOff) {
-      if (!_disconnecting) deviceReconnecting = false;
       return;
     }
     bool cancelled() =>
         _disconnectRequested ||
         _disconnecting ||
         sessionSettings.intentionallyOff ||
-        !identical(curLink, link);
+        !identical(curLink, link) ||
+        _phase != DeviceLinkPhase.reconnecting;
     _reconnecting = true;
     reconnectAttempts++;
     try {
@@ -436,35 +643,21 @@ class ConnectionController {
         onLog: host.log,
         shouldCancel: cancelled,
       );
-      if (cancelled() || curLink.currentState != LinkState.connected) {
-        return;
-      }
-      final deviceInfo = await curLink.deviceInfo();
-      final selfInfo = await curLink.selfInfo();
-      final physical = PhysicalCapabilities.fromDeviceInfo(
-        deviceInfo,
-        maxTxPower: selfInfo.maxTxPower,
-      );
-      await manager.reapplyPhysical(
-        physical: physical,
-        radioParams: selfInfo.radioParams,
-      );
-      if (cancelled() || curLink.currentState != LinkState.connected) {
-        return;
-      }
-      this.deviceInfo = deviceInfo;
-      deviceConnectedAt = DateTime.now();
+      if (cancelled() || curLink.currentState != LinkState.connected) return;
+      await _reapplyPhysical(curLink, manager);
+      if (cancelled() || curLink.currentState != LinkState.connected) return;
       _reconnectFailures = 0;
-      deviceReconnecting = false;
+      _phase = DeviceLinkPhase.connected;
       reconnectSuccesses++;
       host.log('Device link reconnected');
+      await host.updateNotification();
       host.notify();
     } catch (e) {
       if (cancelled()) return;
       _reconnectFailures++;
       host.log('Reconnect failed: $e');
       if (_reconnectFailures >= maxReconnectFailures) {
-        await _abandonSession();
+        await _parkSession();
       } else {
         _scheduleReconnect();
       }
@@ -473,66 +666,354 @@ class ConnectionController {
     }
   }
 
-  /// Stop serving the client when the physical link cannot be restored.
-  ///
-  /// Tearing the session down (instead of leaving the proxy up) makes the
-  /// MeshCore app notice that the companion is gone rather than sending into a
-  /// dead link that reports success locally.
-  Future<void> _abandonSession() async {
-    host.log(
-      'Device link lost after $_reconnectFailures failed reconnect cycles; '
-      'stopping the session',
+  Future<void> _reapplyPhysical(
+    RadioLink curLink,
+    IdentityManager manager,
+  ) async {
+    final deviceInfo = await curLink.deviceInfo();
+    final selfInfo = await curLink.selfInfo();
+    final physical = PhysicalCapabilities.fromDeviceInfo(
+      deviceInfo,
+      maxTxPower: selfInfo.maxTxPower,
     );
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    _linkLost = true;
-    await _disconnectDevice();
+    await manager.reapplyPhysical(
+      physical: physical,
+      radioParams: selfInfo.radioParams,
+    );
+    this.deviceInfo = deviceInfo;
+    deviceConnectedAt = DateTime.now();
   }
 
-  /// Retry the saved device after a link-loss give-up.
+  /// Stop serving the client but keep waiting for the physical companion.
   ///
-  /// Called when the app returns to the foreground: a radio that was left
-  /// behind may be back in range, and actively retrying all day would waste
-  /// battery. Does nothing unless the last session ended from link loss.
+  /// The proxy stops so the client sees the disconnect, the runtimes stop
+  /// because there is no radio, but the foreground service and saved target stay
+  /// alive so recovery can happen later.
+  Future<void> _parkSession() async {
+    final target = sessionSettings.lastSession;
+    if (target == null || target.kind == DeviceTargetKind.simulated) {
+      // There is no physical link to wait for. End the simulated session.
+      host.log(
+        'Device link lost after $_reconnectFailures failed reconnect cycles; '
+        'stopping the session',
+      );
+      await _disconnectDevice();
+      return;
+    }
+    if ((target.kind == DeviceTargetKind.ble &&
+            (!capabilities.supportsBle || target.bleRemoteId == null)) ||
+        (target.kind == DeviceTargetKind.tcp && target.host == null)) {
+      // The saved target cannot be reached on this build; waiting would create
+      // a link with no usable transport.
+      host.log('Cannot wait for the saved companion on this build');
+      await _disconnectDevice();
+      return;
+    }
+    final generation = ++_recoveryGeneration;
+    _phase = DeviceLinkPhase.waiting;
+    _recoveryPending = true;
+    _proxyWasRunning = _proxyWasRunning || host.proxyRunning;
+    _parkedTarget = target;
+    // A failed cold-start recovery has no live label; derive one from the
+    // persisted target so the waiting UI still names what it is waiting for.
+    _parkedLabel = deviceLabel ?? _labelForSession(target);
+    deviceLabel = _parkedLabel;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _passiveArmed = false;
+    host.log(
+      'Device link lost after $_reconnectFailures failed reconnect cycles; '
+      'waiting for the companion',
+    );
+
+    // Persist intent early so a process death during teardown still recovers.
+    await sessionSettings.markRecoveryPending(serveProxy: _proxyWasRunning);
+
+    if (host.proxyRunning) await host.stopProxy();
+    await host.manager?.stopLive();
+    metrics.disconnected();
+    deviceConnectedAt = null;
+    deviceInfo = null;
+    _reconnectFailures = 0;
+
+    try {
+      await link?.disconnect();
+    } catch (e) {
+      host.log('Could not close the lost link cleanly: $e');
+    }
+
+    // A cold-start recovery can fail before any transport was attached; create
+    // one now so the parked session has a link to restore later.
+    if (link == null) {
+      final raw = _createParkedLink(target);
+      if (raw != null) {
+        link = MeteredRadioLink(raw, metrics: metrics);
+        _passiveLink = raw is PassiveConnectLink ? raw : null;
+      }
+    }
+
+    // A cold-start park creates a new link after the old subscription was torn
+    // down. Watch it so a passive BLE connection can trigger the restore.
+    final current = link;
+    if (current != null) _watchLink(current);
+
+    await host.startForegroundService();
+    await host.updateNotification();
+    host.notify();
+    await _armPassiveRecovery(generation);
+  }
+
+  String _labelForSession(SessionConfig target) => switch (target.kind) {
+        DeviceTargetKind.tcp =>
+          'TCP ${formatNetworkAddress(target.host ?? '', target.devicePort)}',
+        DeviceTargetKind.ble =>
+          'BLE ${target.bleName ?? target.bleRemoteId ?? 'companion'}',
+        DeviceTargetKind.simulated => 'Simulated companion',
+      };
+
+  RadioLink? _createParkedLink(SessionConfig target) {
+    switch (target.kind) {
+      case DeviceTargetKind.tcp:
+        final hostName = target.host;
+        if (hostName == null) return null;
+        return tcpLinkFactory(hostName, target.devicePort, host.log);
+      case DeviceTargetKind.ble:
+        final remoteId = target.bleRemoteId;
+        if (remoteId == null) return null;
+        return bleLinkFactory(BluetoothDevice.fromId(remoteId), host.log);
+      case DeviceTargetKind.simulated:
+        return null;
+    }
+  }
+
+  Future<void> _armPassiveRecovery(int generation) async {
+    if (generation != _recoveryGeneration ||
+        _phase != DeviceLinkPhase.waiting) {
+      return;
+    }
+    final target = _parkedTarget;
+    if (link == null || target == null) {
+      await _disconnectDevice();
+      return;
+    }
+    if (target.kind == DeviceTargetKind.tcp) {
+      _schedulePassiveAttempt(generation);
+      return;
+    }
+    if (target.kind != DeviceTargetKind.ble) {
+      await _disconnectDevice();
+      return;
+    }
+    final passive = _passiveLink;
+    if (passive == null || passive is! PassiveConnectLink) {
+      host.log('This build cannot wait passively for the BLE companion');
+      await _disconnectDevice();
+      return;
+    }
+    final passiveConnect = passive as PassiveConnectLink;
+    try {
+      await passiveConnect.startPassiveConnect();
+      if (generation != _recoveryGeneration ||
+          _phase != DeviceLinkPhase.waiting) {
+        return;
+      }
+      _passiveArmed = true;
+      passiveAttempts++;
+      metrics.connectionAttempt();
+      host.log('Waiting for ${_parkedLabel ?? 'BLE companion'} to return');
+    } catch (e) {
+      host.log('Could not arm passive BLE reconnect: $e');
+      if (generation == _recoveryGeneration) {
+        _schedulePassiveAttempt(generation);
+      }
+    }
+  }
+
+  void _schedulePassiveAttempt(int generation) {
+    if (generation != _recoveryGeneration ||
+        _phase != DeviceLinkPhase.waiting) {
+      return;
+    }
+    final index = _nextPassiveDelayIndex.clamp(0, passiveTcpDelays.length - 1);
+    final delay = passiveTcpDelays[index];
+    _nextPassiveDelayIndex =
+        min(_nextPassiveDelayIndex + 1, passiveTcpDelays.length - 1);
+    _passiveTimer?.cancel();
+    _scheduledPassiveDelay = delay;
+    _passiveTimer = timerFactory(delay, () {
+      _passiveTimer = null;
+      _scheduledPassiveDelay = null;
+      unawaited(_runTransition(() => _runPassiveAttempt(generation)));
+    });
+    final target = _parkedTarget;
+    if (target?.kind == DeviceTargetKind.tcp) {
+      final hostName = target?.host ?? '';
+      host.log(
+        'Waiting for TCP ${formatNetworkAddress(hostName, target!.devicePort)}; '
+        'next attempt in ${_formatDelay(delay)}',
+      );
+    }
+  }
+
+  Future<void> _runPassiveAttempt(int generation) async {
+    if (generation != _recoveryGeneration ||
+        _phase != DeviceLinkPhase.waiting) {
+      return;
+    }
+    final target = _parkedTarget;
+    final curLink = link;
+    if (target == null || curLink == null) {
+      await _disconnectDevice();
+      return;
+    }
+    if (target.kind == DeviceTargetKind.ble) {
+      await _armPassiveRecovery(generation);
+      return;
+    }
+    if (target.kind != DeviceTargetKind.tcp) {
+      await _disconnectDevice();
+      return;
+    }
+    // A foreground nudge can queue behind an attempt that is already running.
+    if (curLink.currentState == LinkState.connecting) return;
+    bool cancelled() =>
+        generation != _recoveryGeneration ||
+        _phase != DeviceLinkPhase.waiting ||
+        _disconnectRequested;
+    passiveAttempts++;
+    try {
+      final hostName = target.host ?? '';
+      host.log(
+        'Waiting for TCP ${formatNetworkAddress(hostName, target.devicePort)}; '
+        'connecting ...',
+      );
+      await connectWithBackoff(
+        curLink,
+        maxAttempts: 1,
+        onLog: host.log,
+        shouldCancel: cancelled,
+      );
+      if (cancelled()) return;
+      if (curLink.currentState != LinkState.connected) {
+        throw StateError('TCP companion did not connect');
+      }
+      await _restoreFromPassive(generation);
+    } catch (e) {
+      if (cancelled()) return;
+      if (passiveAttempts == 1 || passiveAttempts % 10 == 0) {
+        host.log('Passive reconnect failed: $e');
+      }
+      try {
+        await curLink.disconnect();
+      } catch (_) {}
+      _schedulePassiveAttempt(generation);
+    }
+  }
+
+  Future<void> _restoreFromPassive(int generation) async {
+    if (generation != _recoveryGeneration ||
+        _phase != DeviceLinkPhase.waiting ||
+        _restoring) {
+      return;
+    }
+    _restoring = true;
+    _passiveTimer?.cancel();
+    _passiveTimer = null;
+    _scheduledPassiveDelay = null;
+    _passiveArmed = false;
+    try {
+      final curLink = link;
+      if (curLink == null) return;
+      final started = await _startLiveRuntimes(
+        curLink,
+        isCancelled: () =>
+            generation != _recoveryGeneration ||
+            _phase != DeviceLinkPhase.waiting,
+      );
+      if (!started) throw StateError('could not start live identities');
+      if (generation != _recoveryGeneration) return;
+      // A BLE passive connect runs on the raw link, so the metered wrapper never
+      // saw the successful connect. TCP attempts are already counted by it.
+      if (_parkedTarget?.kind == DeviceTargetKind.ble) {
+        metrics.connectionSucceeded();
+      }
+
+      // Already running while waiting; refreshes the notification copy.
+      await host.startForegroundService();
+      final serveProxy = _proxyWasRunning;
+      if (serveProxy) {
+        await host.startProxy(serverPort: sessionSettings.port);
+      }
+      if (generation != _recoveryGeneration) return;
+
+      _phase = DeviceLinkPhase.connected;
+      _reconnectFailures = 0;
+      passiveSuccesses++;
+      _nextPassiveDelayIndex = 0;
+      _recoveryPending = false;
+      _proxyWasRunning = false;
+      _parkedTarget = null;
+      _parkedLabel = null;
+      await sessionSettings.clearRecoveryPending();
+      await host.updateNotification();
+      host.log(serveProxy
+          ? 'Companion recovered; proxy listening on port '
+              '${sessionSettings.port}'
+          : 'Companion recovered; proxy remains stopped');
+      host.notify();
+    } catch (e) {
+      host.log('Companion recovery failed: $e');
+      if (generation != _recoveryGeneration) return;
+      try {
+        await link?.disconnect();
+      } catch (_) {}
+      _phase = DeviceLinkPhase.waiting;
+      deviceConnectedAt = null;
+      await host.updateNotification();
+      await _armPassiveRecovery(generation);
+    } finally {
+      _restoring = false;
+    }
+  }
+
+  /// Retry the parked companion when the app returns to the foreground.
+  ///
+  /// For TCP this runs an immediate attempt instead of waiting for the next cap;
+  /// for BLE the OS request is re-armed idempotently.
   Future<void> rearmAfterLinkLoss() async {
-    if (!_linkLost ||
+    if (_phase != DeviceLinkPhase.waiting ||
         _rearming ||
-        deviceConnected ||
         host.busy ||
-        _reconnecting ||
         _disconnecting) {
       return;
     }
-    if (!sessionSettings.autoResume) return;
     _rearming = true;
-    host.log('Device link was lost; retrying the saved device on resume ...');
     try {
-      await resumeSession();
+      _passiveTimer?.cancel();
+      _passiveTimer = null;
+      _scheduledPassiveDelay = null;
+      final generation = _recoveryGeneration;
+      await _runTransition(() async {
+        if (_parkedTarget?.kind == DeviceTargetKind.tcp) {
+          await _runPassiveAttempt(generation);
+        } else {
+          await _armPassiveRecovery(generation);
+        }
+      });
     } finally {
       _rearming = false;
     }
   }
 
   Future<void> _onNodePoweredOff() async {
-    final offPersisted = sessionSettings.markPoweredOff();
-    _reconnectTimer?.cancel();
-    _reconnectTimer = null;
-    final manager = host.manager;
-    await manager?.stopLive();
+    await sessionSettings.markPoweredOff();
+    _cancelActiveWork();
     metrics.disconnected();
-    deviceConnected = false;
-    deviceConnectedAt = null;
     deviceInfo = null;
     deviceLabel = null;
     _reconnectFailures = 0;
-    _linkLost = false;
-    deviceReconnecting = false;
     host.log('Device powered off; automatic reconnect suppressed');
-    await offPersisted;
-    await host.stopProxy();
-    await host.stopForegroundService();
-    host.resetNotificationState();
-    host.notify();
+    await _disconnectDevice();
   }
 
   Future<void> handlePoweredOff() => _runTransition(_onNodePoweredOff);
@@ -540,8 +1021,10 @@ class ConnectionController {
   Future<void> disconnect() {
     // Drop a queued or in-flight reconnect immediately: tapping Disconnect must
     // not wait for a link retry to fail first.
-    _linkLost = false;
     _disconnectRequested = true;
+    _connectCancelled = true;
+    _recovering = false;
+    _recoveryGeneration++;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     return _runTransition(_disconnectDevice);
@@ -556,10 +1039,18 @@ class ConnectionController {
     // Mark the disconnect before awaiting anything so a link drop during
     // proxy shutdown cannot schedule an unexpected reconnect.
     _disconnecting = true;
+    _phase = DeviceLinkPhase.disconnecting;
+    _recoveryGeneration++;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _stopPassiveRecovery();
     await _linkStateSub?.cancel();
     _linkStateSub = null;
+    final pending = _connectingLink;
+    _connectingLink = null;
+    if (pending != null) {
+      await _cancelRawLink(pending);
+    }
     try {
       if (host.proxyRunning) {
         await host.stopProxy();
@@ -572,13 +1063,21 @@ class ConnectionController {
       }
     } finally {
       link = null;
-      deviceConnected = false;
       deviceConnectedAt = null;
       deviceInfo = null;
       deviceLabel = null;
       _reconnectFailures = 0;
       _disconnectRequested = false;
-      deviceReconnecting = false;
+      _phase = DeviceLinkPhase.idle;
+      _parkedTarget = null;
+      _parkedLabel = null;
+      _proxyWasRunning = false;
+      _recoveryPending = false;
+      _nextPassiveDelayIndex = 0;
+      // A cold-start recovery clears its own intent once the attach settles;
+      // tearing down mid-attach must leave the flag so a process death during
+      // the attempt still recovers on the next launch.
+      if (!_recovering) await sessionSettings.clearRecoveryPending();
       await host.stopForegroundService();
       host.resetNotificationState();
       _disconnecting = false;
@@ -587,8 +1086,33 @@ class ConnectionController {
     }
   }
 
+  void _stopPassiveRecovery() {
+    final wasArmed = _passiveArmed;
+    _passiveTimer?.cancel();
+    _passiveTimer = null;
+    _scheduledPassiveDelay = null;
+    _passiveArmed = false;
+    final passive = _passiveLink;
+    _passiveLink = null;
+    if (wasArmed && passive is PassiveConnectLink) {
+      final passiveConnect = passive as PassiveConnectLink;
+      unawaited(passiveConnect.stopPassiveConnect().catchError((Object e) {
+        host.log('Could not stop passive recovery: $e');
+      }));
+    }
+  }
+
+  static String _formatDelay(Duration delay) =>
+      delay.inMinutes >= 1 ? '${delay.inMinutes}m' : '${delay.inSeconds}s';
+
   void dispose() {
     _reconnectTimer?.cancel();
+    _passiveTimer?.cancel();
+    final passive = _passiveLink;
+    if (passive is PassiveConnectLink) {
+      final passiveConnect = passive as PassiveConnectLink;
+      unawaited(passiveConnect.stopPassiveConnect().catchError((Object _) {}));
+    }
     unawaited(_linkStateSub?.cancel());
     unawaited(link?.disconnect());
   }

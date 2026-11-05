@@ -14,7 +14,7 @@ enum DeviceTargetKind { tcp, ble, simulated }
 ///
 /// Versionless files come from pre-0.1.0 development builds and are read as
 /// version 1.
-const int sessionConfigVersion = 1;
+const int sessionConfigVersion = 2;
 
 /// Persisted description of the last device session.
 ///
@@ -32,6 +32,8 @@ class SessionConfig {
     this.proxyPort = defaultCompanionPort,
     this.autoResume = false,
     this.intentionallyOff = false,
+    this.recoveryPending = false,
+    this.recoveryServeProxy = false,
   });
 
   final DeviceTargetKind kind;
@@ -56,10 +58,22 @@ class SessionConfig {
   /// until the user explicitly connects again.
   final bool intentionallyOff;
 
+  /// A dropped session is parked and waiting for the companion to return.
+  ///
+  /// This survives a process death so the next launch can re-arm recovery even
+  /// when [autoResume] is off.
+  final bool recoveryPending;
+
+  /// Whether the proxy was running when the session was parked. Restoring a
+  /// parked session must not restart a proxy the user stopped themselves.
+  final bool recoveryServeProxy;
+
   SessionConfig copyWith({
     int? proxyPort,
     bool? autoResume,
     bool? intentionallyOff,
+    bool? recoveryPending,
+    bool? recoveryServeProxy,
   }) =>
       SessionConfig(
         kind: kind,
@@ -70,6 +84,8 @@ class SessionConfig {
         proxyPort: proxyPort ?? this.proxyPort,
         autoResume: autoResume ?? this.autoResume,
         intentionallyOff: intentionallyOff ?? this.intentionallyOff,
+        recoveryPending: recoveryPending ?? this.recoveryPending,
+        recoveryServeProxy: recoveryServeProxy ?? this.recoveryServeProxy,
       );
 
   Map<String, dynamic> toJson() => {
@@ -82,14 +98,19 @@ class SessionConfig {
         'proxyPort': proxyPort,
         'autoResume': autoResume,
         'intentionallyOff': intentionallyOff,
+        'recoveryPending': recoveryPending,
+        'recoveryServeProxy': recoveryServeProxy,
       };
 
   static SessionConfig? fromJson(Map<String, dynamic> json) {
     final version = json['version'];
+    // Version 1 has the same fields except the recovery flags, which default
+    // to false. Versionless pre-0.1.0 files are read as version 1 too.
     if (version != null &&
         (version is! num ||
             version != version.toInt() ||
-            version.toInt() != sessionConfigVersion)) {
+            version.toInt() < 1 ||
+            version.toInt() > sessionConfigVersion)) {
       return null;
     }
     DeviceTargetKind? kind;
@@ -107,6 +128,8 @@ class SessionConfig {
     final bleName = json['bleName'];
     final autoResume = json['autoResume'];
     final intentionallyOff = json['intentionallyOff'];
+    final recoveryPending = json['recoveryPending'];
+    final recoveryServeProxy = json['recoveryServeProxy'];
     if ((rawDevicePort != null &&
             (rawDevicePort is! num ||
                 rawDevicePort != rawDevicePort.toInt())) ||
@@ -116,7 +139,9 @@ class SessionConfig {
         (bleRemoteId != null && bleRemoteId is! String) ||
         (bleName != null && bleName is! String) ||
         (autoResume != null && autoResume is! bool) ||
-        (intentionallyOff != null && intentionallyOff is! bool)) {
+        (intentionallyOff != null && intentionallyOff is! bool) ||
+        (recoveryPending != null && recoveryPending is! bool) ||
+        (recoveryServeProxy != null && recoveryServeProxy is! bool)) {
       return null;
     }
     final devicePort = (rawDevicePort as num?)?.toInt() ?? defaultCompanionPort;
@@ -137,6 +162,8 @@ class SessionConfig {
       proxyPort: proxyPort,
       autoResume: autoResume as bool? ?? false,
       intentionallyOff: intentionallyOff as bool? ?? false,
+      recoveryPending: recoveryPending as bool? ?? false,
+      recoveryServeProxy: recoveryServeProxy as bool? ?? false,
     );
   }
 }

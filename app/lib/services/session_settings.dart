@@ -22,11 +22,15 @@ class SessionSettings {
   SessionConfig? _lastSession;
   bool _autoResume = false;
   bool _intentionallyOff = false;
+  bool _recoveryPending = false;
+  bool _recoveryServeProxy = false;
   int port = defaultCompanionPort;
 
   SessionConfig? get lastSession => _lastSession;
   bool get autoResume => _autoResume;
   bool get intentionallyOff => _intentionallyOff;
+  bool get recoveryPending => _recoveryPending;
+  bool get recoveryServeProxy => _recoveryServeProxy;
 
   /// Restore persisted settings.
   ///
@@ -44,9 +48,13 @@ class SessionSettings {
       port = session.proxyPort;
       _autoResume = session.autoResume;
       _intentionallyOff = session.intentionallyOff;
+      _recoveryPending = session.recoveryPending;
+      _recoveryServeProxy = session.recoveryServeProxy;
     } else {
       _autoResume = false;
       _intentionallyOff = false;
+      _recoveryPending = false;
+      _recoveryServeProxy = false;
     }
   }
 
@@ -57,7 +65,40 @@ class SessionSettings {
   Future<void> record(SessionConfig session) async {
     _lastSession = session;
     _intentionallyOff = false;
+    _recoveryPending = session.recoveryPending;
+    _recoveryServeProxy = session.recoveryServeProxy;
     await _save(session, 'Could not save the last session');
+  }
+
+  /// Persist that the current session is parked and waiting for the companion.
+  Future<void> markRecoveryPending({required bool serveProxy}) async {
+    _recoveryPending = true;
+    _recoveryServeProxy = serveProxy;
+    final current = _lastSession;
+    if (current == null) return;
+    final updated = current.copyWith(
+      recoveryPending: true,
+      recoveryServeProxy: serveProxy,
+    );
+    _lastSession = updated;
+    await _save(updated, 'Could not persist the recovery state');
+  }
+
+  /// Clear persisted recovery intent after a restore, cancel, or disconnect.
+  Future<void> clearRecoveryPending() async {
+    _recoveryPending = false;
+    _recoveryServeProxy = false;
+    final current = _lastSession;
+    if (current == null ||
+        (!current.recoveryPending && !current.recoveryServeProxy)) {
+      return;
+    }
+    final updated = current.copyWith(
+      recoveryPending: false,
+      recoveryServeProxy: false,
+    );
+    _lastSession = updated;
+    await _save(updated, 'Could not clear the recovery state');
   }
 
   /// Change the app-facing proxy port.
@@ -93,9 +134,15 @@ class SessionSettings {
   /// once the flag is persisted.
   Future<void> markPoweredOff() async {
     _intentionallyOff = true;
+    _recoveryPending = false;
+    _recoveryServeProxy = false;
     final current = _lastSession;
     if (current == null) return;
-    final updated = current.copyWith(intentionallyOff: true);
+    final updated = current.copyWith(
+      intentionallyOff: true,
+      recoveryPending: false,
+      recoveryServeProxy: false,
+    );
     _lastSession = updated;
     await _save(updated, 'Could not persist intentional shutdown');
   }

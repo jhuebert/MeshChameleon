@@ -38,6 +38,7 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   // Connection and notification controls.
   int stopProxyCalls = 0;
   int disconnectCalls = 0;
+  int cancelCalls = 0;
   int rearmCalls = 0;
   int batteryRefreshes = 0;
 
@@ -72,6 +73,26 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
 
   @override
   bool deviceReconnecting = false;
+
+  @override
+  bool deviceWaiting = false;
+
+  @override
+  bool deviceConnecting = false;
+
+  /// Explicit phase for tests that need waiting/connecting without the
+  /// convenience booleans.
+  DeviceLinkPhase phase = DeviceLinkPhase.idle;
+
+  @override
+  DeviceLinkPhase get devicePhase {
+    if (phase != DeviceLinkPhase.idle) return phase;
+    if (deviceConnecting) return DeviceLinkPhase.connecting;
+    if (deviceReconnecting) return DeviceLinkPhase.reconnecting;
+    if (deviceWaiting) return DeviceLinkPhase.waiting;
+    if (deviceConnected) return DeviceLinkPhase.connected;
+    return DeviceLinkPhase.idle;
+  }
 
   @override
   bool busy = false;
@@ -158,7 +179,18 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   Future<bool> connectSimulated({RadioLink? simulatedLink}) async => false;
 
   @override
-  Future<void> cancelPendingConnection() async {}
+  Future<void> cancelPendingConnection() => cancelDeviceAttempt();
+
+  @override
+  Future<void> cancelDeviceAttempt() async {
+    cancelCalls++;
+    deviceConnected = false;
+    deviceReconnecting = false;
+    deviceWaiting = false;
+    deviceConnecting = false;
+    phase = DeviceLinkPhase.idle;
+    notifyListeners();
+  }
 
   @override
   Future<void> stopProxy() async {
@@ -178,6 +210,9 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
     disconnectCalls++;
     deviceConnected = false;
     deviceReconnecting = false;
+    deviceWaiting = false;
+    deviceConnecting = false;
+    phase = DeviceLinkPhase.idle;
     notifyListeners();
   }
 

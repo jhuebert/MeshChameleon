@@ -124,19 +124,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               app.deviceConnected ? app.lastSession?.kind : null,
             ),
             title: 'Device link',
-            subtitle: app.deviceReconnecting
-                ? 'Reconnecting…'
-                : app.deviceLabel ?? 'Not connected',
+            subtitle: _deviceSubtitle(app),
             trailing: app.deviceConnected
                 ? TextButton(
                     onPressed: app.busy ? null : app.disconnectDevice,
                     child: const Text('Disconnect'),
                   )
-                : null,
+                : app.deviceConnecting ||
+                        app.deviceReconnecting ||
+                        app.deviceWaiting
+                    ? TextButton(
+                        onPressed: app.cancelDeviceAttempt,
+                        child: const Text('Cancel'),
+                      )
+                    : null,
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ConnectScreen()),
             ),
           ),
+          if (app.deviceWaiting) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Proxy stopped. It will restart automatically when the '
+              'companion returns.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
           ActionTile(
             icon: active == null ? Icons.key_off : Icons.key,
             title: active?.name ?? 'No identity',
@@ -158,7 +171,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     : 'Stopped',
               ),
               value: app.proxyStatus == ProxyStatus.running,
-              onChanged: app.busy
+              onChanged: app.busy ||
+                      (!app.deviceConnected &&
+                          app.proxyStatus != ProxyStatus.running)
                   ? null
                   : (value) async {
                       if (value) {
@@ -174,7 +189,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               secondary: const Icon(Icons.restart_alt),
               title: const Text('Resume on launch'),
               subtitle: const Text(
-                  'Reconnect the last device and restart the proxy on open'),
+                  'Reconnect the last device on launch (cold start only)'),
               value: app.autoResume,
               onChanged: app.busy ? null : (value) => app.setAutoResume(value),
             ),
@@ -188,6 +203,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+String _deviceSubtitle(AppViewState app) {
+  final label = app.deviceLabel;
+  return switch (app.devicePhase) {
+    DeviceLinkPhase.connecting => 'Connecting…',
+    DeviceLinkPhase.reconnecting => 'Reconnecting…',
+    DeviceLinkPhase.waiting =>
+      label == null ? 'Waiting for companion' : 'Waiting for $label',
+    DeviceLinkPhase.connected => label ?? 'Connected',
+    DeviceLinkPhase.disconnecting => 'Disconnecting…',
+    DeviceLinkPhase.idle => 'Not connected',
+  };
 }
 
 class _BuildFooter extends StatelessWidget {
@@ -403,11 +431,14 @@ class _StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final deviceStatus = app.deviceReconnecting
-        ? 'reconnecting'
-        : app.deviceConnected
-            ? 'connected'
-            : 'disconnected';
+    final deviceStatus = switch (app.devicePhase) {
+      DeviceLinkPhase.connecting => 'connecting',
+      DeviceLinkPhase.connected => 'connected',
+      DeviceLinkPhase.reconnecting => 'reconnecting',
+      DeviceLinkPhase.waiting => 'waiting',
+      DeviceLinkPhase.disconnecting => 'disconnecting',
+      DeviceLinkPhase.idle => 'disconnected',
+    };
     return StatusCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

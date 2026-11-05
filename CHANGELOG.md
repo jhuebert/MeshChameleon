@@ -6,8 +6,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- A dropped BLE or TCP companion now parks instead of ending the session: the
+  proxy stops so the client sees the disconnect, but MeshChameleon keeps waiting
+  (BLE `autoConnect` or a capped TCP retry schedule) and restores the live
+  identities and proxy when the radio returns.
+- Cancel now works during an initial connect, a reconnect grace period, and a
+  parked wait, and the waiting state keeps the last device label visible.
+- A parked recovery survives process death through session schema v2
+  (`recoveryPending`/`recoveryServeProxy`) and re-arms on the next launch even
+  when **Resume on launch** is off.
+
 ### Fixed
 
+- BLE Disconnect/Cancel calls `disconnect(queue: false)`, stale GATT handles are
+  cleared before an active connect, and notify setup is retried before failing.
 - Restored access to existing 0.2.0 identity keys by allowing the v10
   secure-storage backend to import the old Jetpack Security entries on first
   access.

@@ -163,6 +163,25 @@ void main() {
     expect(link.initialRadioParams.frequencyHz, 915000000);
   });
 
+  test('FakeDeviceLink models passive connects and cancellation', () async {
+    final link = FakeDeviceLink();
+
+    await link.startPassiveConnect();
+    expect(link.passiveRequested, isTrue);
+    expect(link.passiveStarts, 1);
+
+    await link.simulatePassiveConnect();
+    expect(link.currentState, LinkState.connected);
+    expect(link.passiveRequested, isFalse);
+
+    await link.stopPassiveConnect();
+    expect(link.passiveStops, 1);
+
+    await link.cancelInFlightConnect();
+    expect(link.cancelCalls, 1);
+    expect(link.currentState, LinkState.disconnected);
+  });
+
   test('FakeDeviceLink.simulateDrop reports a disconnected state', () async {
     final link = FakeDeviceLink();
     await link.connect();

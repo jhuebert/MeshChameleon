@@ -86,11 +86,11 @@ The home screen is the control panel for the whole app.
 | Card | What it does |
 |---|---|
 | **Status** | Shows the active identity, how many identities exist and are live, whether a device is connected, and whether the proxy is running. |
-| **Device link** | Opens the connection screen. When connected, it shows the device name and a **Disconnect** button. |
+| **Device link** | Opens the connection screen. It shows **Disconnect** while connected and **Cancel** while connecting, reconnecting, or waiting for the radio to return. |
 | **Identity card** | Opens the identities screen. The title is the active identity's name. |
 | **Proxy server port** | Shows the local port your MeshCore app will connect to. It can only be edited while the proxy is stopped. |
 | **Proxy server** | Starts or stops the local companion server. The proxy needs a connected device and an available identity. |
-| **Resume on launch** | Reconnects the last device and restarts the proxy on open. |
+| **Resume on launch** | Reconnects the last device on a cold start. Recovery of a session that dropped while running happens even when this is off. |
 | **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Open settings** and set MeshChameleon to **Unrestricted**. |
 | **Backup & restore** | Saves or restores all identities, contacts, channels, messages, and settings in one encrypted file. |
 
@@ -190,10 +190,22 @@ When a device link is active:
 Tap **Disconnect** on the home screen or on the connection screen. This also
 stops the proxy.
 
-If the link drops unexpectedly, MeshChameleon retries automatically. If the
-radio was rebooted, wait for it to come back. If the radio was powered off
-through a MeshCore command, automatic reconnecting is suppressed until you
-connect again yourself.
+If the link drops unexpectedly, MeshChameleon shows **Reconnecting…** and keeps
+the proxy up for a short grace period, so a brief outage is invisible to the
+MeshCore app. If the radio stays away longer, the link enters **Waiting for
+companion**: the proxy stops (the client sees the disconnect), but the ongoing
+notification stays and MeshChameleon keeps waiting. A BLE radio reconnects when
+it comes back into range; a network radio is retried after 30 seconds, then 1,
+2, 5, 10, and every 15 minutes. When the radio returns, MeshChameleon restores
+the identities and restarts the proxy only if it was running before the drop.
+The MeshCore app may need to reconnect to the proxy itself.
+
+Tap **Cancel** at any point to end the attempt and stop waiting. If the radio was
+powered off through a MeshCore command, automatic reconnecting is suppressed
+until you connect again yourself.
+
+Waiting relies on the foreground service staying alive. If Android kills the
+app process, reopen MeshChameleon; a saved recovery re-arms automatically.
 
 ### Which connection should I use?
 
@@ -404,7 +416,8 @@ settings for MeshChameleon.
 ### Resume on launch
 
 Turn on **Resume on launch** to reconnect the last device and restart the proxy
-the next time you open the app.
+when you open the app. It is a cold-start setting only: a session that dropped
+while MeshChameleon was running recovers in the background even when this is off.
 
 This is not a boot service. After a phone reboot, open MeshChameleon once before
 relying on the proxy again.
@@ -666,6 +679,11 @@ No. The radio is used as a radio, and its own identity is kept separate.
 **Why do some radio settings need a reboot?**  
 The companion saves some settings and applies them when it restarts. Your
 MeshCore app can send a reboot command where supported.
+
+**What does “Waiting for companion” mean?**
+The radio has been out of range longer than the short reconnect grace period.
+The proxy is stopped, but MeshChameleon is still running and will restore the
+link automatically when the radio returns. Tap **Cancel** to stop waiting.
 
 **Why is the app killed in the background?**  
 Android battery optimization is the usual cause. Set MeshChameleon to

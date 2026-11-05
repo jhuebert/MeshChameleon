@@ -4,6 +4,7 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 import 'services/backup_service.dart';
 import 'services/build_info.dart';
+import 'services/device_link_phase.dart';
 import 'services/diagnostics_snapshot.dart';
 import 'services/identity_index.dart';
 import 'services/identity_runtime.dart';
@@ -15,6 +16,7 @@ export 'services/backup_service.dart' show BackupPreview;
 export 'services/identity_index.dart' show IdentityRecord;
 export 'services/identity_runtime.dart' show IdentitySummary;
 export 'services/network_connection_store.dart' show SavedNetworkConnection;
+export 'services/device_link_phase.dart';
 export 'services/proxy_status.dart';
 export 'services/session_store.dart' show DeviceTargetKind, SessionConfig;
 
@@ -54,11 +56,16 @@ abstract class AppViewState extends ChangeNotifier {
   ProxyStatus get proxyStatus;
   bool get busy;
   String? get deviceLabel;
+  DeviceLinkPhase get devicePhase;
   bool get deviceConnected;
 
   /// True while an unexpected drop is being retried. The proxy stays up during
   /// this window, but the UI should show the link as reconnecting.
   bool get deviceReconnecting;
+
+  /// True while a parked session waits for the companion to return.
+  bool get deviceWaiting;
+  bool get deviceConnecting;
   int get port;
   bool get autoResume;
   SessionConfig? get lastSession;
@@ -67,9 +74,11 @@ abstract class AppViewState extends ChangeNotifier {
   Future<bool> connectBle(BluetoothDevice device, {String? displayName});
   Future<bool> connectSimulated({RadioLink? simulatedLink});
   Future<void> cancelPendingConnection();
+  Future<void> cancelDeviceAttempt();
   Future<void> disconnectDevice();
 
-  /// Retry the saved device after the session ended from link loss.
+  /// Nudge a parked recovery when the app returns to the foreground: run an
+  /// immediate TCP attempt or re-arm the BLE `autoConnect` request.
   Future<void> rearmAfterLinkLoss();
   Future<bool> setProxyPort(int value);
   Future<void> setAutoResume(bool value);

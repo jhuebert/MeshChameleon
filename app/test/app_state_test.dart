@@ -91,13 +91,17 @@ void main() {
     SessionStore? session,
     NetworkConnectionStore? connections,
     TcpDeviceLinkFactory? tcpLinkFactory,
+    BleLinkFactory? bleLinkFactory,
     DeviceCapabilities capabilities = _capabilities,
+    RecoveryTimerFactory? recoveryTimerFactory,
   }) =>
       AppState(
         repository: repository,
         sessionStore: session ?? sessionStore,
         networkConnectionStore: connections ?? networkConnectionStore,
         tcpLinkFactory: tcpLinkFactory,
+        bleLinkFactory: bleLinkFactory,
+        recoveryTimerFactory: recoveryTimerFactory,
         capabilities: capabilities,
         reconnectDelay: const Duration(milliseconds: 10),
       );
@@ -134,6 +138,27 @@ void main() {
     expect(info[0], respCodeSelfInfo);
     return info.sublist(4, 36);
   }
+
+  test('cancelling an idle app is a no-op', () async {
+    await app.cancelDeviceAttempt();
+    expect(app.devicePhase, DeviceLinkPhase.idle);
+    expect(app.deviceConnected, isFalse);
+  });
+
+  test('the default BLE factory reports a failed connect in this test build',
+      () async {
+    final bleApp = buildApp(
+      capabilities: const DeviceCapabilities(supportsBle: true),
+    );
+    addTearDown(bleApp.disconnectDevice);
+    await bleApp.loadIdentities();
+
+    expect(
+      await bleApp.connectBle(BluetoothDevice.fromId('AA:BB:CC:DD:EE:03')),
+      isFalse,
+    );
+    expect(bleApp.devicePhase, DeviceLinkPhase.idle);
+  });
 
   test('fresh install auto-creates and activates one identity', () async {
     expect(app.identityDatabaseError, isNull);
@@ -731,31 +756,148 @@ void main() {
     expect(app.logs.join('\n'), contains('stopping the session'));
   });
 
-  test('a foreground resume re-arms the link after a give-up', () async {
-    await app.setAutoResume(true);
+  test('a dropped BLE session parks and recovers through passive connect',
+      () async {
     final link = _HandshakeFailLink(
       deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
     );
-    await app.connectSimulated(simulatedLink: link);
-    addTearDown(app.disconnectDevice);
-    await app.startProxy(serverPort: 0);
-    expect(app.proxyStatus, ProxyStatus.running);
+    final bleApp = buildApp(
+      capabilities: const DeviceCapabilities(supportsBle: true),
+      bleLinkFactory: (_, __) => link,
+    );
+    addTearDown(bleApp.disconnectDevice);
+    await bleApp.loadIdentities();
+
+    expect(
+      await bleApp.connectBle(
+        BluetoothDevice.fromId('AA:BB:CC:DD:EE:01'),
+        displayName: 'MeshCore-nc3',
+      ),
+      isTrue,
+      reason: bleApp.logs.join('\n'),
+    );
+    await bleApp.startProxy(serverPort: 0);
+    expect(bleApp.proxyStatus, ProxyStatus.running);
 
     link.failHandshake = true;
     link.simulateDrop();
-    await Future<void>.delayed(const Duration(milliseconds: 100));
-    expect(app.deviceConnected, isFalse);
-    expect(app.proxyStatus, ProxyStatus.stopped);
+    await Future<void>.delayed(const Duration(milliseconds: 150));
 
-    // The companion is back in range; a foreground resume retries the saved
-    // session and restarts the proxy.
+    expect(bleApp.devicePhase, DeviceLinkPhase.waiting);
+    expect(bleApp.proxyStatus, ProxyStatus.stopped);
+    expect(bleApp.manager!.runtimes, isEmpty);
+    expect(link.passiveRequested, isTrue);
+    expect(bleApp.lastSession!.recoveryPending, isTrue);
+    expect(bleApp.lastSession!.recoveryServeProxy, isTrue);
+    expect(bleApp.deviceLabel, 'BLE MeshCore-nc3');
+
+    // The companion is seen again; the OS-level request reconnects.
     link.failHandshake = false;
-    await app.rearmAfterLinkLoss();
-    await Future<void>.delayed(const Duration(milliseconds: 50));
+    await link.simulatePassiveConnect();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
 
-    expect(app.deviceConnected, isTrue);
-    expect(app.proxyStatus, ProxyStatus.running);
-    expect(app.logs.join('\n'), contains('retrying the saved device'));
+    expect(bleApp.devicePhase, DeviceLinkPhase.connected);
+    expect(bleApp.proxyStatus, ProxyStatus.running);
+    expect(bleApp.lastSession!.recoveryPending, isFalse);
+    expect(bleApp.logs.join('\n'), contains('Companion recovered'));
+  });
+
+  test('recovery does not restart a proxy stopped before the drop', () async {
+    final link = _HandshakeFailLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final bleApp = buildApp(
+      capabilities: const DeviceCapabilities(supportsBle: true),
+      bleLinkFactory: (_, __) => link,
+    );
+    addTearDown(bleApp.disconnectDevice);
+    await bleApp.loadIdentities();
+    await bleApp.connectBle(
+      BluetoothDevice.fromId('AA:BB:CC:DD:EE:02'),
+      displayName: 'MeshCore-nc1',
+    );
+    await bleApp.startProxy(serverPort: 0);
+    await bleApp.stopProxy();
+
+    link.failHandshake = true;
+    link.simulateDrop();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+
+    expect(bleApp.devicePhase, DeviceLinkPhase.waiting);
+    expect(bleApp.lastSession!.recoveryServeProxy, isFalse);
+
+    link.failHandshake = false;
+    await link.simulatePassiveConnect();
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    expect(bleApp.devicePhase, DeviceLinkPhase.connected);
+    expect(bleApp.proxyStatus, ProxyStatus.stopped);
+    expect(bleApp.logs.join('\n'), contains('proxy remains stopped'));
+  });
+
+  test('a persisted recovery reconnects at startup even with resume off',
+      () async {
+    final store = SessionStore(file: File('${dir.path}/recovery.json'));
+    await store.save(const SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: 'resume.example',
+      devicePort: 5000,
+      proxyPort: 0,
+      autoResume: false,
+      recoveryPending: true,
+      recoveryServeProxy: true,
+    ));
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    );
+    final recovered = buildApp(
+      session: store,
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    addTearDown(recovered.disconnectDevice);
+
+    await recovered.loadIdentities();
+
+    expect(recovered.deviceConnected, isTrue,
+        reason: recovered.logs.join('\n'));
+    expect(recovered.proxyStatus, ProxyStatus.running);
+    final saved = await store.load();
+    expect(saved!.recoveryPending, isFalse);
+    expect(saved.recoveryServeProxy, isFalse);
+  });
+
+  test('a failed persisted recovery parks instead of returning to idle',
+      () async {
+    final store = SessionStore(file: File('${dir.path}/recovery_fail.json'));
+    await store.save(const SessionConfig(
+      kind: DeviceTargetKind.tcp,
+      host: 'resume.example',
+      devicePort: 5000,
+      proxyPort: 0,
+      autoResume: false,
+      recoveryPending: true,
+      recoveryServeProxy: true,
+    ));
+    final fake = FakeDeviceLink(
+      deviceInfo_: const DeviceInfo(firmwareVerCode: 14),
+    )..deviceInfoError =
+        const DeviceCommandError.malformed(message: 'device unavailable');
+    final failed = buildApp(
+      session: store,
+      tcpLinkFactory: (host, port, onLog) => fake,
+    );
+    addTearDown(failed.disconnectDevice);
+
+    await failed.loadIdentities();
+
+    expect(failed.devicePhase, DeviceLinkPhase.waiting,
+        reason: failed.logs.join('\n'));
+    expect(failed.proxyStatus, ProxyStatus.stopped);
+    expect(failed.deviceLabel, 'TCP resume.example:5000');
+    final saved = await store.load();
+    expect(saved!.recoveryPending, isTrue);
+    expect(saved.recoveryServeProxy, isTrue);
+    await failed.cancelDeviceAttempt();
   });
 
   test('clearing data without a device updates persisted summaries', () async {

@@ -44,6 +44,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   late final TabController _tabController;
   late final Stream<List<ScanResult>> _scanResults;
   bool _scanning = false;
+  bool _cancelRequested = false;
   int _lastTabIndex = 0;
 
   @override
@@ -163,6 +164,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     final host = _hostController.text.trim();
     final port = int.parse(_portController.text.trim());
     FocusScope.of(context).unfocus();
+    _cancelRequested = false;
     final ok = await app.connectTcp(host: host, tcpPort: port);
     _finishConnection(
       ok,
@@ -208,6 +210,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     final app = context.read<AppViewState>();
     final name = bleCompanionDisplayName(result);
     await _stopScan();
+    _cancelRequested = false;
     final ok = await app.connectBle(result.device, displayName: name);
     _finishConnection(
       ok,
@@ -217,6 +220,7 @@ class _ConnectScreenState extends State<ConnectScreen>
 
   Future<void> _connectSimulated() async {
     final app = context.read<AppViewState>();
+    _cancelRequested = false;
     final ok = await app.connectSimulated();
     _finishConnection(
       ok,
@@ -228,9 +232,23 @@ class _ConnectScreenState extends State<ConnectScreen>
     if (!mounted) return;
     if (connected) {
       Navigator.of(context).pop();
-    } else {
-      _showFailure(failureMessage);
+      return;
     }
+    final app = context.read<AppViewState>();
+    // The controller is already showing recovery status, or the user canceled:
+    // a generic failure snackbar would duplicate or contradict that state.
+    if (_cancelRequested ||
+        app.deviceConnecting ||
+        app.deviceReconnecting ||
+        app.deviceWaiting) {
+      return;
+    }
+    _showFailure(failureMessage);
+  }
+
+  Future<void> _cancel() async {
+    _cancelRequested = true;
+    await context.read<AppViewState>().cancelDeviceAttempt();
   }
 
   void _showFailure(String message) => showAppSnackBar(context, message);
@@ -240,16 +258,20 @@ class _ConnectScreenState extends State<ConnectScreen>
     final app = context.watch<AppViewState>();
     return PopScope<void>(
       onPopInvokedWithResult: (didPop, _) {
-        if (didPop) unawaited(app.cancelPendingConnection());
+        // Leaving the screen must not cancel a parked recovery; only an
+        // initial attach that has not completed is abandoned.
+        if (didPop && app.deviceConnecting) {
+          unawaited(app.cancelDeviceAttempt());
+        }
       },
       child: Scaffold(
         appBar: AppBar(title: const Text('Connect device')),
         body: Column(
           children: [
-            if (app.deviceConnected)
+            if (app.devicePhase != DeviceLinkPhase.idle)
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                child: _ConnectedDeviceCard(app: app),
+                child: _ConnectionStatusCard(app: app, onCancel: _cancel),
               ),
             TabBar(
               controller: _tabController,
@@ -456,20 +478,32 @@ String _relativeTime(
 String _ago(int value, String unit) =>
     '$value $unit${value == 1 ? '' : 's'} ago';
 
-class _ConnectedDeviceCard extends StatelessWidget {
-  const _ConnectedDeviceCard({required this.app});
+class _ConnectionStatusCard extends StatelessWidget {
+  const _ConnectionStatusCard({required this.app, required this.onCancel});
 
   final AppViewState app;
+  final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = switch (app.devicePhase) {
+      DeviceLinkPhase.connecting => 'Connecting…',
+      DeviceLinkPhase.connected => 'Connected',
+      DeviceLinkPhase.reconnecting => 'Reconnecting…',
+      DeviceLinkPhase.waiting =>
+        'Waiting for the companion. The proxy restarts when it returns.',
+      DeviceLinkPhase.disconnecting => 'Disconnecting…',
+      DeviceLinkPhase.idle => '',
+    };
+    final connected = app.deviceConnected;
     return ActionTile(
       icon: deviceTargetIcon(app.lastSession?.kind),
       title: app.deviceLabel ?? 'Connected device',
-      subtitle: app.deviceReconnecting ? 'Reconnecting…' : 'Connected',
+      subtitle: subtitle,
       trailing: TextButton(
-        onPressed: app.busy ? null : app.disconnectDevice,
-        child: const Text('Disconnect'),
+        onPressed:
+            connected ? (app.busy ? null : app.disconnectDevice) : onCancel,
+        child: Text(connected ? 'Disconnect' : 'Cancel'),
       ),
       enabled: false,
     );
