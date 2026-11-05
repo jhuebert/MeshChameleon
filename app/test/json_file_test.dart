@@ -20,12 +20,14 @@ void main() {
       () async {
     final file = File('${dir.path}/shared.json');
     final gate = Completer<void>();
+    final firstStarted = Completer<void>();
     final order = <String>[];
 
     final first = JsonFile(file).write(
       {'value': 1},
       beforeRename: () async {
         order.add('first');
+        firstStarted.complete();
         await gate.future;
       },
     );
@@ -34,6 +36,9 @@ void main() {
       beforeRename: () async => order.add('second'),
     );
 
+    // Wait for the first write to reach its rename instead of guessing how
+    // long its file I/O takes on a loaded runner.
+    await firstStarted.future;
     await Future<void>.delayed(const Duration(milliseconds: 30));
     expect(order, ['first']);
     expect(await file.exists(), isFalse,
