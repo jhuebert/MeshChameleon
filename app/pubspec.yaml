@@ -36,7 +36,7 @@ dev_dependencies:
   # -d <device>`); never part of the default `flutter test` gate.
   integration_test:
     sdk: flutter
-  flutter_lints: ^4.0.0
+  flutter_lints: ^6.0.0
   test_support:
     path: ../packages/test_support
   # Platform-interface fake used by the BLE unit tests.
