@@ -20,6 +20,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Matched stock companion behavior for `APP_START` reserved bytes,
+  per-command minimum lengths/error codes, `GET_CHANNEL`, 16-byte channel
+  secrets, signed-message sender prefixes, reserved group-data type 0 receive,
+  and the 16-message offline queue with channel-message eviction (oversized
+  legacy queues are trimmed to the newest 16 on load).
+- Contain failures from scheduled ACKs/replies when the radio link drops, and
+  report device-link send failures with protocol error codes instead of
+  counting them as internal errors.
 - BLE Disconnect/Cancel calls `disconnect(queue: false)`, stale GATT handles are
   cleared before an active connect, and notify setup is retried before failing.
 - Restored access to existing 0.2.0 identity keys by allowing the v10

@@ -188,8 +188,10 @@ secure storage: meshcore_identity_v2/<id>     64-byte expanded key
 Rules worth preserving:
 
 - Inactive identities still receive, decrypt, ACK, and queue traffic, but never
-  send unsolicited adverts. Each identity keeps up to 512 queued messages with
-  drop-oldest behavior.
+  send unsolicited adverts. Each identity keeps the stock 16-message queue:
+  when full, the oldest channel message is evicted; if none exists, the new
+  message is dropped. A pre-0.1.0 state file with a larger queue is trimmed to
+  the newest 16 messages on load.
 - Disabled identities keep their key, state, and queue but have no live runtime,
   so they cannot receive, ACK, or queue new traffic until re-enabled. The active
   identity must stay enabled; a catalog whose active record is disabled is

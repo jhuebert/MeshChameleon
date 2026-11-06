@@ -122,8 +122,7 @@ void main() {
     expect((await client.frames.next())[0], respCodeDeviceInfo);
     final w = BufferWriter()
       ..writeByte(cmdAppStart)
-      ..writeByte(3)
-      ..writeBytes(List.filled(6, 0))
+      ..writeBytes(List.filled(7, 0))
       ..writeString('test')
       ..writeByte(0);
     client.send(w.toBytes());

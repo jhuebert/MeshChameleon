@@ -196,6 +196,29 @@ void main() {
       final r = BufferReader(plain)..skipBytes(4);
       expect(r.readByte(), ((txtTypeSigned & 0x3F) << 2) | 2);
     });
+
+    test('attempts beyond 3 append the extended attempt tail', () async {
+      final alice = await makeIdentity(1);
+      final bob = await makeIdentity(2);
+      final contact = contactFor(bob);
+      final (p, _) = await PacketBuilder.createTextMessage(
+        contact: contact,
+        identity: alice,
+        message: 'hi',
+        attempt: 5,
+        timestamp: 100,
+      );
+      final secret = await bob.sharedSecret(alice.publicKey);
+      final plain = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16),
+        secret,
+        p.payload.sublist(2),
+      );
+      final r = BufferReader(plain)..skipBytes(4);
+      expect(r.readByte(), (txtTypePlain << 2) | 1);
+      expect(r.readCString(), 'hi');
+      expect(r.readByte(), 5);
+    });
   });
 
   group('group messages', () {
@@ -224,6 +247,26 @@ void main() {
       expect(r.readUInt32Le(), 100);
       expect(r.readByte(), 0);
       expect(r.readCString(), 'alice: hello');
+    });
+
+    test('createGroupText truncates content to the firmware text limit', () {
+      final p = PacketBuilder.createGroupText(
+        channel: channel,
+        message: 'x' * 500,
+        senderName: 'alice',
+        timestamp: 100,
+      );
+      final secret = Uint8List(32);
+      secret.setRange(0, channel.secret.length, channel.secret);
+      final plain = CryptoUtils.macThenDecrypt(
+        secret.sublist(0, 16),
+        secret,
+        p.payload.sublist(1),
+      );
+      final r = BufferReader(plain)..skipBytes(5);
+      final content = r.readCString();
+      expect(content, hasLength(maxTextLength));
+      expect(content, startsWith('alice: '));
     });
 
     test('createGroupData handles flood and zero-hop direct routes', () {

@@ -189,7 +189,7 @@ class MeshRx {
       case payloadTypeTxtMsg:
         await _onDirectText(packet, generation);
       case payloadTypeGrpTxt:
-        await _onGroupText(packet, generation, peerOrigin: peerOrigin);
+        await _onGroupText(packet, generation);
       case payloadTypeGrpData:
         await _onGroupData(packet, generation);
       case payloadTypeControl:
@@ -210,6 +210,7 @@ class MeshRx {
   }
 
   Future<void> _onAdvert(Packet packet, int generation) async {
+    if (deduper.isDuplicate(packet.calculatePacketHash())) return;
     final advert = PacketBuilder.decodeAdvertPacket(packet.payload);
     if (advert == null || advert.appData.isEmpty) return;
     if (!await advert.verify()) return;
@@ -372,38 +373,40 @@ class MeshRx {
     );
     if (decrypted == null) return;
     final (sender, plaintext) = decrypted;
-    if (plaintext.length < 5) return;
+    if (plaintext.length < 6) return;
     final r = BufferReader(plaintext);
     final ts = r.readUInt32Le();
     final flagsByte = r.readByte();
     final txtType = (flagsByte >> 2) & 0x3F;
+    if (txtType != txtTypePlain &&
+        txtType != txtTypeCliData &&
+        txtType != txtTypeCliCommand &&
+        txtType != txtTypeSigned) {
+      return;
+    }
 
     // Signed messages carry a 4-byte sender prefix before the text.
     late String text;
+    Uint8List? senderPrefix;
     Uint8List? rawCommand;
     late Uint8List ackBytes;
     if (txtType == txtTypeSigned) {
       if (plaintext.length < 9) return;
-      r.skipBytes(4); // sender prefix (informational)
-      text = r.readCString();
-      // Track the room-server sync cursor (highest signed timestamp seen).
-      if (ts > sender.syncSince) {
-        sender.syncSince = ts;
-        deps.persist();
-      }
-      final textLen = utf8.encode(text).length;
-      final end = (9 + textLen).clamp(0, plaintext.length);
+      senderPrefix = Uint8List.fromList(plaintext.sublist(5, 9));
+      // Use the raw on-air bytes for the ACK: re-encoding a lossy UTF-8 decode
+      // would change the hash the sender computed over the original bytes.
+      final textBytes = _readCStringBytes(plaintext, 9);
+      text = utf8.decode(textBytes, allowMalformed: true);
+      final end = (9 + textBytes.length).clamp(0, plaintext.length);
       // The firmware ACKs signed messages with
       // sha256(plaintext up to the text end | self pubkey).
       ackBytes = Uint8List.fromList(CryptoUtils.sha256(
               [...plaintext.sublist(0, end), ...identity.publicKey])
           .sublist(0, keyPrefix4));
     } else {
-      if (txtType == txtTypeCliCommand) {
-        rawCommand = _readCStringBytes(plaintext, r.position);
-      }
-      text = r.readCString();
-      final textBytes = utf8.encode(text);
+      final textBytes = _readCStringBytes(plaintext, r.position);
+      if (txtType == txtTypeCliCommand) rawCommand = textBytes;
+      text = utf8.decode(textBytes, allowMalformed: true);
       final hash = PacketBuilder.ackHash(
         timestamp: ts,
         flagsByte: flagsByte,
@@ -435,6 +438,15 @@ class MeshRx {
     // plain/signed messages is still ACKed above but not queued twice.
     if (deduper.isDuplicate(packet.calculatePacketHash())) return;
 
+    if (txtType == txtTypePlain || txtType == txtTypeSigned) {
+      sender.lastmod = clock.wallSeconds;
+      // Track the room-server sync cursor (highest signed timestamp seen).
+      if (txtType == txtTypeSigned && ts > sender.syncSince) {
+        sender.syncSince = ts;
+      }
+      deps.persist();
+    }
+
     if (txtType == txtTypeCliCommand) {
       if (contacts.isPersistent(sender) && (sender.flags & 0x10) != 0) {
         await _handleRemoteCli(
@@ -457,6 +469,8 @@ class MeshRx {
         text: text,
         snr: packet.snr,
         rssi: packet.rssi,
+        pathLen: packet.isRouteFlood ? packet.pathLenByte : 0xFF,
+        senderPrefix: senderPrefix,
       ),
       identityGeneration: generation,
     );
@@ -536,7 +550,10 @@ class MeshRx {
   ) {
     if (!deps.isCurrent(generation)) return;
     acks.schedule(const Duration(milliseconds: 600), () {
-      unawaited(_sendCliReply(sender, requestTimestamp, reply, generation));
+      unawaited(
+        _sendCliReply(sender, requestTimestamp, reply, generation)
+            .catchError((Object _) {}),
+      );
     });
   }
 
@@ -565,6 +582,32 @@ class MeshRx {
     );
   }
 
+  /// Fire-and-forget transmission for scheduled endpoint work.
+  ///
+  /// ACKs, CLI/telemetry replies, and reciprocal paths run on timers after the
+  /// frame that scheduled them. If the link drops before the timer fires (or
+  /// while the send is in flight), the failure is already reflected in link
+  /// state and must not escape as an unhandled asynchronous error.
+  void _transmitScheduled(
+    Packet packet, {
+    required bool flood,
+    bool scoped = false,
+    bool preservePath = false,
+    int? identityGeneration,
+  }) {
+    unawaited(
+      deps
+          .transmit(
+            packet,
+            flood: flood,
+            scoped: scoped,
+            preservePath: preservePath,
+            identityGeneration: identityGeneration,
+          )
+          .catchError((Object _) {}),
+    );
+  }
+
   /// Endpoint ACK schedule (never the repeater forwarding fan-out):
   /// * known direct route, multi_acks=0: ACK at 200ms
   /// * known direct route, multi_acks>0: ONE multipart ACK at 200ms, ACK at 500ms
@@ -589,7 +632,7 @@ class MeshRx {
       );
       acks.schedule(
         firstDelay,
-        () => unawaited(deps.transmit(pathReturn, flood: true, scoped: true)),
+        () => _transmitScheduled(pathReturn, flood: true, scoped: true),
       );
       return;
     }
@@ -599,7 +642,7 @@ class MeshRx {
       ack.header = (ack.header & ~phRouteMask) | routeTypeFlood;
       acks.schedule(
         firstDelay,
-        () => unawaited(deps.transmit(ack, flood: true, scoped: true)),
+        () => _transmitScheduled(ack, flood: true, scoped: true),
       );
       return;
     }
@@ -610,25 +653,24 @@ class MeshRx {
         ..setPath(sender.outPath, sender.outPathLen);
       acks.schedule(
         firstDelay,
-        () => unawaited(deps.transmit(multi, flood: false)),
+        () => _transmitScheduled(multi, flood: false),
       );
       acks.schedule(
         const Duration(milliseconds: 500),
-        () => unawaited(deps.transmit(ack, flood: false)),
+        () => _transmitScheduled(ack, flood: false),
       );
     } else {
       acks.schedule(
         firstDelay,
-        () => unawaited(deps.transmit(ack, flood: false)),
+        () => _transmitScheduled(ack, flood: false),
       );
     }
   }
 
   Future<void> _onGroupText(
     Packet packet,
-    int generation, {
-    bool peerOrigin = false,
-  }) async {
+    int generation,
+  ) async {
     if (packet.payload.length < 3) return;
     final decoded = _decryptChannelPayload(packet);
     if (decoded == null) return;
@@ -637,12 +679,13 @@ class MeshRx {
     if (plaintext.length < 5) return;
     final r = BufferReader(plaintext);
     final ts = r.readUInt32Le();
-    r.skipBytes(1); // flags
+    final flags = r.readByte();
+    // Stock only delivers plain group text (`txt_type` in the upper six bits).
+    if ((flags >> 2) != 0) return;
     final text = r.readCString();
-    // Raw RX is forwarded separately for path/repeat tracking; don't queue our
-    // own channel TX as a new incoming message. A locally mirrored peer copy is
-    // not our own TX even when both identities share a display name.
-    if (!peerOrigin && text.startsWith('${prefs.nodeName}: ')) return;
+    // Raw RX is forwarded separately for path/repeat tracking. Stock marks
+    // every transmitted packet as seen, so a rebroadcast of our own channel
+    // text is filtered by the deduper; do not also guess from the name.
     if (!deps.isCurrent(generation)) return;
     if (deduper.isDuplicate(packet.calculatePacketHash())) return;
     await deps.enqueueMessage(
@@ -668,9 +711,9 @@ class MeshRx {
     if (plaintext.length < 3) return;
     final dataType = plaintext[0] | (plaintext[1] << 8);
     final dataLen = plaintext[2];
-    if (dataType == dataTypeReserved ||
-        dataLen > maxChannelDataLength ||
-        plaintext.length < 3 + dataLen) {
+    // Type 0 is reserved on send but stock still forwards received group data
+    // with any type, including 0.
+    if (dataLen > maxChannelDataLength || plaintext.length < 3 + dataLen) {
       return;
     }
     if (!deps.isCurrent(generation)) return;
@@ -683,6 +726,7 @@ class MeshRx {
         pathLen: packet.isRouteFlood ? packet.pathLenByte : 0xFF,
         snr: packet.snr,
         rssi: packet.rssi,
+        isChannelData: true,
         channelDataType: dataType,
         channelDataPayload: Uint8List.fromList(
           plaintext.sublist(3, 3 + dataLen),
@@ -701,6 +745,11 @@ class MeshRx {
     // for the other channels in the collision (the firmware tries up to four).
     for (final entry in channels.entries) {
       final ch = entry.value;
+      // Match the firmware's searchChannelsByHash: skip unnamed slots. A
+      // cleared channel keeps its index with an all-zero secret, which would
+      // otherwise accept null-key group traffic meant for no configured
+      // channel.
+      if (ch.name.isEmpty) continue;
       if (channelHash(ch.secret) != channelHashByte) continue;
       final secret = channelSecret32(ch.secret);
       try {
@@ -721,6 +770,7 @@ class MeshRx {
 
   Future<void> _onRequest(Packet packet, int generation) async {
     if (packet.payload.length < 2) return;
+    if (deduper.isDuplicate(packet.calculatePacketHash())) return;
     if (packet.payload[0] != identity.publicKey[0]) return;
     final decrypted = await _decryptFromSource(
       packet.payload[1],
@@ -757,14 +807,16 @@ class MeshRx {
     final requestPathLen = packet.pathLenByte;
     final requestWasFlood = packet.isRouteFlood;
     acks.schedule(const Duration(milliseconds: 300), () {
-      unawaited(_sendTelemetryReply(
-        senderCopy,
-        reply,
-        requestWasFlood: requestWasFlood,
-        requestPath: requestPath,
-        requestPathLen: requestPathLen,
-        generation: generation,
-      ));
+      unawaited(
+        _sendTelemetryReply(
+          senderCopy,
+          reply,
+          requestWasFlood: requestWasFlood,
+          requestPath: requestPath,
+          requestPathLen: requestPathLen,
+          generation: generation,
+        ).catchError((Object _) {}),
+      );
     });
   }
 
@@ -862,10 +914,10 @@ class MeshRx {
 
   void _onControlData(Packet packet) {
     if (packet.payload.isEmpty) return;
-    // Discovery/probe control payloads are zero-hop direct. Flooded or
-    // still-in-transit control data is not delivered as a local discovery event.
+    // Discovery/probe control payloads are zero-hop direct and must carry the
+    // 0x80 control-data marker.
     if (!packet.isRouteDirect || packet.pathHashCount != 0) return;
-    if (deduper.isDuplicate(packet.calculatePacketHash())) return;
+    if ((packet.payload[0] & 0x80) == 0) return;
     pushSink?.pushControlData(
       packet.snr,
       packet.rssi,
@@ -928,7 +980,18 @@ class MeshRx {
         (packet.payload[3] << 24);
     // Keep-alive ACKs are matched separately and not surfaced to the client.
     if (sessions.acceptAck(crc)) return;
-    acks.confirm(crc);
+    final pending = acks.take(crc);
+    if (pending == null) return;
+    final contact = contacts.findByKey(pending.contactPubkey);
+    if (contact != null) {
+      unawaited(
+        _scheduleReciprocalPath(
+          contact,
+          packet,
+          delay: const Duration(seconds: 3),
+        ).catchError((Object _) {}),
+      );
+    }
   }
 
   /// Handle a `PAYLOAD_TYPE_MULTIPART` packet. Only multipart ACKs are used by
@@ -953,6 +1016,7 @@ class MeshRx {
   Future<void> _onPathReturn(Packet packet, int generation) async {
     final payload = packet.payload;
     if (payload.length < 2) return;
+    if (deduper.isDuplicate(packet.calculatePacketHash())) return;
     if (payload[0] != identity.publicKey[0]) return; // not addressed to us
     final srcHash = payload[1];
     final decrypted = await _decryptFromSource(
@@ -989,11 +1053,19 @@ class MeshRx {
     }
     if (!deps.isCurrent(generation)) return;
 
+    var isPathDiscovery = false;
     if (extraType == payloadTypeAck && extra.length >= 4) {
       final crc =
           extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
       acks.confirm(crc);
     } else if (extraType == payloadTypeResponse) {
+      if (extra.length >= 4) {
+        final tag =
+            extra[0] | (extra[1] << 8) | (extra[2] << 16) | (extra[3] << 24);
+        final target = requests.discoveryTarget(tag);
+        isPathDiscovery =
+            target != null && bytesEqual(target, sender.publicKey);
+      }
       _dispatchResponse(
         sender.publicKey,
         extra,
@@ -1003,6 +1075,52 @@ class MeshRx {
         inPathLen: packet.pathLenByte,
       );
     }
+
+    // Stock sends a reciprocal return path directly when the incoming
+    // path-return was flooded, so the peer also learns the route back. It
+    // skips this for path-discovery replies, which are surfaced to the app
+    // instead (MyMesh::onContactPathRecv returns false there).
+    if (pathReturn.hasValidPath && !isPathDiscovery) {
+      await _scheduleReciprocalPath(
+        sender,
+        packet,
+        delay: const Duration(milliseconds: 500),
+      );
+    }
+  }
+
+  /// Send a reciprocal return path directly to [contact] when [packet] was
+  /// flooded and a direct route is known, matching the firmware's
+  /// `handleReturnPathRetry`.
+  Future<void> _scheduleReciprocalPath(
+    Contact contact,
+    Packet packet, {
+    required Duration delay,
+  }) async {
+    if (!packet.isRouteFlood || !contact.hasDirectRoute) return;
+    final generation = deps.identityGeneration();
+    final secret = await identity.sharedSecret(contact.publicKey);
+    if (!deps.isCurrent(generation)) return;
+    final reciprocal = PacketBuilder.createPathReturn(
+      destHashByte: contact.publicKey[0],
+      srcHashByte: identity.publicKey[0],
+      secret: secret,
+      path: packet.path,
+      pathLenEncoded: packet.pathLenByte,
+      extraType: 0,
+      extra: const [],
+    );
+    reciprocal.header = (reciprocal.header & ~phRouteMask) | routeTypeDirect;
+    reciprocal.setPath(contact.outPath, contact.outPathLen);
+    acks.schedule(
+      delay,
+      () => _transmitScheduled(
+        reciprocal,
+        flood: false,
+        preservePath: true,
+        identityGeneration: generation,
+      ),
+    );
   }
 
   /// Handle a `PAYLOAD_TYPE_RESPONSE` datagram (a response to a request sent as
@@ -1010,6 +1128,7 @@ class MeshRx {
   Future<void> _onResponse(Packet packet, int generation) async {
     final payload = packet.payload;
     if (payload.length < 2) return;
+    if (deduper.isDuplicate(packet.calculatePacketHash())) return;
     if (payload[0] != identity.publicKey[0]) return;
     final srcHash = payload[1];
     final decrypted = await _decryptFromSource(
@@ -1020,6 +1139,11 @@ class MeshRx {
     if (decrypted == null) return;
     final (sender, plaintext) = decrypted;
     _dispatchResponse(sender.publicKey, plaintext);
+    await _scheduleReciprocalPath(
+      sender,
+      packet,
+      delay: const Duration(seconds: 3),
+    );
   }
 
   /// Route a request response (login/status/path-discovery) to the matching

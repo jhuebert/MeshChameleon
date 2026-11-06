@@ -22,16 +22,18 @@ String? validateAdvertName(String name) {
 
 /// Decode a binary `SET_ADVERT_NAME` payload.
 ///
-/// An optional single trailing NUL terminator is accepted and removed. Embedded
-/// NULs, overlong values, malformed UTF-8, empty names, and control characters
-/// are rejected rather than truncated or concatenated.
+/// Stock firmware treats the field as a C string and truncates it to 31 bytes.
+/// An optional trailing NUL is accepted; embedded NULs end the name. Overlong
+/// names are truncated on a UTF-8 boundary. Empty names, malformed UTF-8, and
+/// control characters are still rejected.
 String? decodeAdvertNameBytes(List<int> raw) {
   var bytes = raw;
-  if (bytes.isNotEmpty && bytes.last == 0) {
-    bytes = bytes.sublist(0, bytes.length - 1);
+  final nul = bytes.indexOf(0);
+  if (nul >= 0) bytes = bytes.sublist(0, nul);
+  if (bytes.isEmpty) return null;
+  if (bytes.length > maxAdvertNameBytes) {
+    bytes = bytes.sublist(0, utf8CutIndex(bytes, maxAdvertNameBytes));
   }
-  if (bytes.isEmpty || bytes.length > maxAdvertNameBytes) return null;
-  if (bytes.contains(0)) return null;
   try {
     return validateAdvertName(utf8.decode(bytes));
   } on FormatException {

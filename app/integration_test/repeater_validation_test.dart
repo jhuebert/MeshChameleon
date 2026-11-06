@@ -108,7 +108,7 @@ void main() {
     addTearDown(client.close);
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     await client.next();
 
     final pubkey = Uint8List.fromList(_parseHex(_pubkeyHex));

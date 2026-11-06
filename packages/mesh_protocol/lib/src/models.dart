@@ -476,6 +476,8 @@ class QueuedMessage {
     this.pathLen = 0,
     this.snr = 0.0,
     this.rssi = 0,
+    this.senderPrefix,
+    this.isChannelData = false,
     this.channelDataType = 0,
     this.channelDataPayload,
   });
@@ -490,8 +492,16 @@ class QueuedMessage {
   final double snr;
   final int rssi;
 
-  /// Non-zero for group *data* (binary) channel messages; [channelDataPayload]
-  /// then holds the raw payload and [text] is unused.
+  /// Four-byte signed-message sender prefix carried after the timestamp in
+  /// `PACKET_CONTACT_MSG_RECV[_V3]` when [txtType] is signed.
+  final Uint8List? senderPrefix;
+
+  /// True for group *data* (binary) channel messages, including the reserved
+  /// type `0` that stock firmware still forwards to the client.
+  final bool isChannelData;
+
+  /// Group-data type; meaningful when [isChannelData] is true. Type `0` is
+  /// reserved on send but still forwarded on receive.
   final int channelDataType;
   final Uint8List? channelDataPayload;
 
@@ -505,6 +515,9 @@ class QueuedMessage {
         pathLen: pathLen,
         snr: snr,
         rssi: rssi,
+        senderPrefix:
+            senderPrefix == null ? null : Uint8List.fromList(senderPrefix!),
+        isChannelData: isChannelData,
         channelDataType: channelDataType,
         channelDataPayload: channelDataPayload == null
             ? null

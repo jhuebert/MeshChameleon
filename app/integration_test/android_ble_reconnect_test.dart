@@ -107,7 +107,7 @@ void main() {
     try {
       client.send([cmdDeviceQuery, appProtocolVersion]);
       await client.next();
-      client.send([cmdAppStart, appProtocolVersion]);
+      client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       final self = await client.next();
       expect(self.sublist(4, 36), app.identity!.publicKey);
       debugPrint('BEFORE_REBOOT key=$originalKey port=$_proxyPort');
@@ -143,7 +143,7 @@ void main() {
       try {
         second.send([cmdDeviceQuery, appProtocolVersion]);
         await second.next();
-        second.send([cmdAppStart, appProtocolVersion]);
+        second.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
         final self2 = await second.next();
         expect(self2.sublist(4, 36), hexToBytes(originalKey));
       } finally {

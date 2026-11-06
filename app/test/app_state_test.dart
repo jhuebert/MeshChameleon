@@ -129,8 +129,7 @@ void main() {
   Future<Uint8List> handshake(FramedClient client) async {
     final w = BufferWriter()
       ..writeByte(cmdAppStart)
-      ..writeByte(appProtocolVersion)
-      ..writeBytes(List.filled(6, 0))
+      ..writeBytes(List.filled(7, 0))
       ..writeString('test')
       ..writeByte(0);
     client.send(w.toBytes());

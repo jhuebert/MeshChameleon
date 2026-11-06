@@ -56,7 +56,9 @@ class ConnectionSessions {
     connection.timer?.cancel();
     connection.timer = Timer.periodic(
       connection.interval,
-      (_) => unawaited(onKeepAlive(connection)),
+      (_) => unawaited(
+        onKeepAlive(connection).catchError((Object _) {}),
+      ),
     );
   }
 

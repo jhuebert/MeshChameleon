@@ -1,4 +1,4 @@
-// Eight live identities with local DM fan-out and no drops.
+// Eight live identities with local DM fan-out and the stock queue cap.
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -14,7 +14,8 @@ import 'package:meshchameleon/services/network_connection_store.dart';
 import 'package:meshchameleon/services/session_store.dart';
 
 void main() {
-  test('eight identities live and a local DM mirrors without drops', () async {
+  test('eight identities live and a local DM mirrors to the stock queue cap',
+      () async {
     FlutterSecureStorage.setMockInitialValues({});
     final dir = await Directory.systemTemp.createTemp('mesh_scale_');
     final app = AppState(
@@ -70,6 +71,8 @@ void main() {
           .sendTextMessage(target.identity!.publicKey, 'scale $i');
       expect(result.success, isTrue);
     }
-    expect(target.node!.queuedDirectCount, 20);
+    // Stock has a 16-message offline queue and drops new messages when no
+    // channel message can be evicted.
+    expect(target.node!.queuedDirectCount, 16);
   });
 }

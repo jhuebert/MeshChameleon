@@ -143,7 +143,7 @@ void main() {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     expect((await client.next())[0], respCodeDeviceInfo);
 
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     final selfInfo = await client.next();
     expect(selfInfo[0], respCodeSelfInfo);
     expect(selfInfo.sublist(4, 36), identity.publicKey);

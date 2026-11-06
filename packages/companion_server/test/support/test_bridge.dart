@@ -49,11 +49,17 @@ class TestBridge extends CompanionBridge {
   bool channelMessageResult = true;
   int? sentChannelIndex;
   String? sentChannelText;
+  int? sentChannelTimestamp;
 
   @override
-  Future<bool> sendChannelMessage(int channelIndex, String text) async {
+  Future<bool> sendChannelMessage(
+    int channelIndex,
+    String text, {
+    int? timestamp,
+  }) async {
     sentChannelIndex = channelIndex;
     sentChannelText = text;
+    sentChannelTimestamp = timestamp;
     return channelMessageResult;
   }
 
@@ -211,6 +217,22 @@ class TestBridge extends CompanionBridge {
     return cliReply;
   }
 
+  /// CLI execution that changes the runtime lifecycle (for reset/reboot guards).
+  int cliLifecycleBump = 0;
+  int lifecycleGenerationValue = 0;
+
+  @override
+  int get lifecycleGeneration => lifecycleGenerationValue;
+
+  @override
+  Future<String> runCliCommandBytes(Uint8List payload) {
+    if (cliLifecycleBump > 0) {
+      lifecycleGenerationValue += cliLifecycleBump;
+      cliLifecycleBump = 0;
+    }
+    return super.runCliCommandBytes(payload);
+  }
+
   final customVars = <String, String>{};
   final supportedCustomKeys = <String>{};
   CompanionOperationError? customVarError;
@@ -233,8 +255,11 @@ class TestBridge extends CompanionBridge {
   @override
   List<Contact> getContacts({int since = 0}) {
     if (contactsError != null) throw contactsError!;
-    return contacts;
+    return contacts.where((c) => c.lastmod > since).toList();
   }
+
+  @override
+  int get contactCount => contacts.length;
 
   Object? contactsError;
 
@@ -382,9 +407,14 @@ class TestBridge extends CompanionBridge {
       success: true, isFlood: false, expectedAck: 0x99, timeoutMs: 10000);
 
   @override
-  Future<bool> sendTracePathRaw(
+  Future<SentResult> sendTracePathRaw(
           int tag, int authCode, int flags, Uint8List pathBytes) async =>
-      traceResult;
+      SentResult(
+        success: traceResult,
+        isFlood: false,
+        expectedAck: tag,
+        timeoutMs: 1000,
+      );
 
   bool traceResult = true;
 
@@ -392,6 +422,7 @@ class TestBridge extends CompanionBridge {
   String? sentText;
   int? sentTextAttempt;
   int? sentTextTimestamp;
+  int? sentTextType;
   SentResult? sentTextResult;
 
   @override
@@ -401,6 +432,7 @@ class TestBridge extends CompanionBridge {
     sentText = text;
     sentTextAttempt = attempt;
     sentTextTimestamp = timestamp;
+    sentTextType = txtType;
     return sentTextResult ??
         const SentResult(success: true, expectedAck: 0x1234, timeoutMs: 5000);
   }
@@ -425,10 +457,12 @@ class TestBridge extends CompanionBridge {
 
   @override
   Future<Uint8List> sign(Uint8List message) {
+    lastSignedMessage = Uint8List.fromList(message);
     if (signError != null) throw signError!;
     return identity.sign(message);
   }
 
+  Uint8List? lastSignedMessage;
   Object? signError;
 
   int identityImports = 0;

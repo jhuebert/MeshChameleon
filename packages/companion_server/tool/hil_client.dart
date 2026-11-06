@@ -11,7 +11,7 @@
 //   keys-export <file>        export virtual 64-byte key to a 0600 file
 //   keys-import <file>        import a 64-byte key from a file
 //   contacts [--since N]      list contacts
-//   channels                  list all channels (empty-payload extension)
+//   channels                  list all channels by index
 //   messages [--max N]        drain queued messages, V3 layout
 //   stats [--type N]          request core/radio stats
 //   cli <text>                run a virtual CLI command
@@ -484,7 +484,10 @@ Future<void> _channels(String host, int port, List<String> args) async {
   final conn = await _connect(host, port);
   try {
     await conn.handshake(appVersion: _appVersion(args));
-    conn.send([cmdGetChannel]);
+    final maxChannels = conn.deviceInfo?.maxChannels ?? 40;
+    for (var i = 0; i < maxChannels; i++) {
+      conn.send([cmdGetChannel, i]);
+    }
     final frames = await conn.collect(
       quiet: const Duration(milliseconds: 400),
       timeout: const Duration(seconds: 10),

@@ -81,6 +81,42 @@ Do not claim hardware validation unless it was run against real hardware. BLE,
 multi-identity radio behavior, and background execution are currently not
 hardware-validated.
 
+## Stock-firmware parity
+
+The virtual companion must be indistinguishable from a stock MeshCore companion
+on the wire. Match `MeshCore/docs/companion_protocol.md` and the pinned stock
+firmware (`MeshCore/examples/companion_radio/`) for accepted command lengths,
+response codes, frame layouts, limits, and routing semantics. If stock firmware
+rejects, clamps, or ignores something, MeshChameleon should do the same.
+Virtual-only behavior (multi-identity, telemetry/CLI extensions, app-only reset)
+must be explicit and documented, never an accidental protocol divergence.
+
+### Known intentional differences
+
+- Self telemetry currently returns the virtual battery voltage (and location
+  when permitted) but does not synthesize MCU temperature or environment
+  sensors. Feeding Android device sensors into the LPP response is a future
+  enhancement; stock firmware reports board sensors.
+- `CMD_SET_RADIO_PARAMS` without the optional client-repeat byte preserves the
+  physical radio's current repeat setting. Stock firmware defaults repeat off
+  when the byte is omitted; this affects only pre-v9 clients.
+- `CMD_SET_DEVICE_PIN` and `CMD_FACTORY_RESET` are disabled: the proxy never
+  changes the physical radio's PIN or wipes its storage. Both reply
+  `RESP_CODE_DISABLED`; virtual reset is available from the app instead.
+- Duplicate direct text is acknowledged again but queued only once. Stock drops
+  the duplicate at the mesh layer without an ACK; re-ACKing keeps client
+  retries confirmable over lossy links.
+- `CMD_SET_ADVERT_NAME` requires a non-empty printable UTF-8 name and cuts
+  overlong input on a code-point boundary; stock stores arbitrary bytes.
+- `STATS_TYPE_CORE` `queue_len` reports the offline message queue length (not
+  stock's outbound packet queue), and `errors` reports virtual RX errors (not
+  the firmware error flags). Treat these as virtual diagnostics.
+- Stock sends direct text, control data, raw data, and traces directly over the
+  radio; the virtual companion wraps them in `SEND_RAW_PACKET`, whose frame is
+  limited to 176 bytes. Packets that exceed that budget are rejected with
+  `ERR_CODE_TABLE_FULL` before transmission. For a direct/flood message this
+  means roughly a 154-byte text ceiling, below stock's 160-byte protocol limit.
+
 ## Development and verification
 
 Flutter stable / Dart are expected on `PATH`.
@@ -120,7 +156,8 @@ package checks, then the full script before finishing.
 - `CMD_DEVICE_QUERY` reports `max_contacts / 2` in one byte. The server must
   clamp its reported contacts to the representable range.
 - `app_target_ver >= 3` selects the V3 direct/channel message response layout;
-  preserve the value sent by the client in `DEVICE_QUERY` / `APP_START`.
+  preserve the value sent by the client in `DEVICE_QUERY`. `APP_START` bytes
+  1-7 are reserved and must not override it.
 - `PUSH_CODE_LOG_RX_DATA (0x88)` has `[code][snr*4][rssi][raw on-air packet]`.
   Only the raw packet should be delivered to `MeshNode.process` logic.
 - The device identity is not the proxy identity. Do not expose it in `SELF_INFO`

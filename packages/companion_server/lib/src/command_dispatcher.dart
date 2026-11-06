@@ -68,7 +68,7 @@ class CompanionCommandDispatcher {
       return;
     }
     if (data.length < spec.minDataLength) {
-      host.sendErr(errCodeIllegalArg);
+      host.sendErr(spec.shortErrorCode);
       return;
     }
     try {
@@ -110,13 +110,17 @@ class CompanionCommandDispatcher {
   // -------------------------------------------------------------------------
 
   Map<int, CommandSpec> _buildCommandTable() => {
-        cmdDeviceQuery: CommandSpec(0, _cmdDeviceQuery),
-        cmdAppStart: CommandSpec(0, _cmdAppStart),
+        cmdDeviceQuery: CommandSpec(1, _cmdDeviceQuery,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdAppStart:
+            CommandSpec(7, _cmdAppStart, shortErrorCode: errCodeUnsupportedCmd),
         cmdGetDeviceTime: CommandSpec(0, (_) => _cmdGetDeviceTime()),
-        cmdSetDeviceTime: CommandSpec(4, _cmdSetDeviceTime),
+        cmdSetDeviceTime: CommandSpec(4, _cmdSetDeviceTime,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdGetBattAndStorage: CommandSpec(0, (_) => _cmdBattery()),
         cmdGetCustomVars: CommandSpec(0, (_) => _cmdCustomVars()),
-        cmdSetCustomVar: CommandSpec(3, _cmdSetCustomVar),
+        cmdSetCustomVar: CommandSpec(3, _cmdSetCustomVar,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdGetAutoAddConfig: CommandSpec(0, (_) => _cmdGetAutoAddConfig()),
         cmdSetAutoAddConfig: CommandSpec(1, _cmdSetAutoAddConfig),
         cmdSetOtherParams: CommandSpec(1, _cmdSetOtherParams),
@@ -128,49 +132,77 @@ class CompanionCommandDispatcher {
         cmdFactoryReset: CommandSpec(0, (_) => host.sendDisabled()),
         // Virtual identity import/export never touches the physical identity.
         cmdExportPrivateKey: CommandSpec(0, (_) => _cmdExportPrivateKey()),
-        cmdImportPrivateKey: CommandSpec(64, _cmdImportPrivateKey),
+        cmdImportPrivateKey: CommandSpec(64, _cmdImportPrivateKey,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdGetTuningParams: CommandSpec(0, (_) => _cmdGetTuningParams()),
         cmdSetTuningParams: CommandSpec(8, _cmdSetTuningParams),
-        cmdSetPathHashMode: CommandSpec(2, _cmdSetPathHashMode),
-        cmdRunCliCommand: CommandSpec(0, _cmdRunCliCommand),
+        cmdSetPathHashMode: CommandSpec(2, _cmdSetPathHashMode,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdRunCliCommand: CommandSpec(2, _cmdRunCliCommand,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdGetContacts: CommandSpec(0, _cmdGetContacts),
         cmdGetContactByKey: CommandSpec(pubKeySize, _cmdGetContactByKey),
-        cmdAddUpdateContact: CommandSpec(36, _cmdAddUpdateContact),
+        cmdAddUpdateContact: CommandSpec(35, _cmdAddUpdateContact,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdRemoveContact: CommandSpec(pubKeySize, _cmdRemoveContact),
-        cmdResetPath: CommandSpec(pubKeySize, _cmdResetPath),
-        cmdGetChannel: CommandSpec(0, _cmdGetChannel),
-        cmdSetChannel: CommandSpec(34, _cmdSetChannel),
+        cmdResetPath: CommandSpec(pubKeySize, _cmdResetPath,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdGetChannel: CommandSpec(1, _cmdGetChannel,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSetChannel: CommandSpec(49, _cmdSetChannel,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdSendSelfAdvert: CommandSpec(0, _cmdSendSelfAdvert),
-        cmdSetAdvertName: CommandSpec(1, _cmdSetAdvertName),
-        cmdSetAdvertLatLon: CommandSpec(8, _cmdSetAdvertLatLon),
-        cmdSendTxtMsg: CommandSpec(12, _cmdSendTxt),
-        cmdSendChannelTxtMsg: CommandSpec(6, _cmdSendChannelTxt),
+        cmdSetAdvertName: CommandSpec(1, _cmdSetAdvertName,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSetAdvertLatLon: CommandSpec(8, _cmdSetAdvertLatLon,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendTxtMsg:
+            CommandSpec(13, _cmdSendTxt, shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendChannelTxtMsg: CommandSpec(6, _cmdSendChannelTxt,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdSendChannelData: CommandSpec(4, _cmdSendChannelData),
-        cmdSendControlData: CommandSpec(1, _cmdSendControlData),
+        cmdSendControlData: CommandSpec(1, _cmdSendControlData,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdSyncNextMessage: CommandSpec(0, (_) => _cmdSyncNextMessage()),
         cmdSignStart: CommandSpec(0, (_) => _cmdSignStart()),
-        cmdSignData: CommandSpec(1, _cmdSignData),
+        cmdSignData:
+            CommandSpec(1, _cmdSignData, shortErrorCode: errCodeUnsupportedCmd),
         cmdSignFinish: CommandSpec(0, (_) => _cmdSignFinish()),
-        cmdGetStats: CommandSpec(0, _cmdGetStats),
+        cmdGetStats:
+            CommandSpec(1, _cmdGetStats, shortErrorCode: errCodeUnsupportedCmd),
         cmdGetAllowedRepeatFreq:
             CommandSpec(0, (_) => _cmdGetAllowedRepeatFreq()),
-        cmdGetAdvertPath: CommandSpec(1 + pubKeySize, _cmdGetAdvertPath),
+        cmdGetAdvertPath: CommandSpec(1 + pubKeySize, _cmdGetAdvertPath,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdExportContact: CommandSpec(0, _cmdExportContact),
-        cmdImportContact: CommandSpec(1, _cmdImportContact),
+        cmdImportContact: CommandSpec(98, _cmdImportContact,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdShareContact: CommandSpec(pubKeySize, _cmdShareContact),
-        cmdSendBinaryReq: CommandSpec(pubKeySize + 1, _cmdSendBinaryReq),
-        cmdSendAnonReq: CommandSpec(pubKeySize + 1, _cmdSendAnonReq),
-        cmdSendTelemetryReq: CommandSpec(3, _cmdSendTelemetryReq),
-        cmdSendTracePath: CommandSpec(10, _cmdSendTracePath),
-        cmdSendPathDiscoveryReq:
-            CommandSpec(1 + pubKeySize, _cmdSendPathDiscoveryReq),
-        cmdSendLogin: CommandSpec(pubKeySize, _cmdSendLogin),
-        cmdSendStatusReq: CommandSpec(pubKeySize, _cmdSendStatusReq),
-        cmdSendRawData: CommandSpec(1, _cmdSendRawData),
-        cmdSendRawPacket: CommandSpec(3, _cmdSendRawPacket),
-        cmdLogout: CommandSpec(pubKeySize, _cmdLogout),
-        cmdHasConnection: CommandSpec(pubKeySize, _cmdHasConnection),
-        cmdSetFloodScope: CommandSpec(1, _cmdSetFloodScope),
+        cmdSendBinaryReq: CommandSpec(pubKeySize + 1, _cmdSendBinaryReq,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendAnonReq: CommandSpec(pubKeySize + 1, _cmdSendAnonReq,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendTelemetryReq: CommandSpec(3, _cmdSendTelemetryReq,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendTracePath: CommandSpec(10, _cmdSendTracePath,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendPathDiscoveryReq: CommandSpec(
+            1 + pubKeySize, _cmdSendPathDiscoveryReq,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendLogin: CommandSpec(pubKeySize, _cmdSendLogin,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendStatusReq: CommandSpec(pubKeySize, _cmdSendStatusReq,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendRawData: CommandSpec(5, _cmdSendRawData,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSendRawPacket: CommandSpec(3, _cmdSendRawPacket,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdLogout: CommandSpec(pubKeySize, _cmdLogout,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdHasConnection: CommandSpec(pubKeySize, _cmdHasConnection,
+            shortErrorCode: errCodeUnsupportedCmd),
+        cmdSetFloodScope: CommandSpec(1, _cmdSetFloodScope,
+            shortErrorCode: errCodeUnsupportedCmd),
         cmdSetDefaultFloodScope: CommandSpec(0, _cmdSetDefaultFloodScope),
         cmdGetDefaultFloodScope:
             CommandSpec(0, (_) => _cmdGetDefaultFloodScope()),
@@ -201,9 +233,10 @@ class CompanionCommandDispatcher {
   }
 
   void _cmdAppStart(Uint8List data) {
-    if (data.isNotEmpty) {
-      host.metrics.appTargetVersionReceived(data[0]);
-    }
+    // APP_START bytes 1-7 are reserved and ignored by stock firmware. The
+    // protocol version comes from DEVICE_QUERY; reading data[0] here would let
+    // a spec-compliant reserved zero override it and force the pre-V3 message
+    // layout.
     final prefs = host.bridge.getSelfInfo();
     final pubkey = host.bridge.getPublicKey();
     final w = BufferWriter()
@@ -351,7 +384,7 @@ class CompanionCommandDispatcher {
 
   Future<void> _cmdSetPathHashMode(Uint8List data) async {
     // [cmd][reserved=0][mode]
-    if (data[0] != 0) return host.sendErr(errCodeIllegalArg);
+    if (data[0] != 0) return host.sendErr(errCodeUnsupportedCmd);
     final mode = data[1];
     if (!isValidPathHashMode(mode)) return host.sendErr(errCodeIllegalArg);
     await host.bridge.setPathHashMode(mode);
@@ -375,7 +408,7 @@ class CompanionCommandDispatcher {
       respCodeCliReply,
       ...truncateUtf8Bytes(
         utf8.encode(text),
-        maxCompanionPayloadSize - 1,
+        maxCliReplyLength,
       ),
     ]));
   }
@@ -389,7 +422,7 @@ class CompanionCommandDispatcher {
     final contacts = host.bridge.getContacts(since: since);
     final start = BufferWriter()
       ..writeByte(respCodeContactsStart)
-      ..writeUInt32Le(contacts.length);
+      ..writeUInt32Le(host.bridge.contactCount);
     host.sendFrame(start.toBytes());
     var mostRecent = 0;
     for (final c in contacts) {
@@ -437,16 +470,8 @@ class CompanionCommandDispatcher {
   // -------------------------------------------------------------------------
 
   void _cmdGetChannel(Uint8List data) {
-    final fullList = data.isEmpty;
-    final max = host.bridge.maxChannels;
-    if (fullList) {
-      for (var i = 0; i < max; i++) {
-        host.sendFrame(_channelFrame(i, host.bridge.getChannel(i)));
-      }
-      if (max == 0) host.sendFrame(_channelFrame(0, null));
-      return;
-    }
     final idx = data[0];
+    final max = host.bridge.maxChannels;
     if (idx >= max) return host.sendErr(errCodeNotFound);
     host.sendFrame(_channelFrame(idx, host.bridge.getChannel(idx)));
   }
@@ -468,15 +493,15 @@ class CompanionCommandDispatcher {
   Future<void> _cmdSetChannel(Uint8List data) async {
     final idx = data[0];
     final nameRaw = data.sublist(1, 33);
-    final name = String.fromCharCodes(nameRaw.takeWhile((b) => b != 0)).trim();
-    Uint8List secret;
+    // Stock's strncpy caps the field at 31 bytes plus a NUL terminator.
+    final name = String.fromCharCodes(
+        nameRaw.takeWhile((b) => b != 0).take(maxNameSize - 1));
     if (data.length >= 65) {
-      secret = data.sublist(33, 65);
-    } else if (data.length >= 49) {
-      secret = data.sublist(33, 49);
-    } else {
-      return host.sendErr(errCodeIllegalArg);
+      // Stock 1.18 firmware rejects the 32-byte variant. Only 16-byte secrets
+      // can round-trip because CHANNEL_INFO has a fixed 16-byte secret field.
+      return host.sendErr(errCodeUnsupportedCmd);
     }
+    final secret = data.sublist(33, 49);
     await host.bridge.setChannel(idx, name, Uint8List.fromList(secret));
     host.sendOk();
   }
@@ -490,7 +515,7 @@ class CompanionCommandDispatcher {
     // zero-hop.
     final flood = data.isNotEmpty && data[0] == 1;
     final ok = await host.bridge.advertise(flood: flood);
-    ok ? host.sendOk() : host.sendErr(errCodeBadState);
+    ok ? host.sendOk() : host.sendErr(errCodeTableFull);
   }
 
   Future<void> _cmdSetAdvertName(Uint8List data) async {
@@ -527,6 +552,11 @@ class CompanionCommandDispatcher {
     final text = r.readCString();
     final contact = host.bridge.getContactByKeyPrefix(prefix);
     if (contact == null) return host.sendErr(errCodeNotFound);
+    if (txtType != txtTypePlain &&
+        txtType != txtTypeCliData &&
+        txtType != txtTypeCliCommand) {
+      return host.sendErr(errCodeUnsupportedCmd);
+    }
     final result = await host.bridge.sendTextMessage(
       contact.publicKey,
       text,
@@ -536,7 +566,7 @@ class CompanionCommandDispatcher {
       attempt: attempt,
       timestamp: timestamp,
     );
-    if (!result.success) return host.sendErr(errCodeBadState);
+    if (!result.success) return host.sendErr(errCodeTableFull);
     host.sendFrame(encodeSent(result, defaultTimeoutMs: 5000));
   }
 
@@ -544,7 +574,7 @@ class CompanionCommandDispatcher {
     final r = BufferReader(data);
     final txtType = r.readByte();
     final channelIdx = r.readByte();
-    r.skipBytes(4); // timestamp
+    final timestamp = r.readUInt32Le();
     final text = r.readCString();
     if (txtType != txtTypePlain) {
       return host.sendErr(errCodeUnsupportedCmd);
@@ -552,9 +582,16 @@ class CompanionCommandDispatcher {
     if (host.bridge.getChannel(channelIdx) == null) {
       return host.sendErr(errCodeNotFound);
     }
+    final ok = await host.bridge.sendChannelMessage(
+      channelIdx,
+      text,
+      timestamp: timestamp,
+    );
+    if (!ok) {
+      host.log('channel message send failed for channel $channelIdx');
+      return host.sendErr(errCodeNotFound);
+    }
     host.sendOk();
-    final ok = await host.bridge.sendChannelMessage(channelIdx, text);
-    if (!ok) host.log('channel message send failed for channel $channelIdx');
   }
 
   Future<void> _cmdSendChannelData(Uint8List data) async {
@@ -574,6 +611,10 @@ class CompanionCommandDispatcher {
     if (r.remaining < 2) return host.sendErr(errCodeIllegalArg);
     final dataType = r.readUInt16Le();
     final payload = r.readRemainingBytes();
+    // Stock checks the channel before the data type/payload limits.
+    if (host.bridge.getChannel(channelIdx) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     if (dataType == dataTypeReserved) return host.sendErr(errCodeIllegalArg);
     // The radio-side group-data limit is 165; the 167-byte channel-data limit
     // applies only to CHANNEL_DATA_RECV pushes. The whole command must also fit
@@ -581,13 +622,6 @@ class CompanionCommandDispatcher {
     if (payload.length > maxGroupDataLength ||
         payload.length > maxGroupDataLengthForCompanionPath(pathBytes.length)) {
       return host.sendErr(errCodeIllegalArg);
-    }
-    final commandLength = 5 + pathBytes.length + payload.length;
-    if (commandLength > maxCompanionPayloadSize) {
-      return host.sendErr(errCodeIllegalArg);
-    }
-    if (host.bridge.getChannel(channelIdx) == null) {
-      return host.sendErr(errCodeNotFound);
     }
     final ok = await host.bridge.sendChannelData(
       channelIdx,
@@ -602,7 +636,7 @@ class CompanionCommandDispatcher {
   Future<void> _cmdSendControlData(Uint8List data) async {
     // The first control byte must set the 0x80 bit (control-data marker).
     if ((data[0] & 0x80) == 0) {
-      return host.sendErr(errCodeIllegalArg);
+      return host.sendErr(errCodeUnsupportedCmd);
     }
     final ok = await host.bridge.sendControlData(data);
     ok ? host.sendOk() : host.sendErr(errCodeTableFull);
@@ -672,7 +706,7 @@ class CompanionCommandDispatcher {
   }
 
   Future<void> _cmdGetStats(Uint8List data) async {
-    final statsType = data.isEmpty ? statsTypePackets : data[0];
+    final statsType = data[0];
     if (statsType != statsTypeCore &&
         statsType != statsTypeRadio &&
         statsType != statsTypePackets) {
@@ -738,15 +772,21 @@ class CompanionCommandDispatcher {
 
   Future<void> _cmdShareContact(Uint8List data) async {
     final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    if (host.bridge.getContactByKey(pubkey) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     final ok = await host.bridge.shareContact(pubkey);
-    ok ? host.sendOk() : host.sendErr(errCodeNotFound);
+    ok ? host.sendOk() : host.sendErr(errCodeTableFull);
   }
 
   Future<void> _cmdSendBinaryReq(Uint8List data) async {
     final pubkey = data.sublist(0, pubKeySize);
     final reqData = data.sublist(pubKeySize);
+    if (host.bridge.getContactByKey(pubkey) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     final result = await host.bridge.sendBinaryReq(pubkey, reqData);
-    if (!result.success) return host.sendErr(errCodeNotFound);
+    if (!result.success) return host.sendErr(errCodeTableFull);
     _sendSent(result);
   }
 
@@ -755,7 +795,7 @@ class CompanionCommandDispatcher {
     final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
     final reqData = Uint8List.fromList(data.sublist(pubKeySize));
     final result = await host.bridge.sendAnonReq(pubkey, reqData);
-    if (!result.success) return host.sendErr(errCodeNotFound);
+    if (!result.success) return host.sendErr(errCodeTableFull);
     _sendSent(result);
   }
 
@@ -774,10 +814,15 @@ class CompanionCommandDispatcher {
       ]));
       return;
     }
-    if (data.length < 3 + pubKeySize) return host.sendErr(errCodeIllegalArg);
+    if (data.length < 3 + pubKeySize) {
+      return host.sendErr(errCodeUnsupportedCmd);
+    }
     final pubkey = Uint8List.fromList(data.sublist(3, 3 + pubKeySize));
+    if (host.bridge.getContactByKey(pubkey) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     final result = await host.bridge.sendTelemetryRequest(pubkey);
-    if (!result.success) return host.sendErr(errCodeNotFound);
+    if (!result.success) return host.sendErr(errCodeTableFull);
     // The telemetry payload itself arrives later via PUSH_CODE_TELEMETRY_RESPONSE.
     _sendSent(result);
   }
@@ -813,25 +858,24 @@ class CompanionCommandDispatcher {
     if (trace == null || !trace.hasValidPath) {
       return host.sendErr(errCodeIllegalArg);
     }
-    final ok = await host.bridge
+    final result = await host.bridge
         .sendTracePathRaw(trace.tag, trace.authCode, trace.flags, trace.path);
-    if (!ok) return host.sendErr(errCodeTableFull);
-    final timeout = 5000 + trace.path.length * 200;
-    host.sendFrame(encodeSentValues(
-      isFlood: false,
-      expectedAck: trace.tag,
-      timeoutMs: timeout,
-    ));
+    if (!result.success) return host.sendErr(errCodeTableFull);
+    _sendSent(result);
   }
 
   Future<void> _cmdSendPathDiscoveryReq(Uint8List data) async {
-    // data = [request-index(0)] + pubkey(32); the index must be 0.
+    // data = [request-index(0)] + pubkey(32); stock only enters the branch
+    // when the index is zero and otherwise answers unsupported.
     if (data[0] != 0) {
-      return host.sendErr(errCodeIllegalArg);
+      return host.sendErr(errCodeUnsupportedCmd);
     }
     final pubkey = Uint8List.fromList(data.sublist(1, 1 + pubKeySize));
+    if (host.bridge.getContactByKey(pubkey) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     final result = await host.bridge.sendPathDiscoveryReq(pubkey);
-    if (!result.success) return host.sendErr(errCodeNotFound);
+    if (!result.success) return host.sendErr(errCodeTableFull);
     _sendSent(result);
   }
 
@@ -839,15 +883,29 @@ class CompanionCommandDispatcher {
     final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
     final password =
         String.fromCharCodes(data.sublist(pubKeySize).takeWhile((b) => b != 0));
+    if (host.bridge.getContactByKey(pubkey) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     final result = await host.bridge.sendLogin(pubkey, password);
-    if (!result.success) return host.sendErr(errCodeNotFound);
-    _sendSent(result);
+    if (!result.success) return host.sendErr(errCodeTableFull);
+    // Stock writes the first four public-key bytes into the SENT tag field for
+    // login, unlike the tag used by other request commands.
+    final tag =
+        pubkey[0] | (pubkey[1] << 8) | (pubkey[2] << 16) | (pubkey[3] << 24);
+    host.sendFrame(encodeSentValues(
+      isFlood: result.isFlood,
+      expectedAck: tag,
+      timeoutMs: result.timeoutMs ?? 15000,
+    ));
   }
 
   Future<void> _cmdSendStatusReq(Uint8List data) async {
     final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
+    if (host.bridge.getContactByKey(pubkey) == null) {
+      return host.sendErr(errCodeNotFound);
+    }
     final result = await host.bridge.sendStatusReq(pubkey);
-    if (!result.success) return host.sendErr(errCodeNotFound);
+    if (!result.success) return host.sendErr(errCodeTableFull);
     _sendSent(result);
   }
 
@@ -877,7 +935,7 @@ class CompanionCommandDispatcher {
         host.bridge.setFloodUnscoped();
         host.sendOk();
       default:
-        host.sendErr(errCodeIllegalArg);
+        host.sendErr(errCodeUnsupportedCmd);
     }
   }
 
@@ -917,9 +975,11 @@ class CompanionCommandDispatcher {
   }
 
   Future<void> _cmdReboot(Uint8List data) async {
-    // Exact magic only; extra bytes are not a reboot alias.
-    if (data.length != 6 || String.fromCharCodes(data) != 'reboot') {
-      return host.sendErr(errCodeIllegalArg);
+    // Stock matches the six-byte magic and ignores trailing bytes; anything
+    // else falls through to the unsupported-command reply.
+    if (data.length < 6 ||
+        String.fromCharCodes(data.sublist(0, 6)) != 'reboot') {
+      return host.sendErr(errCodeUnsupportedCmd);
     }
     await host.bridge.reboot();
     _signBuffer.clear();

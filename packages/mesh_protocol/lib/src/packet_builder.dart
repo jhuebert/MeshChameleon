@@ -210,6 +210,11 @@ class PacketBuilder {
       ..writeByte(flagsByte)
       ..writeString(message)
       ..writeByte(0);
+    if (attempt > 3) {
+      // Stock appends a zero byte after the text NUL, then the full attempt
+      // number, so retries beyond 3 keep a unique packet hash.
+      plaintext.writeByte(attempt & 0xFF);
+    }
 
     final secret = await identity.sharedSecret(contact.publicKey);
     final aesKey = secret.sublist(0, 16);
@@ -239,19 +244,33 @@ class PacketBuilder {
   }
 
   /// Build an encrypted group/channel text message.
+  ///
+  /// [maxContentLength] caps the `"<sender>: <message>"` content. The default
+  /// matches the firmware's `MAX_TEXT_LEN`; a stock companion raw frame needs
+  /// [maxGroupTextContentOverCompanion].
   static Packet createGroupText({
     required Channel channel,
     required String message,
     required String senderName,
     required int timestamp,
+    int maxContentLength = maxTextLength,
   }) {
     final (:secret, :hash) = _channelKey(channel);
     final ts = timestamp;
-    final content = '$senderName: $message';
+    final prefix = utf8.encode('$senderName: ');
+    final available =
+        (maxContentLength - prefix.length).clamp(0, maxContentLength);
+    final messageBytes = utf8.encode(message);
+    final content = [
+      ...prefix,
+      ...(messageBytes.length <= available
+          ? messageBytes
+          : messageBytes.sublist(0, available)),
+    ];
     final plaintext = BufferWriter()
       ..writeUInt32Le(ts)
       ..writeByte(0x00)
-      ..writeString(content);
+      ..writeBytes(content);
     final cipher = CryptoUtils.encryptThenMac(
       secret.sublist(0, 16),
       secret,

@@ -36,11 +36,11 @@ void main() {
       expect(decodeAdvertNameBytes([...utf8.encode('node'), 0]), 'node');
     });
 
-    test('rejects empty, overlong, and embedded NUL input', () {
+    test('truncates overlong input and stops at an embedded NUL', () {
       expect(decodeAdvertNameBytes(const []), isNull);
       expect(decodeAdvertNameBytes([0]), isNull);
-      expect(decodeAdvertNameBytes(List.filled(32, 0x61)), isNull);
-      expect(decodeAdvertNameBytes([0x61, 0, 0x62, 0]), isNull);
+      expect(decodeAdvertNameBytes(List.filled(32, 0x61)), 'a' * 31);
+      expect(decodeAdvertNameBytes([0x61, 0, 0x62, 0]), 'a');
     });
 
     test('rejects malformed UTF-8 and control characters', () {

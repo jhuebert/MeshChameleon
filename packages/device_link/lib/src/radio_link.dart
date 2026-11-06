@@ -72,14 +72,15 @@ class DeviceFrames {
   static Uint8List deviceQuery({int appVersion = appProtocolVersion}) =>
       Uint8List.fromList([cmdDeviceQuery, appVersion]);
 
-  static Uint8List appStart({
-    int appVersion = appProtocolVersion,
-    String appName = 'MeshCoreProxy',
-  }) {
+  /// `APP_START`: seven reserved bytes, then the app name.
+  ///
+  /// The protocol version is supplied by `DEVICE_QUERY`; stock firmware ignores
+  /// these reserved bytes.
+  static Uint8List appStart({String appName = 'MeshCoreProxy'}) {
     final nameBytes = BufferWriter()..writeString(appName);
     return Uint8List.fromList([
       cmdAppStart,
-      appVersion,
+      0,
       0,
       0,
       0,

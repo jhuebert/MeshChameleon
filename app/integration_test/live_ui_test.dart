@@ -57,7 +57,7 @@ class _Client extends support.FramedClient {
         respCodeDeviceInfo);
     send([
       cmdAppStart,
-      appProtocolVersion,
+      0,
       0,
       0,
       0,

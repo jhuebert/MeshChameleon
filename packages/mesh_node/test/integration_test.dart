@@ -158,7 +158,7 @@ void main() {
       client.send([cmdDeviceQuery, appProtocolVersion]);
       expect((await client.next())[0], respCodeDeviceInfo);
 
-      client.send([cmdAppStart, appProtocolVersion]);
+      client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       final selfInfo = await client.next();
       expect(selfInfo[0], respCodeSelfInfo);
       expect(selfInfo.sublist(4, 36), aliceId.publicKey);
@@ -509,7 +509,7 @@ void main() {
       expect(info[80], 1, reason: 'physical repeat byte');
       expect(info[81], 0, reason: 'virtual path mode');
 
-      final start = await command([cmdAppStart, appProtocolVersion]);
+      final start = await command([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       expect(start[0], respCodeSelfInfo);
       expect(start.sublist(4, 36), aliceId.publicKey);
       expect(start[2], 0xFD, reason: 'signed -3 dBm TX power byte');
@@ -531,7 +531,7 @@ void main() {
       final autoAdd = await command([cmdSetAutoAddConfig, 0x06, 2]);
       expect(autoAdd[0], respCodeOk);
       expect(await command([cmdGetAutoAddConfig]), [25, 0x06, 2]);
-      final startedAgain = await command([cmdAppStart, appProtocolVersion]);
+      final startedAgain = await command([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       final prefsReader = BufferReader(startedAgain)..skipBytes(4 + 32 + 8);
       prefsReader.skipBytes(4);
       expect(prefsReader.readUInt32Le(), 869525);
@@ -649,7 +649,7 @@ void main() {
       final remoteReply = await bob.syncNextMessage();
       expect(remoteReply?.txtType, txtTypeCliData);
       expect(remoteReply?.text, 'AB|OK');
-      final afterRemote = await command([cmdAppStart, appProtocolVersion]);
+      final afterRemote = await command([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       expect(
         String.fromCharCodes(afterRemote.sublist(58).takeWhile((b) => b != 0)),
         'T16 Remote',
@@ -755,7 +755,7 @@ void main() {
       );
       final replacedInfo = await command([cmdDeviceQuery, appProtocolVersion]);
       expect(replacedInfo[1], targetFirmwareVerCode);
-      final replacedSelf = await command([cmdAppStart, appProtocolVersion]);
+      final replacedSelf = await command([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       expect(replacedSelf.sublist(4, 36), replacement.publicKey);
       expect(alice.getPublicKey(), replacement.publicKey);
       // Virtual state survives the identity switch.

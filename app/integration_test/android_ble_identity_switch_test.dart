@@ -107,7 +107,7 @@ void main() {
     try {
       firstClient.send([cmdDeviceQuery, appProtocolVersion]);
       await firstClient.next(timeout: const Duration(seconds: 20));
-      firstClient.send([cmdAppStart, appProtocolVersion]);
+      firstClient.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       final self = await firstClient.next(timeout: const Duration(seconds: 20));
       expect(self.sublist(4, 36), hexToBytes(firstKey));
     } finally {
@@ -122,7 +122,7 @@ void main() {
     try {
       secondClient.send([cmdDeviceQuery, appProtocolVersion]);
       await secondClient.next(timeout: const Duration(seconds: 20));
-      secondClient.send([cmdAppStart, appProtocolVersion]);
+      secondClient.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
       final self =
           await secondClient.next(timeout: const Duration(seconds: 20));
       expect(self.sublist(4, 36), secondKey);

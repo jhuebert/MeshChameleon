@@ -24,6 +24,12 @@ void main() {
     expect(bridge, isA<LifecycleHost>());
   });
 
+  test('the default contact host is empty', () {
+    expect(bridge.getContacts(), isEmpty);
+    expect(bridge.contactCount, 0);
+    expect(bridge.getContactByKey(Uint8List(32)), isNull);
+  });
+
   test('push sink can be attached and cleared', () {
     expect(bridge.pushSink, isNull);
     final sink = NoopCompanionPushSink();

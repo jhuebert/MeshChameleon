@@ -254,6 +254,9 @@ class CompanionBridge
   List<Contact> getContacts({int since = 0}) => const [];
 
   @override
+  int get contactCount => 0;
+
+  @override
   Contact? getContactByKey(Uint8List pubkey) => null;
 
   /// Persistent-contact lookup for client listing/export commands; transient
@@ -297,7 +300,11 @@ class CompanionBridge
       _unsupported('sendTextMessage');
 
   @override
-  Future<bool> sendChannelMessage(int channelIndex, String text) async =>
+  Future<bool> sendChannelMessage(
+    int channelIndex,
+    String text, {
+    int? timestamp,
+  }) async =>
       _unsupported('sendChannelMessage');
 
   /// Send a binary group-data packet on [channelIndex]. When [path] is given the
@@ -469,7 +476,7 @@ class CompanionBridge
       _unsupported('sendTelemetryRequest');
 
   @override
-  Future<bool> sendTracePathRaw(
+  Future<SentResult> sendTracePathRaw(
     int tag,
     int authCode,
     int flags,

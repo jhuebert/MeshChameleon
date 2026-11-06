@@ -195,6 +195,9 @@ class ContactTable {
       ];
 
   /// Register a transient zero-hop contact for [pubkey] if one doesn't exist.
+  ///
+  /// Stock keeps eight reserved anon slots and reuses the oldest one by
+  /// `lastmod`, so an anon request never fails for capacity.
   Contact ensureAnon(Uint8List pubkey) {
     final hex = bytesToHex(pubkey);
     for (final c in _transient) {
@@ -203,6 +206,8 @@ class ContactTable {
     final contact = Contact(
       publicKey: Uint8List.fromList(pubkey),
       advType: advTypeNone,
+      // Stock defaults an unknown anon-request target to zero-hop direct.
+      outPathLen: 0,
       lastmod: clock.wallSeconds,
     );
     if (_transient.length < maxTransientContacts) {

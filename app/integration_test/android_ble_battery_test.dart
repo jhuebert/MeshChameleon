@@ -61,7 +61,7 @@ Future<Uint8List> _batteryFrame(int port) async {
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     await client.next();
     client.send([cmdGetBattAndStorage]);
     final frame = await client.next();

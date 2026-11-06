@@ -369,6 +369,7 @@ void main() {
         pathLen: 7,
         snr: 3.5,
         rssi: -80,
+        isChannelData: true,
         channelDataType: 0x1234,
         channelDataPayload: Uint8List.fromList([1, 2, 3]),
       );

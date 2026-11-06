@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:companion_server/companion_server.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'ack_tracker.dart';
@@ -90,6 +91,11 @@ class MessageSender {
     final generation = deps.identityGeneration();
     final contact = contacts.findByKey(pubkey);
     if (contact == null) return const SentResult.failure();
+    final textLength = utf8.encode(text).length;
+    if (textLength > maxTextLength ||
+        (attempt > 3 && textLength > maxTextLength - 2)) {
+      return const SentResult.failure();
+    }
     final isCli = txtType == txtTypeCliData || txtType == txtTypeCliCommand;
     // Stock firmware uses the app-supplied timestamp for normal messages so the
     // client's precomputed ACK hash matches. CLI sends use the node RTC.
@@ -129,6 +135,10 @@ class MessageSender {
         scoped: true,
         identityGeneration: generation,
       );
+    } on CompanionOperationError catch (e) {
+      if (pending != null) acks.cancel(pending);
+      if (e.code == errCodeTableFull) return const SentResult.failure();
+      rethrow;
     } catch (_) {
       if (pending != null) acks.cancel(pending);
       rethrow;
@@ -153,7 +163,11 @@ class MessageSender {
     );
   }
 
-  Future<bool> sendChannelMessage(int channelIndex, String text) async {
+  Future<bool> sendChannelMessage(
+    int channelIndex,
+    String text, {
+    int? timestamp,
+  }) async {
     if (deps.isBlocked()) return false;
     final generation = deps.identityGeneration();
     final channel = channels[channelIndex];
@@ -162,7 +176,8 @@ class MessageSender {
       channel: channel,
       message: text,
       senderName: prefs.nodeName,
-      timestamp: requests.nextTimestamp(),
+      timestamp: timestamp ?? requests.nextTimestamp(),
+      maxContentLength: maxGroupTextContentOverCompanion,
     );
     deduper.noteSentGroup(packet.calculatePacketHash());
     await deps.transmit(
@@ -229,6 +244,10 @@ class MessageSender {
     return !deps.isBlocked();
   }
 
+  int _requestTimeout(Packet packet, bool flood, {required int fallback}) =>
+      deps.transport.sendTimeoutMillisFor(packet, flood: flood, scoped: true) ??
+      fallback;
+
   Future<SentResult> sendBinaryReq(Uint8List pubkey, Uint8List data) async {
     if (deps.isBlocked()) return const SentResult.failure();
     deps.ensureNotBlockedPeer(pubkey);
@@ -247,7 +266,12 @@ class MessageSender {
     final flood = !contact.hasDirectRoute;
     requests.registerBinary(tag, pubkey);
     try {
-      await deps.transmit(packet, flood: flood, identityGeneration: generation);
+      await deps.transmit(
+        packet,
+        flood: flood,
+        scoped: true,
+        identityGeneration: generation,
+      );
     } catch (_) {
       requests.removeBinary(tag);
       rethrow;
@@ -257,7 +281,11 @@ class MessageSender {
       return const SentResult.failure();
     }
     return SentResult(
-        success: true, isFlood: flood, expectedAck: tag, timeoutMs: 10000);
+      success: true,
+      isFlood: flood,
+      expectedAck: tag,
+      timeoutMs: _requestTimeout(packet, flood, fallback: 10000),
+    );
   }
 
   Future<SentResult> sendAnonReq(Uint8List pubkey, Uint8List data) async {
@@ -281,7 +309,12 @@ class MessageSender {
     if (!deps.isCurrent(generation)) return const SentResult.failure();
     requests.registerBinary(tag, pubkey);
     try {
-      await deps.transmit(packet, flood: flood, identityGeneration: generation);
+      await deps.transmit(
+        packet,
+        flood: flood,
+        scoped: true,
+        identityGeneration: generation,
+      );
     } catch (_) {
       requests.removeBinary(tag);
       rethrow;
@@ -291,7 +324,11 @@ class MessageSender {
       return const SentResult.failure();
     }
     return SentResult(
-        success: true, isFlood: flood, expectedAck: tag, timeoutMs: 10000);
+      success: true,
+      isFlood: flood,
+      expectedAck: tag,
+      timeoutMs: _requestTimeout(packet, flood, fallback: 10000),
+    );
   }
 
   /// Register a transient zero-hop contact for [pubkey] if one doesn't exist.
@@ -326,7 +363,12 @@ class MessageSender {
     if (!deps.isCurrent(generation)) return const SentResult.failure();
     requests.registerDiscovery(tag, pubkey);
     try {
-      await deps.transmit(packet, flood: true, identityGeneration: generation);
+      await deps.transmit(
+        packet,
+        flood: true,
+        scoped: true,
+        identityGeneration: generation,
+      );
     } catch (_) {
       requests.removeDiscovery(tag);
       rethrow;
@@ -339,7 +381,7 @@ class MessageSender {
       success: true,
       isFlood: true,
       expectedAck: tag,
-      timeoutMs: 15000,
+      timeoutMs: _requestTimeout(packet, true, fallback: 15000),
     );
   }
 
@@ -362,18 +404,30 @@ class MessageSender {
     if (!wantLocation) inverse |= telemPermLocation;
     if (!wantEnvironment) inverse |= telemPermEnvironment;
     final flood = !contact.hasDirectRoute;
+    final rng = Random.secure();
     final packet = await PacketBuilder.createProtocolRequest(
       contact: contact,
       identity: identity,
       protocolCode: reqTypeGetTelemetryData,
-      data: [inverse & 0xFF],
+      data: [
+        inverse & 0xFF,
+        0,
+        0,
+        0,
+        ...List<int>.generate(4, (_) => rng.nextInt(256)),
+      ],
       timestamp: tag,
       flood: flood,
     );
     if (!deps.isCurrent(generation)) return const SentResult.failure();
     requests.registerTelemetry(tag, pubkey);
     try {
-      await deps.transmit(packet, flood: flood, identityGeneration: generation);
+      await deps.transmit(
+        packet,
+        flood: flood,
+        scoped: true,
+        identityGeneration: generation,
+      );
     } catch (_) {
       requests.removeTelemetry(tag);
       rethrow;
@@ -386,17 +440,17 @@ class MessageSender {
       success: true,
       isFlood: flood,
       expectedAck: tag,
-      timeoutMs: 10000,
+      timeoutMs: _requestTimeout(packet, flood, fallback: 10000),
     );
   }
 
-  Future<bool> sendTracePathRaw(
+  Future<SentResult> sendTracePathRaw(
     int tag,
     int authCode,
     int flags,
     Uint8List pathBytes,
   ) async {
-    if (deps.isBlocked()) return false;
+    if (deps.isBlocked()) return const SentResult.failure();
     final generation = deps.identityGeneration();
     final packet = PacketBuilder.createTrace(
       tag: tag,
@@ -405,7 +459,16 @@ class MessageSender {
       path: pathBytes,
     );
     await deps.transmit(packet, flood: false, identityGeneration: generation);
-    return deps.isCurrent(generation);
+    if (!deps.isCurrent(generation)) return const SentResult.failure();
+    final pathSz = flags & 0x03;
+    final hashCount = pathBytes.length >> pathSz;
+    final airtimeMs = deps.transport.airtimeMicrosFor(packet.rawLength) ~/ 1000;
+    return SentResult(
+      success: true,
+      isFlood: false,
+      expectedAck: tag,
+      timeoutMs: 500 + ((airtimeMs * 6 + 250) * (hashCount + 1)),
+    );
   }
 
   Future<bool> sendRawData(
@@ -428,7 +491,10 @@ class MessageSender {
     if (deps.isBlocked()) return false;
     final generation = deps.identityGeneration();
     // Transmitted verbatim; route type and path come from the packet itself.
-    await deps.transmit(
+    // Unlike semantic sends, stock does not mark raw client packets as seen
+    // (`CMD_SEND_RAW_PACKET` calls `Dispatcher::sendPacket` directly), so skip
+    // the node-level dedup marking and let a repeater echo be processed.
+    await deps.transport.transmit(
       packet,
       flood: packet.isRouteFlood,
       preservePath: true,
@@ -465,7 +531,12 @@ class MessageSender {
     if (!deps.isCurrent(generation)) return const SentResult.failure();
     requests.setPendingLogin(Uint8List.fromList(pubkey.sublist(0, keyPrefix4)));
     try {
-      await deps.transmit(packet, flood: flood, identityGeneration: generation);
+      await deps.transmit(
+        packet,
+        flood: flood,
+        scoped: true,
+        identityGeneration: generation,
+      );
     } catch (_) {
       requests.clearPendingLogin();
       rethrow;
@@ -478,7 +549,7 @@ class MessageSender {
       success: true,
       isFlood: flood,
       expectedAck: tag,
-      timeoutMs: 15000,
+      timeoutMs: _requestTimeout(packet, flood, fallback: 15000),
     );
   }
 
@@ -510,7 +581,12 @@ class MessageSender {
     requests
         .setPendingStatus(Uint8List.fromList(pubkey.sublist(0, keyPrefix4)));
     try {
-      await deps.transmit(packet, flood: flood, identityGeneration: generation);
+      await deps.transmit(
+        packet,
+        flood: flood,
+        scoped: true,
+        identityGeneration: generation,
+      );
     } catch (_) {
       requests.clearPendingStatus();
       rethrow;
@@ -523,7 +599,7 @@ class MessageSender {
       success: true,
       isFlood: flood,
       expectedAck: tag,
-      timeoutMs: 15000,
+      timeoutMs: _requestTimeout(packet, flood, fallback: 15000),
     );
   }
 }

@@ -18,9 +18,15 @@ class MessageQueue {
 
   int get channelCount => _messages.where((m) => m.isChannel).length;
 
+  /// Replace the queue, keeping at most [maxQueueSize] messages.
+  ///
+  /// Older state files may exceed the current stock-sized cap. The released
+  /// queue dropped the oldest message on overflow, so keep the newest entries.
   void replace(Iterable<QueuedMessage> messages) {
     _messages
       ..clear()
       ..addAll(messages);
+    final overflow = _messages.length - maxQueueSize;
+    if (overflow > 0) _messages.removeRange(0, overflow);
   }
 }

@@ -159,7 +159,7 @@ class HilConnection {
     deviceInfo = TcpDeviceInfoParser.parse(info.payload);
     final self = await request([
       cmdAppStart,
-      appVersion,
+      0,
       0,
       0,
       0,

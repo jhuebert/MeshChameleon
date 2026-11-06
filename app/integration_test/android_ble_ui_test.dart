@@ -74,7 +74,7 @@ Future<void> _handshake(int port) async {
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     expect((await client.next())[0], respCodeDeviceInfo);
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     expect((await client.next())[0], respCodeSelfInfo);
   } finally {
     await client.close();
@@ -88,7 +88,7 @@ Future<String> _cli(int port, String command) async {
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     await client.next();
     client.send([cmdRunCliCommand, ...utf8.encode(command)]);
     final frame = await client.next();

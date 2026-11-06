@@ -43,7 +43,7 @@ class _Client extends support.FramedClient {
     expect((await next())[0], respCodeDeviceInfo);
     send([
       cmdAppStart,
-      3,
+      0,
       0,
       0,
       0,
@@ -131,7 +131,7 @@ void main() {
     await Future<void>.delayed(const Duration(seconds: 15));
     client.send([
       cmdAppStart,
-      3,
+      0,
       0,
       0,
       0,

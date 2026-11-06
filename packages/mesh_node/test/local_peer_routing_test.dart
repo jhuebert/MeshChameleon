@@ -290,7 +290,7 @@ void main() {
     final sink = _Sink();
     b.setPushSink(sink);
 
-    expect(await a.sendControlData(Uint8List.fromList([7, 8])), isTrue);
+    expect(await a.sendControlData(Uint8List.fromList([0x81, 8])), isTrue);
     expect(
       await a.sendRawData(Uint8List.fromList([1, 2, 3]), Uint8List(0), 0),
       isTrue,

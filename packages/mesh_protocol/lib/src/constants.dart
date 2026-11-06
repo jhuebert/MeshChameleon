@@ -257,6 +257,26 @@ const int timestampSize = 4;
 /// Firmware `MAX_PACKET_PAYLOAD`: the on-air packet payload maximum.
 const int maxPacketPayloadSize = 184;
 
+/// Maximum text bytes in a direct or group message (`MAX_TEXT_LEN`).
+///
+/// The firmware caps the `timestamp | flags | text` plaintext (or the
+/// `"<sender>: " + message` group content) at this many bytes. Oversized direct
+/// text is rejected; oversized group text is truncated.
+const int maxTextLength = 160;
+
+/// Maximum group-text content (`"<sender>: " + message`) that fits a stock
+/// companion `SEND_RAW_PACKET` frame.
+///
+/// The frame adds command + priority (2), header (1), transport codes (4),
+/// path length (1), channel hash (1), MAC (2), and AES block padding. The
+/// largest cipher block is 160 bytes, leaving 155 content bytes; the message
+/// text budget is therefore `153 - UTF-8(sender)`.
+const int maxGroupTextContentOverCompanion = 155;
+
+/// Maximum CLI reply text bytes (`reply_buf[166]` in stock firmware, including
+/// the NUL terminator).
+const int maxCliReplyLength = 165;
+
 /// On-air group-data application limit (`MAX_GROUP_DATA_LENGTH` =
 /// 184-byte packet payload - 16-byte cipher block - 3 plaintext bytes).
 const int maxGroupDataLength = maxPacketPayloadSize - cipherBlockSize - 3;

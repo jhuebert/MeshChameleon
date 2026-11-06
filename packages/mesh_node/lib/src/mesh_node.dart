@@ -32,9 +32,10 @@ import 'serial_queue.dart';
 import 'state_persistence.dart';
 import 'virtual_clock.dart';
 
-/// Maximum number of inbound messages held for the client before the oldest
-/// is dropped. Matches openHop's `DEFAULT_OFFLINE_QUEUE_SIZE`.
-const int defaultOfflineQueueSize = 512;
+/// Maximum number of inbound messages held for the client. When the queue is
+/// full, the oldest channel message is dropped to make room; if there is none,
+/// the new message is dropped. Matches stock firmware's `OFFLINE_QUEUE_SIZE`.
+const int defaultOfflineQueueSize = 16;
 
 /// The reimplemented MeshCore companion node.
 ///
@@ -509,7 +510,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     // Keep-alive is only usable once we know the direct path to the server.
     if (!contact.hasDirectRoute) return;
 
-    const syncSince = 0;
+    final syncSince = contact.syncSince;
     final timestamp = _requests.nextTag();
     final packet = await PacketBuilder.createProtocolRequest(
       contact: contact,
@@ -1101,6 +1102,8 @@ class MeshNode extends CompanionBridge implements CliHost {
     // The loopback runs after the caller's binary OK so response/push ordering
     // stays unambiguous; import success never guarantees insertion.
     packet.header = (packet.header & ~phRouteMask) | routeTypeFlood;
+    // Stock clears the seen-table entry before looping the imported advert back.
+    _deduper.clearHash(packet.calculatePacketHash());
     final generation = _guard.generation;
     Timer.run(() => unawaited(_rx.handleAdvert(packet, generation)));
     return true;
@@ -1157,8 +1160,12 @@ class MeshNode extends CompanionBridge implements CliHost {
       );
 
   @override
-  Future<bool> sendChannelMessage(int channelIndex, String text) =>
-      _messages.sendChannelMessage(channelIndex, text);
+  Future<bool> sendChannelMessage(
+    int channelIndex,
+    String text, {
+    int? timestamp,
+  }) =>
+      _messages.sendChannelMessage(channelIndex, text, timestamp: timestamp);
 
   @override
   Future<bool> sendChannelData(
@@ -1219,7 +1226,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       );
 
   @override
-  Future<bool> sendTracePathRaw(
+  Future<SentResult> sendTracePathRaw(
     int tag,
     int authCode,
     int flags,
@@ -1410,15 +1417,17 @@ class MeshNode extends CompanionBridge implements CliHost {
     bool preservePath = false,
     int priority = 0,
     int? identityGeneration,
-  }) =>
-      _transport.transmit(
-        packet,
-        flood: flood,
-        scoped: scoped,
-        preservePath: preservePath,
-        priority: priority,
-        identityGeneration: identityGeneration,
-      );
+  }) {
+    _deduper.markSent(packet.calculatePacketHash());
+    return _transport.transmit(
+      packet,
+      flood: flood,
+      scoped: scoped,
+      preservePath: preservePath,
+      priority: priority,
+      identityGeneration: identityGeneration,
+    );
+  }
 
   /// Deliver an in-process peer copy.
   ///
@@ -1446,6 +1455,9 @@ class MeshNode extends CompanionBridge implements CliHost {
 
   /// Number of persistent contacts (transient anonymous slots excluded).
   int get persistentContactCount => contacts.length;
+
+  @override
+  int get contactCount => persistentContactCount;
 
   /// Configured channel count, including the default Public channel.
   int get channelCount => channels.length;
@@ -1602,22 +1614,23 @@ class MeshNode extends CompanionBridge implements CliHost {
           quotaExceeded = true;
           return null; // the new message alone does not fit
         }
+        final incoming = message.clone();
         final candidateQueue = [
           for (final m in current.queue) m.clone(),
-          message.clone(),
+          incoming,
         ];
-        while (candidateQueue.length > maxQueueSize) {
-          candidateQueue.removeAt(0); // drop oldest on count overflow
-        }
-        var candidate = current.copyWith(queue: candidateQueue);
-        while (candidate.storageBytes > storageQuotaBytes &&
-            candidateQueue.length > 1) {
-          candidateQueue.removeAt(0);
-          candidate = current.copyWith(queue: candidateQueue);
-        }
-        if (candidate.storageBytes > storageQuotaBytes) {
-          quotaExceeded = true;
-          return null;
+        // Stock: when the queue is full, evict the oldest *channel* message and
+        // append the new one; if there is no channel message, drop the new
+        // message. Apply the same policy to virtual storage-quota pressure.
+        while (true) {
+          final candidate = current.copyWith(queue: candidateQueue);
+          final overCount = candidateQueue.length > maxQueueSize;
+          final overQuota = candidate.storageBytes > storageQuotaBytes;
+          if (!overCount && !overQuota) break;
+          final channelIndex = candidateQueue.indexWhere((m) => m.isChannel);
+          if (channelIndex < 0) return null;
+          final removed = candidateQueue.removeAt(channelIndex);
+          if (identical(removed, incoming)) return null;
         }
         enqueued = true;
         return current.copyWith(queue: candidateQueue);

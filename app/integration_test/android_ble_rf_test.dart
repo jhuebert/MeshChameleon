@@ -103,7 +103,7 @@ void main() {
       try {
         client.send([cmdDeviceQuery, appProtocolVersion]);
         await client.next();
-        client.send([cmdAppStart, appProtocolVersion]);
+        client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
         await client.next();
         final text =
             'ANDROID-BLE-${self.nodeName}-${DateTime.now().millisecondsSinceEpoch}';
@@ -155,7 +155,7 @@ Future<void> _registerContact(String host, int port, Uint8List pubkey) async {
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     await client.next();
     client.send(
       (BufferWriter()
@@ -184,7 +184,7 @@ Future<void> _removeContact(String host, int port, Uint8List pubkey) async {
   try {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.next();
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     await client.next();
     client.send([cmdRemoveContact, ...pubkey]);
     final reply = await client.next();

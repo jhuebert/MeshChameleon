@@ -62,6 +62,21 @@ void main() {
             isChannel: true,
             channelIdx: 1,
           ),
+          QueuedMessage(
+            senderKey: Uint8List(32),
+            txtType: txtTypeSigned,
+            timestamp: 44,
+            text: 'signed',
+            senderPrefix: Uint8List.fromList([1, 2, 3, 4]),
+          ),
+          QueuedMessage(
+            senderKey: Uint8List(32),
+            isChannel: true,
+            channelIdx: 1,
+            isChannelData: true,
+            channelDataType: 0,
+            channelDataPayload: Uint8List.fromList([9, 8, 7]),
+          ),
         ],
         advertPaths: {
           'AABBCCDDEEFF00': AdvertPath(
@@ -97,16 +112,32 @@ void main() {
       expect(decoded.channels[1]!.name, 'team');
       expect(decoded.channels[1]!.secret, List.filled(16, 7));
 
-      expect(decoded.queue, hasLength(2));
+      expect(decoded.queue, hasLength(4));
       expect(decoded.queue[0].text, 'hello');
       expect(decoded.queue[0].snr, -3.25);
       expect(decoded.queue[1].isChannel, isTrue);
       expect(decoded.queue[1].channelIdx, 1);
+      expect(decoded.queue[2].senderPrefix, [1, 2, 3, 4]);
+      expect(decoded.queue[3].isChannelData, isTrue);
+      expect(decoded.queue[3].channelDataType, 0);
+      expect(decoded.queue[3].channelDataPayload, [9, 8, 7]);
 
       final p = decoded.advertPaths['AABBCCDDEEFF00']!;
       expect(p.name, 'peer');
       expect(p.path, [0x11]);
       expect(p.recvTimestamp, 99);
+
+      // Legacy rows have no `is_channel_data` flag; a non-zero data type still
+      // decodes as channel data.
+      final legacy =
+          jsonDecode(jsonEncode(state.toJson())) as Map<String, Object?>;
+      final legacyQueue = legacy['queue'] as List<Object?>;
+      final legacyRow = legacyQueue.last as Map<String, Object?>;
+      legacyRow.remove('is_channel_data');
+      legacyRow['channel_data_type'] = 0x1234;
+      final legacyDecoded = NodeState.fromJson(legacy);
+      expect(legacyDecoded.queue.last.isChannelData, isTrue);
+      expect(legacyDecoded.queue.last.channelDataType, 0x1234);
     });
 
     test('a JSON document with no version still loads as legacy v1', () {
@@ -562,6 +593,26 @@ void main() {
       expect(await relaunched.syncNextMessage(), isNull);
     });
 
+    test('trims a pre-16 queue on load, keeping the newest messages', () async {
+      await store.save(NodeState(
+        prefs: NodePrefs(),
+        queue: [
+          for (var i = 0; i < 20; i++)
+            QueuedMessage(
+              senderKey: Uint8List(32),
+              timestamp: i,
+              text: 'm$i',
+            ),
+        ],
+      ));
+
+      final relaunched =
+          MeshNode(identity: aliceId, link: aliceLink, store: store);
+      await relaunched.load();
+      expect(relaunched.queuedMessageCount, defaultOfflineQueueSize);
+      expect((await relaunched.syncNextMessage())!.text, 'm4');
+    });
+
     test('drops the oldest queued messages on overflow', () async {
       final bounded = MeshNode(
         identity: aliceId,
@@ -813,7 +864,7 @@ void main() {
     });
 
     test('advert_path_cache_is_capped_at_64', () async {
-      expect(defaultOfflineQueueSize, 512);
+      expect(defaultOfflineQueueSize, 16);
       final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 11);
       final link = FakeDeviceLink();
       await link.connect();
@@ -866,6 +917,7 @@ QueuedMessage _queuedChannelData(Uint8List data) => QueuedMessage(
       pathLen: 0xFF,
       snr: 6.0,
       rssi: -70,
+      isChannelData: true,
       channelDataType: 0x1234,
       channelDataPayload: Uint8List.fromList(data),
     );

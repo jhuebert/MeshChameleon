@@ -51,7 +51,7 @@ class _Client extends support.FramedClient {
     expect((await next())[0], respCodeDeviceInfo);
     send([
       cmdAppStart,
-      3,
+      0,
       0,
       0,
       0,
@@ -225,7 +225,7 @@ Future<String> _selfName(_Client client) async {
   // The handshake already consumed SELF_INFO; re-read it.
   client.send([
     cmdAppStart,
-    3,
+    0,
     0,
     0,
     0,

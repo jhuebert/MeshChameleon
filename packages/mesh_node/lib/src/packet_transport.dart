@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'local_peer_router.dart';
+import 'mesh_errors.dart';
 import 'runtime_guard.dart';
 import 'virtual_clock.dart';
 
@@ -88,14 +90,30 @@ class PacketTransport {
       final scope = effectiveFloodScope();
       if (scope != null) packet.applyFloodScope(scope);
     }
+    final bytes = packet.writeTo();
+    // Stock firmware sends these packets directly over the radio; the virtual
+    // node has to wrap each one in SEND_RAW_PACKET (command + priority), which
+    // has a 176-byte companion payload limit. Reject before touching the radio
+    // so an oversized valid stock packet fails cleanly instead of being
+    // silently dropped by the device.
+    if (bytes.length + 2 > maxCompanionPayloadSize) {
+      throw CompanionOperationError(
+        errCodeTableFull,
+        message: 'packet is ${bytes.length} bytes; stock companion raw frame '
+            'limit is ${maxCompanionPayloadSize - 2}',
+      );
+    }
     _packetStats['sent'] = (_packetStats['sent'] ?? 0) + 1;
     _packetStats[flood ? 'flood_tx' : 'direct_tx'] =
         (_packetStats[flood ? 'flood_tx' : 'direct_tx'] ?? 0) + 1;
-    final bytes = packet.writeTo();
     _txAirMicros += airtimeMicrosFor(bytes.length);
     _activePhysicalTx++;
     try {
       await link.sendRawPacket(bytes, priority);
+    } on DeviceCommandError catch (e) {
+      // A dropped/slow link is an expected physical failure, not an internal
+      // handler bug. Map it to the companion-protocol error the client sees.
+      throw operationError(e);
     } finally {
       _activePhysicalTx--;
       if (_activePhysicalTx == 0) {

@@ -229,6 +229,16 @@ void main() {
       expect(deduper.isDuplicate(hash), isFalse);
       expect(deduper.consumeSentGroup(hash), isFalse);
     });
+
+    test('bounds the seen and sent-group tables', () {
+      final deduper = PacketDeduper(clock: _TestClock().clock);
+      for (var i = 0; i < 1100; i++) {
+        final hash = Uint8List.fromList([i & 0xFF, (i >> 8) & 0xFF]);
+        expect(deduper.isDuplicate(hash), isFalse);
+        deduper.noteSentGroup(hash);
+        deduper.markSent(hash);
+      }
+    });
   });
 
   group('RequestTracker', () {
@@ -323,6 +333,13 @@ void main() {
       expect(queue.length, 1);
       expect(queue.directCount, 1);
       expect(queue.channelCount, 0);
+    });
+
+    test('replace enforces the cap by keeping the newest messages', () {
+      final queue = MessageQueue(maxQueueSize: 2)
+        ..replace([_message('one'), _message('two'), _message('three')]);
+
+      expect(queue.messages.map((m) => m.text), ['two', 'three']);
     });
   });
 
@@ -507,6 +524,22 @@ void main() {
 
       sessions.start(_key(2), 60);
       sessions.removeByHex(bytesToHex(_key(2)));
+      expect(sessions.length, 0);
+    });
+
+    test('contains keep-alive failures and removes a session', () async {
+      final sessions = ConnectionSessions(
+        clock: _TestClock().clock,
+        onKeepAlive: (_) async => throw StateError('link gone'),
+      );
+      addTearDown(sessions.clear);
+
+      final pubkey = _key(3);
+      sessions.start(pubkey, 1);
+      await Future<void>.delayed(const Duration(milliseconds: 1100));
+      expect(sessions.contains(pubkey), isTrue);
+
+      sessions.remove(sessions.values.single);
       expect(sessions.length, 0);
     });
   });

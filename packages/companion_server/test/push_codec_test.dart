@@ -19,6 +19,24 @@ void main() {
       expect(rssiByte(-200), 128);
     });
 
+    test('text truncation and signed prefixes handle edge input', () {
+      expect(textBytesWithin('abc', 0), isEmpty);
+      expect(textBytesWithin('abc', 2), [0x61, 0x62]);
+      expect(textBytesWithin('abc', 10), [0x61, 0x62, 0x63]);
+
+      expect(
+        signedSenderPrefix(QueuedMessage(senderKey: Uint8List(0))),
+        [0, 0, 0, 0],
+      );
+      expect(
+        signedSenderPrefix(QueuedMessage(
+          senderKey: Uint8List(0),
+          senderPrefix: Uint8List.fromList([1, 2, 3, 4, 5]),
+        )),
+        [1, 2, 3, 4],
+      );
+    });
+
     test('keyPrefix truncates but never pads', () {
       expect(keyPrefix(Uint8List.fromList([1, 2, 3]), 2), [1, 2]);
       expect(keyPrefix(Uint8List.fromList([1, 2]), 6), [1, 2]);
@@ -206,6 +224,62 @@ void main() {
       );
     });
 
+    test('signed direct frames carry the four-byte sender prefix', () {
+      final signed = QueuedMessage(
+        senderKey: key,
+        txtType: txtTypeSigned,
+        senderPrefix: Uint8List.fromList([9, 8, 7, 6]),
+        pathLen: 2,
+        timestamp: 0x01020304,
+        text: 'hi',
+        snr: 6,
+      );
+      expect(
+        encodeMessageFrame(signed, appTargetVer: 3),
+        [
+          16,
+          24,
+          0,
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6,
+          2,
+          2,
+          4,
+          3,
+          2,
+          1,
+          9,
+          8,
+          7,
+          6,
+          0x68,
+          0x69,
+        ],
+      );
+      expect(
+        encodeMessageFrame(signed, appTargetVer: 2),
+        [7, 1, 2, 3, 4, 5, 6, 2, 2, 4, 3, 2, 1, 9, 8, 7, 6, 0x68, 0x69],
+      );
+    });
+
+    test('message text is truncated to the companion payload limit', () {
+      final frame = encodeMessageFrame(
+        QueuedMessage(
+          senderKey: key,
+          pathLen: 0,
+          timestamp: 1,
+          text: 'x' * 500,
+        ),
+        appTargetVer: 3,
+      );
+      expect(frame.length, maxCompanionPayloadSize);
+    });
+
     test('channel text V3 and legacy layouts', () {
       final channel = QueuedMessage(
         senderKey: Uint8List(0),
@@ -235,6 +309,7 @@ void main() {
           isChannel: true,
           channelIdx: 1,
           pathLen: 0,
+          isChannelData: true,
           channelDataType: 0x1234,
           channelDataPayload: payload,
         ),

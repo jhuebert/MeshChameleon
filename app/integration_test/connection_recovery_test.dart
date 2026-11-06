@@ -341,7 +341,7 @@ class _Client {
         respCodeDeviceInfo);
     send([
       cmdAppStart,
-      appProtocolVersion,
+      0,
       0,
       0,
       0,
@@ -832,7 +832,7 @@ void main() {
     await restoredClient.handshake();
     final self = await restoredClient.command([
       cmdAppStart,
-      appProtocolVersion,
+      0,
       0,
       0,
       0,

@@ -12,6 +12,10 @@ import 'mesh_stats.dart';
 
 abstract interface class ContactHost {
   List<Contact> getContacts({int since = 0});
+
+  /// Total persistent contacts, independent of the `since` filter. Stock
+  /// firmware reports this total in `PACKET_CONTACT_START`.
+  int get contactCount;
   Contact? getContactByKey(Uint8List pubkey);
   Contact? getPersistentContactByKey(Uint8List pubkey);
   Contact? getContactByKeyPrefix(Uint8List prefix);
@@ -32,7 +36,11 @@ abstract interface class MessageHost {
     int attempt = 0,
     int? timestamp,
   });
-  Future<bool> sendChannelMessage(int channelIndex, String text);
+  Future<bool> sendChannelMessage(
+    int channelIndex,
+    String text, {
+    int? timestamp,
+  });
   Future<bool> sendChannelData(
     int channelIndex,
     int dataType,
@@ -49,7 +57,7 @@ abstract interface class MessageHost {
     bool wantLocation = true,
     bool wantEnvironment = true,
   });
-  Future<bool> sendTracePathRaw(
+  Future<SentResult> sendTracePathRaw(
     int tag,
     int authCode,
     int flags,

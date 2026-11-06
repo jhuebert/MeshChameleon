@@ -74,6 +74,29 @@ void main() {
     expect(server.metrics.lastDisconnectReason, 'test close');
   });
 
+  test('APP_START does not override the DEVICE_QUERY protocol version',
+      () async {
+    client.send([cmdDeviceQuery, appProtocolVersion]);
+    await client.frames.next();
+    expect(server.metrics.appTargetVer, appProtocolVersion);
+
+    // Spec-compliant APP_START: 7 reserved bytes followed by the app name.
+    client.send([
+      cmdAppStart,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      ...utf8Bytes('mccli'),
+      0,
+    ]);
+    expect((await client.frames.next())[0], respCodeSelfInfo);
+    expect(server.metrics.appTargetVer, appProtocolVersion);
+  });
+
   test('metrics count a client eviction', () async {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     await client.frames.next();
@@ -171,7 +194,7 @@ void main() {
   });
 
   test('APP_START returns SELF_INFO with the proxy public key', () async {
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     final resp = await client.frames.next();
     expect(resp[0], respCodeSelfInfo);
     expect(resp.sublist(4, 36), identity.publicKey);
@@ -294,6 +317,35 @@ void main() {
     expect((await client.frames.next())[0], respCodeEndOfContacts);
   });
 
+  test('GET_CONTACTS reports the total count while filtering by since',
+      () async {
+    bridge.contacts.addAll([
+      Contact(
+        publicKey: Uint8List(32)..[0] = 9,
+        name: 'old',
+        lastmod: 50,
+      ),
+      Contact(
+        publicKey: Uint8List(32)..[0] = 10,
+        name: 'new',
+        lastmod: 200,
+      ),
+    ]);
+
+    client.send([cmdGetContacts, 100, 0, 0, 0]);
+    final start = await client.frames.next();
+    expect(start[0], respCodeContactsStart);
+    expect((BufferReader(start)..skipBytes(1)).readUInt32Le(), 2);
+
+    final contact = await client.frames.next();
+    expect(contact[0], respCodeContact);
+    expect(contact.sublist(1, 2), [10]);
+
+    final end = await client.frames.next();
+    expect(end[0], respCodeEndOfContacts);
+    expect((BufferReader(end)..skipBytes(1)).readUInt32Le(), 200);
+  });
+
   test('unlisted command IDs return ERR unsupported', () async {
     for (final id in [44, 45, 46, 47, 48, 49, 53]) {
       client.send([id]);
@@ -330,7 +382,7 @@ void main() {
     expect(resp.sublist(34, 50), psk);
   });
 
-  test('SEND_CHANNEL_TXT_MSG skips the client timestamp', () async {
+  test('SEND_CHANNEL_TXT_MSG uses the client timestamp', () async {
     bridge.channels[0] = Channel(
       name: 'Public',
       secret: Uint8List.fromList(LocalIdentity.defaultPublicChannelSecret),
@@ -347,6 +399,7 @@ void main() {
     expect((await client.frames.next())[0], respCodeOk);
     expect(bridge.sentChannelIndex, 0);
     expect(bridge.sentChannelText, 'P');
+    expect(bridge.sentChannelTimestamp, 0x6AD05965);
   });
 
   test('SEND_CHANNEL_TXT_MSG decodes UTF-8 text', () async {
@@ -714,7 +767,7 @@ void main() {
 
     // Nonzero reserved byte is rejected without a state change.
     client.send([cmdSetPathHashMode, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     expect(bridge.pathHash, 1);
   });
 
@@ -771,7 +824,7 @@ void main() {
     client.send([cmdRunCliCommand, ...utf8Bytes('ver')]);
     final long = await client.frames.next();
     expect(long[0], respCodeCliReply);
-    expect(long.length, lessThanOrEqualTo(maxCompanionPayloadSize));
+    expect(long.length, maxCliReplyLength + 1);
     expect(utf8.decode(long.sublist(1)).endsWith('...'), isTrue);
   });
 
@@ -830,7 +883,7 @@ void main() {
     client.send([cmdHasConnection, 1, 2, 3]);
     final short = await client.frames.next();
     expect(short[0], respCodeErr);
-    expect(short[1], errCodeIllegalArg);
+    expect(short[1], errCodeUnsupportedCmd);
   });
 
   test('no_logs_contain_imported_or_exported_key_hex_or_payload', () async {
@@ -903,7 +956,7 @@ void main() {
       isTrue,
     );
 
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     final info = await client.frames.next();
     expect(info.sublist(4, 36), newIdentity.publicKey);
 
@@ -937,7 +990,6 @@ void main() {
     final invalidEcdh = hexToBytes(
         '0137dddb67ad806e5073c8ee561af2980cf721dbde3f7ace16729d4e8fb2613a5ed63e9c3f6ff001ffdd8f93dc4772cb3a5994a23c00184cc1aea33e4ff8b936');
     final badKeys = <Uint8List>[
-      Uint8List(32),
       prefix00,
       prefixFf,
       invalidEcdh,
@@ -949,6 +1001,11 @@ void main() {
       expect(bridge.identity.publicKey, oldIdentity.publicKey);
       expect(bridge.identityImports, 0);
     }
+
+    client.send([cmdImportPrivateKey, ...Uint8List(32)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    expect(bridge.identity.publicKey, oldIdentity.publicKey);
+    expect(bridge.identityImports, 0);
   });
 
   test('SET_FLOOD_SCOPE stores, resets, and forces unscoped', () async {
@@ -999,13 +1056,15 @@ void main() {
     client.send([cmdReboot, ...'nope'.codeUnits]);
     final resp = await client.frames.next();
     expect(resp[0], respCodeErr);
-    expect(resp[1], errCodeIllegalArg);
+    expect(resp[1], errCodeUnsupportedCmd);
     expect(bridge.reboots, 1);
 
+    client.send([cmdReboot, ...'reboo'.codeUnits]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+
     client.send([cmdReboot, ...'rebootx'.codeUnits]);
-    final extra = await client.frames.next();
-    expect(extra, [respCodeErr, errCodeIllegalArg]);
-    expect(bridge.reboots, 1);
+    expect((await client.frames.next())[0], respCodeOk);
+    expect(bridge.reboots, 2);
   });
 
   test('SEND_ANON_REQ returns SENT and forwards to the bridge', () async {
@@ -1060,13 +1119,15 @@ void main() {
   });
 
   test('IMPORT_CONTACT forwards the blob', () async {
-    client.send([cmdImportContact, 0x04, 7, 8, 9]);
+    final blob = List<int>.filled(98, 0)..[0] = 0x04;
+    client.send([cmdImportContact, ...blob]);
     expect((await client.frames.next())[0], respCodeOk);
-    expect(bridge.importedData, [0x04, 7, 8, 9]);
+    expect(bridge.importedData, blob);
   });
 
   test('SHARE_CONTACT forwards the pubkey', () async {
     final pubkey = identity.publicKey;
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'self'));
     client.send([cmdShareContact, ...pubkey]);
     expect((await client.frames.next())[0], respCodeOk);
     expect(bridge.sharedPubkey, pubkey);
@@ -1098,7 +1159,7 @@ void main() {
     client.send([cmdSendRawData, 0x00, 1, 2]);
     final err = await client.frames.next();
     expect(err[0], respCodeErr);
-    expect(err[1], errCodeIllegalArg);
+    expect(err[1], errCodeUnsupportedCmd);
 
     // Reserved hash width (hash_size == 4) is unsupported.
     client.send([cmdSendRawData, 0xC0, 1, 2, 3, 4]);
@@ -1177,7 +1238,7 @@ void main() {
 
     client.send([cmdSetOtherParams, 0x01, 0x26, 0x01, 0x02]);
     expect(await client.frames.next(), [respCodeOk]);
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     final self = await client.frames.next();
     expect(self[0], respCodeSelfInfo);
     expect(self[44], 2); // multiAcks
@@ -1187,23 +1248,26 @@ void main() {
   });
 
   test('names_utf8_byte_limit_and_coordinate_ranges', () async {
-    // 31 UTF-8 bytes is accepted, 32 is not.
+    // 31 UTF-8 bytes is accepted; 32 is truncated to 31 like stock firmware.
     client.send([cmdSetAdvertName, ...utf8Bytes('a' * 31)]);
     expect(await client.frames.next(), [respCodeOk]);
     client.send([cmdSetAdvertName, ...utf8Bytes('a' * 32)]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeOk]);
 
-    // A single trailing NUL is accepted; embedded NUL/control input is not.
+    // A single trailing NUL is accepted; embedded NUL ends the name.
     client.send([cmdSetAdvertName, ...utf8Bytes('café'), 0]);
     expect(await client.frames.next(), [respCodeOk]);
     client.send([cmdSetAdvertName, ...utf8Bytes('ab'), 0, ...utf8Bytes('cd')]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeOk]);
     client.send([cmdSetAdvertName, ...utf8Bytes('bad\nname')]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
     client.send([cmdSetAdvertName, 0xFF]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdSetAdvertName, ...utf8Bytes('café')]);
+    expect(await client.frames.next(), [respCodeOk]);
+
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     final self = await client.frames.next();
     expect(self.sublist(58), utf8Bytes('café'));
 
@@ -1349,7 +1413,7 @@ void main() {
     client.send([cmdDeviceQuery, appProtocolVersion]);
     expect((await client.frames.next())[0], respCodeDeviceInfo);
 
-    client.send([cmdAppStart, appProtocolVersion]);
+    client.send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
     expect((await client.frames.next())[0], respCodeSelfInfo);
 
     client.send([cmdGetBattAndStorage]);
@@ -1401,19 +1465,19 @@ void main() {
     expect(freq.sublist(1), bridge.allowedRepeatFreq);
 
     // Contact sharing.
-    client.send([cmdShareContact, ...pubkey]);
+    client.send([cmdShareContact, ...peerKey]);
     expect((await client.frames.next())[0], respCodeOk);
 
-    client.send([cmdExportContact, ...pubkey]);
+    client.send([cmdExportContact, ...peerKey]);
     final exported = await client.frames.next();
     expect(exported[0], respCodeExportContact);
     expect(exported.sublist(1), bridge.contactBlob);
 
-    client.send([cmdImportContact, 0x04, 1, 2, 3]);
+    client.send([cmdImportContact, ...List<int>.filled(98, 0)..[0] = 0x04]);
     expect((await client.frames.next())[0], respCodeOk);
 
     // Binary request: SENT now, the reply follows asynchronously by tag.
-    client.send([cmdSendBinaryReq, ...pubkey, reqTypeGetStatus]);
+    client.send([cmdSendBinaryReq, ...peerKey, reqTypeGetStatus]);
     final sent = await client.frames.next();
     expect(sent[0], respCodeSent);
     final binTag = (BufferReader(sent)..skipBytes(2)).readUInt32Le();
@@ -1461,7 +1525,7 @@ void main() {
     expect((await client.frames.next())[0], respCodeNoMoreMessages);
 
     // Path discovery is acknowledged SENT.
-    client.send([cmdSendPathDiscoveryReq, 0, ...pubkey]);
+    client.send([cmdSendPathDiscoveryReq, 0, ...peerKey]);
     expect((await client.frames.next())[0], respCodeSent);
 
     // Signing handshake returns a 64-byte signature.
@@ -1480,8 +1544,8 @@ void main() {
     bridge.channels[0] = Channel(name: 'Public', secret: psk);
     bridge.channels[2] = Channel(name: 'Extra', secret: Uint8List(2));
 
-    client.send([cmdGetChannel]);
     for (var i = 0; i < 8; i++) {
+      client.send([cmdGetChannel, i]);
       final frame = await client.frames.next();
       expect(frame[0], respCodeChannelInfo);
       expect(frame[1], i);
@@ -1498,18 +1562,11 @@ void main() {
       }
     }
 
-    bridge.maxChannelsValue = 0;
-    client.send([cmdGetChannel]);
-    final only = await client.frames.next();
-    expect(only[0], respCodeChannelInfo);
-    expect(only[1], 0);
-    bridge.maxChannelsValue = 8;
-
     client.send([cmdGetChannel, 8]);
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
   });
 
-  test('SET_CHANNEL accepts 16- and 32-byte secrets and rejects truncation',
+  test('SET_CHANNEL accepts 16-byte secrets and rejects 32-byte and truncation',
       () async {
     final psk16 = Uint8List.fromList(List.generate(16, (i) => i + 1));
     final psk32 = Uint8List.fromList(List.generate(32, (i) => i + 1));
@@ -1524,14 +1581,25 @@ void main() {
     expect(bridge.channels[4]!.name, 'short');
     expect(bridge.channels[4]!.secret, psk16);
 
+    // A full 32-byte, non-NUL name is clamped to 31 bytes like stock strncpy.
+    client.send((BufferWriter()
+          ..writeByte(cmdSetChannel)
+          ..writeByte(8)
+          ..writeBytes(utf8.encode('n' * 32))
+          ..writeBytes(psk16))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeOk]);
+    expect(bridge.channels[8]!.name, 'n' * 31);
+
+    // Stock 1.18 firmware rejects the unsupported 32-byte variant.
     client.send((BufferWriter()
           ..writeByte(cmdSetChannel)
           ..writeByte(5)
           ..writeCString('long', 32)
           ..writeBytes(psk32))
         .toBytes());
-    expect(await client.frames.next(), [respCodeOk]);
-    expect(bridge.channels[5]!.secret, psk32);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    expect(bridge.channels[5], isNull);
 
     client.send((BufferWriter()
           ..writeByte(cmdSetChannel)
@@ -1539,10 +1607,10 @@ void main() {
           ..writeCString('bad', 32)
           ..writeBytes(Uint8List(15)))
         .toBytes());
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send([cmdSetChannel, 0, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     bridge.setChannelError = const CompanionOperationError(errCodeFileIoError);
     client.send((BufferWriter()
@@ -1560,7 +1628,7 @@ void main() {
 
     client.send([cmdSendChannelTxtMsg, txtTypePlain, 0, 0, 0, 0]);
     // Too short (only 5 data bytes).
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send((BufferWriter()
           ..writeByte(cmdSendChannelTxtMsg)
@@ -1588,7 +1656,7 @@ void main() {
           ..writeUInt32Le(0)
           ..writeCString('hi', 3))
         .toBytes());
-    expect(await client.frames.next(), [respCodeOk]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
     expect(
       serverLogs.any((line) => line.contains('channel message send failed')),
       isTrue,
@@ -1601,7 +1669,7 @@ void main() {
     bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
 
     client.send([cmdSendTxtMsg, 0, 0, 0, 0]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send((BufferWriter()
           ..writeByte(cmdSendTxtMsg)
@@ -1613,6 +1681,20 @@ void main() {
         .toBytes());
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
 
+    // Stock firmware only accepts plain and CLI direct text types; a signed
+    // direct send is receive-only and must be rejected.
+    bridge.sentText = null;
+    client.send((BufferWriter()
+          ..writeByte(cmdSendTxtMsg)
+          ..writeByte(txtTypeSigned)
+          ..writeByte(0)
+          ..writeUInt32Le(0)
+          ..writeBytes(pubkey.sublist(0, 6))
+          ..writeCString('hi', 3))
+        .toBytes());
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    expect(bridge.sentText, isNull);
+
     bridge.sentTextResult = const SentResult.failure();
     client.send((BufferWriter()
           ..writeByte(cmdSendTxtMsg)
@@ -1622,7 +1704,7 @@ void main() {
           ..writeBytes(pubkey.sublist(0, 6))
           ..writeCString('hi', 3))
         .toBytes());
-    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
 
     // Flood sends with null optional fields fall back to the wire defaults.
     bridge.sentTextResult = const SentResult(success: true, isFlood: true);
@@ -1644,6 +1726,7 @@ void main() {
 
   test('SEND_CHANNEL_DATA validates paths, payload size, and send result',
       () async {
+    bridge.channels[0] = Channel(name: 'Public', secret: Uint8List(16));
     final payload = [1, 2, 3, 4];
 
     client.send([cmdSendChannelData, 0, 0, 0]);
@@ -1664,6 +1747,11 @@ void main() {
     // Reserved data type.
     client.send([cmdSendChannelData, 0, 0, 0, 0, 1, 2, 3]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+
+    // Stock checks the channel first, so an unknown channel with a reserved
+    // data type still reports not-found.
+    client.send([cmdSendChannelData, 7, 0, 0, 0, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
 
     // Payload beyond the group-data limit.
     client.send([cmdSendChannelData, 0, 0, 1, 0, ...List.filled(158, 1)]);
@@ -1690,10 +1778,10 @@ void main() {
 
   test('SEND_CONTROL_DATA requires the control marker', () async {
     client.send([cmdSendControlData]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send([cmdSendControlData, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send([cmdSendControlData, 0x80, 1, 2]);
     expect(await client.frames.next(), [respCodeOk]);
@@ -1711,6 +1799,7 @@ void main() {
       isChannel: true,
       channelIdx: 2,
       pathLen: 300,
+      isChannelData: true,
       channelDataType: 0x1234,
       channelDataPayload: Uint8List.fromList(List.filled(200, 0xAB)),
     );
@@ -1770,7 +1859,7 @@ void main() {
 
   test('SIGN_DATA bounds and SIGN_FINISH errors', () async {
     client.send([cmdSignData]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send([cmdSignStart]);
     await client.frames.next();
@@ -1794,6 +1883,23 @@ void main() {
     expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
   });
 
+  test('RUN_CLI_COMMAND clears a partial signing buffer on lifecycle change',
+      () async {
+    client.send([cmdSignStart]);
+    await client.frames.next();
+    client.send([cmdSignData, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeOk]);
+
+    bridge.cliReply = 'OK';
+    bridge.cliLifecycleBump = 1;
+    client.send([cmdRunCliCommand, ...utf8Bytes('reboot')]);
+    expect((await client.frames.next())[0], respCodeCliReply);
+
+    client.send([cmdSignFinish]);
+    expect((await client.frames.next())[0], respCodeSignature);
+    expect(bridge.lastSignedMessage, isEmpty);
+  });
+
   test('private-key export validates the length and maps bridge errors',
       () async {
     bridge.exportKeyOverride = Uint8List(63);
@@ -1806,7 +1912,7 @@ void main() {
     expect(await client.frames.next(), [respCodeErr, errCodeFileIoError]);
 
     client.send([cmdImportPrivateKey, 1, 2, 3]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
   });
 
   test('GET_STATS rejects unknown types and emits packet counters', () async {
@@ -1814,6 +1920,9 @@ void main() {
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
     client.send([cmdGetStats]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+
+    client.send([cmdGetStats, statsTypePackets]);
     final stats = await client.frames.next();
     expect(stats[0], respCodeStats);
     expect(stats[1], statsTypePackets);
@@ -1825,7 +1934,7 @@ void main() {
     final prefix = Uint8List.fromList([1, 2, 3, 4, 5, 6, 7]);
 
     client.send([cmdGetAdvertPath, 0]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send([cmdGetAdvertPath, 0, ...prefix, ...Uint8List(25)]);
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
@@ -1848,10 +1957,10 @@ void main() {
 
   test('EXPORT/IMPORT/SHARE_CONTACT cover failure results', () async {
     client.send([cmdImportContact]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     bridge.importContactResult = false;
-    client.send([cmdImportContact, 0x04, 1]);
+    client.send([cmdImportContact, ...List<int>.filled(98, 0)]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
     bridge.shareContactResult = false;
@@ -1863,28 +1972,38 @@ void main() {
     final pubkey = Uint8List(32)..[0] = 7;
 
     client.send([cmdSendBinaryReq, ...pubkey.sublist(0, 3)]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
     bridge.binaryResult = const SentResult.failure();
     client.send([cmdSendBinaryReq, ...pubkey, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    final unknown = Uint8List(32)..[0] = 8;
+    client.send([cmdSendBinaryReq, ...unknown, 1]);
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
 
     client.send([cmdSendAnonReq, ...pubkey]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     bridge.anonResult = const SentResult.failure();
     client.send([cmdSendAnonReq, ...pubkey, 1]);
-    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
   });
 
   test('telemetry requests validate length and report not-found', () async {
     client.send([cmdSendTelemetryReq, 0]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     final pubkey = Uint8List(32)..[0] = 7;
     client.send([cmdSendTelemetryReq, 0, 0, 0, ...pubkey.sublist(0, 31)]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     bridge.telemetryResult = const SentResult.failure();
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
     client.send([cmdSendTelemetryReq, 0, 0, 0, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    final unknown = Uint8List(32)..[0] = 8;
+    client.send([cmdSendTelemetryReq, 0, 0, 0, ...unknown]);
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
   });
 
@@ -1892,12 +2011,17 @@ void main() {
     final pubkey = Uint8List(32)..[0] = 7;
 
     client.send([cmdSendPathDiscoveryReq, 0, ...pubkey.sublist(0, 3)]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     client.send([cmdSendPathDiscoveryReq, 1, ...pubkey]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     bridge.pathDiscoveryResult = const SentResult.failure();
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
     client.send([cmdSendPathDiscoveryReq, 0, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    final unknown = Uint8List(32)..[0] = 8;
+    client.send([cmdSendPathDiscoveryReq, 0, ...unknown]);
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
 
     bridge.pathDiscoveryResult = const SentResult(success: true);
@@ -1911,16 +2035,20 @@ void main() {
     final pubkey = Uint8List(32)..[0] = 7;
 
     client.send([cmdSendLogin, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     client.send([cmdSendStatusReq, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     client.send([cmdLogout, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
+    bridge.contacts.add(Contact(publicKey: pubkey, name: 'peer'));
     client.send([cmdSendLogin, ...pubkey, ...utf8Bytes('secret'), 0, 9]);
     final login = await client.frames.next();
     expect(login[0], respCodeSent);
-    expect((BufferReader(login)..skipBytes(2)).readUInt32Le(), 0x7777);
+    expect(
+      (BufferReader(login)..skipBytes(2)).readUInt32Le(),
+      pubkey[0] | (pubkey[1] << 8) | (pubkey[2] << 16) | (pubkey[3] << 24),
+    );
     expect(bridge.loginPassword, 'secret');
 
     client.send([cmdSendStatusReq, ...pubkey]);
@@ -1931,9 +2059,15 @@ void main() {
 
     bridge.loginResult = const SentResult.failure();
     client.send([cmdSendLogin, ...pubkey, 0]);
-    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
     bridge.statusResult = const SentResult.failure();
     client.send([cmdSendStatusReq, ...pubkey]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
+
+    final unknown = Uint8List(32)..[0] = 8;
+    client.send([cmdSendLogin, ...unknown, 0]);
+    expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
+    client.send([cmdSendStatusReq, ...unknown]);
     expect(await client.frames.next(), [respCodeErr, errCodeNotFound]);
 
     client.send([cmdLogout, ...pubkey]);
@@ -1989,7 +2123,7 @@ void main() {
 
   test('SET_CUSTOM_VAR validates encoding and maps operation errors', () async {
     client.send([cmdSetCustomVar, 0x61, 0x62]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     client.send([cmdSetCustomVar, 0xFF, 0xFF, 0xFF]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
@@ -2096,7 +2230,7 @@ void main() {
     expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
 
     client.send([cmdSetPathHashMode, 0]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
   });
 
   test('advert setters and the advert send map bridge failures', () async {
@@ -2114,14 +2248,14 @@ void main() {
 
     bridge.advertiseResult = false;
     client.send([cmdSendSelfAdvert]);
-    expect(await client.frames.next(), [respCodeErr, errCodeBadState]);
+    expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
   });
 
   test('flood-scope commands validate their arguments', () async {
     client.send([cmdSetFloodScope]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     client.send([cmdSetFloodScope, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
 
     // 31 non-NUL bytes cannot be a valid display name.
     client.send((BufferWriter()
@@ -2158,6 +2292,9 @@ void main() {
     client.send([cmdSendRawData, 0x00, 1, 2, 3, 4]);
     expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
     client.send([cmdSendRawData, 0x00, 1, 2, 3]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    // A one-byte path leaves too little room for the required 4-byte payload.
+    client.send([cmdSendRawData, 0x01, 0xAA, 1, 2, 3]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
     final raw = (Packet()
@@ -2168,6 +2305,9 @@ void main() {
     client.send([cmdSendRawPacket, 0, ...raw]);
     expect(await client.frames.next(), [respCodeErr, errCodeTableFull]);
     client.send([cmdSendRawPacket, 0, 1]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
+    // Enough length to dispatch, but the packet bytes are not a valid frame.
+    client.send([cmdSendRawPacket, 0, 0x00, 0xC0]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
   });
 
@@ -2276,7 +2416,7 @@ void main() {
 
     final next = FramedClient(await Socket.connect('127.0.0.1', server.port!));
     addTearDown(next.close);
-    final info = await appStart(next, appProtocolVersion);
+    final info = await appStart(next);
     expect(info[0], respCodeSelfInfo);
     expect(info.sublist(4, 36), secondIdentity.publicKey);
     expect(server.bridge, same(secondBridge));
@@ -2323,7 +2463,7 @@ void main() {
 
     final next = FramedClient(await Socket.connect('127.0.0.1', server.port!));
     addTearDown(next.close);
-    final info = await appStart(next, appProtocolVersion);
+    final info = await appStart(next);
     expect(info[0], respCodeSelfInfo);
   });
 
@@ -2524,16 +2664,20 @@ void main() {
       () async {
     final pubkey = Uint8List(32)..[0] = 9;
 
+    client.send([cmdAddUpdateContact, ..._contactBody(pubkey).sublist(0, 34)]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd],
+        reason: 'records shorter than 35 bytes are rejected');
+
+    // Stock's guard is `len >= 1+32+2+1`, i.e. a 35-byte body is accepted.
     client.send([cmdAddUpdateContact, ..._contactBody(pubkey).sublist(0, 35)]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg],
-        reason: 'records shorter than 36 bytes are rejected');
+    expect(await client.frames.next(), [respCodeOk]);
 
     final twoHop = _contactBody(pubkey, pathLen: 2);
     client.send([cmdAddUpdateContact, ...twoHop.sublist(0, 36)]);
     expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
 
     client.send([cmdAddUpdateContact, ...const <int>[]]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
   });
 
   test('REMOVE_CONTACT and RESET_PATH validate and forward the key', () async {
@@ -2548,7 +2692,7 @@ void main() {
     expect(bridge.contacts, isEmpty);
 
     client.send([cmdResetPath, 1, 2]);
-    expect(await client.frames.next(), [respCodeErr, errCodeIllegalArg]);
+    expect(await client.frames.next(), [respCodeErr, errCodeUnsupportedCmd]);
     client.send([cmdResetPath, ...pubkey]);
     expect(await client.frames.next(), [respCodeOk]);
     expect(bridge.resetPathFor, pubkey);
@@ -2621,7 +2765,7 @@ void main() {
           cmdReboot,
         ]));
     expect(server.commandSpecs.length, 59);
-    expect(server.commandSpecs[cmdSendTxtMsg]!.minDataLength, 12);
+    expect(server.commandSpecs[cmdSendTxtMsg]!.minDataLength, 13);
     expect(server.commandSpecs[cmdImportPrivateKey]!.minDataLength, 64);
     expect(server.commandSpecs[cmdGetContactByKey]!.minDataLength, pubKeySize);
     expect(server.commandSpecs[cmdSendAnonReq]!.minDataLength, pubKeySize + 1);
@@ -2635,7 +2779,7 @@ void main() {
       client.send([entry.key, ...List.filled(min - 1, 0)]);
       expect(
         await client.frames.next(),
-        [respCodeErr, errCodeIllegalArg],
+        [respCodeErr, entry.value.shortErrorCode],
         reason: 'cmd 0x${entry.key.toRadixString(16)} with ${min - 1} bytes',
       );
     }
@@ -2645,14 +2789,10 @@ void main() {
   });
 }
 
-Future<Uint8List> appStart(
-  FramedClient client,
-  int appVersion,
-) async {
+Future<Uint8List> appStart(FramedClient client) async {
   final w = BufferWriter()
     ..writeByte(cmdAppStart)
-    ..writeByte(appVersion)
-    ..writeBytes(List.filled(6, 0))
+    ..writeBytes(List.filled(7, 0))
     ..writeString('test')
     ..writeByte(0);
   client.send(w.toBytes());

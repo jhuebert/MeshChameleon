@@ -60,19 +60,9 @@ Future<void> main(List<String> args) async {
     stdout.writeln('DEVICE_INFO fw=${deviceInfo[1]} '
         'maxContacts=${deviceInfo[2] * 2} maxChannels=$maxChannels');
 
-    // CMD_APP_START needs len>=8 (6 reserved bytes then trailing app name).
-    send([
-      cmdAppStart,
-      appProtocolVersion,
-      0,
-      0,
-      0,
-      0,
-      0,
-      0,
-      ...'CompanionInspect'.codeUnits,
-      0
-    ]);
+    // CMD_APP_START needs len>=8 (command + 7 reserved bytes, then app name).
+    send(
+        [cmdAppStart, 0, 0, 0, 0, 0, 0, 0, ...'CompanionInspect'.codeUnits, 0]);
     var self = await nextDefault();
     var guard = 0;
     while (self.isNotEmpty &&
@@ -116,8 +106,8 @@ Future<void> _dumpChannels(
   int maxChannels,
 ) async {
   stdout.writeln('--- channels ($maxChannels) ---');
-  send([cmdGetChannel]); // empty payload == full list
   for (var i = 0; i < maxChannels; i++) {
+    send([cmdGetChannel, i]);
     final frame = await next(const Duration(seconds: 2));
     if (frame.isEmpty) break;
     if (frame[0] != respCodeChannelInfo || frame.length < 50) {

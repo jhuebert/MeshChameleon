@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:mesh_protocol/mesh_protocol.dart';
@@ -17,6 +18,27 @@ int rssiByte(int rssi) => rssi.clamp(-128, 127) & 0xFF;
 /// The first [length] bytes of [key], or the whole key when it is shorter.
 List<int> keyPrefix(Uint8List key, int length) =>
     key.length <= length ? key : key.sublist(0, length);
+
+/// Encode [text] truncated to at most [maxBytes] UTF-8 bytes.
+///
+/// Stock firmware copies raw bytes and may cut a UTF-8 sequence when the
+/// companion frame is full; mirror that so frame lengths match.
+Uint8List textBytesWithin(String text, int maxBytes) {
+  if (maxBytes <= 0) return Uint8List(0);
+  final bytes = utf8.encode(text);
+  return Uint8List.fromList(
+      bytes.length <= maxBytes ? bytes : bytes.sublist(0, maxBytes));
+}
+
+/// The four signed-message prefix bytes, zero-padded when absent.
+Uint8List signedSenderPrefix(QueuedMessage msg) {
+  final out = Uint8List(4);
+  final prefix = msg.senderPrefix;
+  if (prefix != null) {
+    out.setRange(0, prefix.length.clamp(0, 4), prefix);
+  }
+  return out;
+}
 
 /// `PUSH_CODE_MSG_WAITING`.
 Uint8List encodePushMsgWaiting() => Uint8List.fromList([pushCodeMsgWaiting]);
@@ -228,7 +250,7 @@ Uint8List encodeMessageFrame(QueuedMessage msg, {required int appTargetVer}) {
   final snr = snrByte(msg.snr);
   final pathLenByte = msg.pathLen < 256 ? msg.pathLen : 0xFF;
   if (msg.isChannel) {
-    if (msg.channelDataType != 0) {
+    if (msg.isChannelData) {
       final raw = msg.channelDataPayload ?? Uint8List(0);
       final payload = raw.length > maxChannelDataLength
           ? raw.sublist(0, maxChannelDataLength)
@@ -245,27 +267,27 @@ Uint8List encodeMessageFrame(QueuedMessage msg, {required int appTargetVer}) {
             ..writeBytes(payload))
           .toBytes();
     }
+    final w = BufferWriter();
     if (appTargetVer >= 3) {
-      return (BufferWriter()
-            ..writeByte(respCodeChannelMsgRecvV3)
-            ..writeByte(snr)
-            ..writeByte(0)
-            ..writeByte(0)
-            ..writeByte(msg.channelIdx)
-            ..writeByte(pathLenByte)
-            ..writeByte(msg.txtType)
-            ..writeUInt32Le(msg.timestamp)
-            ..writeString(msg.text))
-          .toBytes();
+      w
+        ..writeByte(respCodeChannelMsgRecvV3)
+        ..writeByte(snr)
+        ..writeByte(0)
+        ..writeByte(0)
+        ..writeByte(msg.channelIdx)
+        ..writeByte(pathLenByte)
+        ..writeByte(msg.txtType)
+        ..writeUInt32Le(msg.timestamp);
+    } else {
+      w
+        ..writeByte(respCodeChannelMsgRecv)
+        ..writeByte(msg.channelIdx)
+        ..writeByte(pathLenByte)
+        ..writeByte(msg.txtType)
+        ..writeUInt32Le(msg.timestamp);
     }
-    return (BufferWriter()
-          ..writeByte(respCodeChannelMsgRecv)
-          ..writeByte(msg.channelIdx)
-          ..writeByte(pathLenByte)
-          ..writeByte(msg.txtType)
-          ..writeUInt32Le(msg.timestamp)
-          ..writeString(msg.text))
-        .toBytes();
+    w.writeBytes(textBytesWithin(msg.text, maxCompanionPayloadSize - w.length));
+    return w.toBytes();
   }
   final prefix = msg.senderKey.length >= keyPrefix6
       ? msg.senderKey.sublist(0, keyPrefix6)
@@ -273,25 +295,28 @@ Uint8List encodeMessageFrame(QueuedMessage msg, {required int appTargetVer}) {
           ...msg.senderKey,
           ...List.filled(keyPrefix6 - msg.senderKey.length, 0),
         ]);
+  final w = BufferWriter();
   if (appTargetVer >= 3) {
-    return (BufferWriter()
-          ..writeByte(respCodeContactMsgRecvV3)
-          ..writeByte(snr)
-          ..writeByte(0)
-          ..writeByte(0)
-          ..writeBytes(prefix)
-          ..writeByte(pathLenByte)
-          ..writeByte(msg.txtType)
-          ..writeUInt32Le(msg.timestamp)
-          ..writeString(msg.text))
-        .toBytes();
+    w
+      ..writeByte(respCodeContactMsgRecvV3)
+      ..writeByte(snr)
+      ..writeByte(0)
+      ..writeByte(0)
+      ..writeBytes(prefix)
+      ..writeByte(pathLenByte)
+      ..writeByte(msg.txtType)
+      ..writeUInt32Le(msg.timestamp);
+  } else {
+    w
+      ..writeByte(respCodeContactMsgRecv)
+      ..writeBytes(prefix)
+      ..writeByte(pathLenByte)
+      ..writeByte(msg.txtType)
+      ..writeUInt32Le(msg.timestamp);
   }
-  return (BufferWriter()
-        ..writeByte(respCodeContactMsgRecv)
-        ..writeBytes(prefix)
-        ..writeByte(pathLenByte)
-        ..writeByte(msg.txtType)
-        ..writeUInt32Le(msg.timestamp)
-        ..writeString(msg.text))
-      .toBytes();
+  if (msg.txtType == txtTypeSigned) {
+    w.writeBytes(signedSenderPrefix(msg));
+  }
+  w.writeBytes(textBytesWithin(msg.text, maxCompanionPayloadSize - w.length));
+  return w.toBytes();
 }

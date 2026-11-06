@@ -89,17 +89,19 @@ class AckTracker {
   }
 
   /// Confirm a matching pending send. Returns true when one was found.
-  bool confirm(int crc) {
+  PendingAck? take(int crc) {
     final index = _pending.indexWhere((ack) => ack.crc == (crc & 0xFFFFFFFF));
-    if (index < 0) return false;
+    if (index < 0) return null;
     final pending = _pending.removeAt(index);
     pending.timer.cancel();
     final tripTime =
         (clock.monotonicMilliseconds - pending.sentAtMonotonicMillis)
             .clamp(0, 0xFFFFFFFF);
     onConfirmed(crc & 0xFFFFFFFF, tripTime);
-    return true;
+    return pending;
   }
+
+  bool confirm(int crc) => take(crc) != null;
 
   void removeForContact(Uint8List pubkey) {
     final hex = bytesToHex(pubkey);

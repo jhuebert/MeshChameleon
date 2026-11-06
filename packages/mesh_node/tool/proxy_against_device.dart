@@ -87,7 +87,7 @@ Future<void> main(List<String> args) async {
   stdout.writeln('client DEVICE_INFO code=${deviceInfo[0]} fw=${deviceInfo[1]} '
       'maxContacts=${deviceInfo[2] * 2} maxChannels=${deviceInfo[3]}');
 
-  send([cmdAppStart, appProtocolVersion]);
+  send([cmdAppStart, 0, 0, 0, 0, 0, 0, 0]);
   final selfInfo = await next();
   final self = ParsedSelfInfo.parse(selfInfo);
   if (self == null) {

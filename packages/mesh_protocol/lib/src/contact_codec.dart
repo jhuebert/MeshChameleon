@@ -26,7 +26,7 @@ CompanionContactRecord? decodeCompanionContactRecord(
   Uint8List data, {
   int defaultLastmod = 0,
 }) {
-  if (data.length < 36) return null;
+  if (data.length < 35) return null;
   final pubkey = Uint8List.fromList(data.sublist(0, pubKeySize));
   final advType = data[32];
   final flags = data[33];

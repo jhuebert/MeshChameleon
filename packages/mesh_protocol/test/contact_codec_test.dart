@@ -71,7 +71,21 @@ void main() {
   });
 
   test('rejects short records, invalid paths, names, and coordinates', () {
-    expect(decodeCompanionContactRecord(Uint8List(35)), isNull);
+    expect(decodeCompanionContactRecord(Uint8List(34)), isNull);
+
+    // The firmware guard is `len >= 36` including the command byte, so a
+    // 35-byte body is a valid minimal record.
+    final minimal = (BufferWriter()
+          ..writeBytes(key())
+          ..writeByte(advTypeChat)
+          ..writeByte(0)
+          ..writeByte(0xFF))
+        .toBytes();
+    final minimalRecord = decodeCompanionContactRecord(minimal);
+    expect(minimalRecord, isNotNull);
+    expect(minimalRecord!.contact.name, isEmpty);
+    expect(minimalRecord.contact.outPathLen, -1);
+    expect(minimalRecord.hasGps, isFalse);
 
     final badPath = Contact(
       publicKey: key(),

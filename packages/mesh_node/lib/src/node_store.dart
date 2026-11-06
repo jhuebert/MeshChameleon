@@ -450,6 +450,8 @@ Map<String, Object?> _queuedMessageToJson(QueuedMessage m) => <String, Object?>{
       'path_len': m.pathLen,
       'snr': m.snr,
       'rssi': m.rssi,
+      if (m.senderPrefix != null) 'sender_prefix': bytesToHex(m.senderPrefix!),
+      if (m.isChannelData) 'is_channel_data': true,
       'channel_data_type': m.channelDataType,
       if (m.channelDataPayload != null)
         'channel_data_payload': bytesToHex(m.channelDataPayload!),
@@ -465,6 +467,10 @@ QueuedMessage _queuedMessageFromJson(Map<String, Object?> j) => QueuedMessage(
       pathLen: _int(j['path_len']),
       snr: _double(j['snr']),
       rssi: _int(j['rssi']),
+      senderPrefix:
+          j['sender_prefix'] == null ? null : _bytes(j['sender_prefix']),
+      isChannelData:
+          j['is_channel_data'] == true || _int(j['channel_data_type']) != 0,
       channelDataType: _int(j['channel_data_type']),
       channelDataPayload: j['channel_data_payload'] == null
           ? null

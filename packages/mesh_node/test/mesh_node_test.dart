@@ -309,6 +309,41 @@ void main() {
     expect(aliceSink.confirmed.first, result.expectedAck);
   });
 
+  test('queued direct messages report the stock path_len field', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+
+    final direct = await _encryptedTextPacket(
+      from: alice.identity,
+      to: bob.identity,
+      timestamp: 1,
+      txtType: txtTypePlain,
+      text: 'direct path',
+    );
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, direct.writeTo());
+    await pump();
+    final directMsg = await bob.syncNextMessage();
+    expect(directMsg, isNotNull);
+    expect(directMsg!.pathLen, 0xFF,
+        reason: 'a direct-route message reports an unknown/flooded path byte');
+
+    final flooded = await _encryptedTextPacket(
+      from: alice.identity,
+      to: bob.identity,
+      timestamp: 2,
+      txtType: txtTypePlain,
+      text: 'flood path',
+    );
+    flooded.header = (flooded.header & ~phRouteMask) | routeTypeFlood;
+    flooded.pathLenByte = 0x40; // hash size 2, zero hops
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, flooded.writeTo());
+    await pump();
+    final floodMsg = await bob.syncNextMessage();
+    expect(floodMsg, isNotNull);
+    expect(floodMsg!.pathLen, 0x40);
+  });
+
   test('direct text uses the client timestamp and attempt verbatim', () async {
     await alice.addUpdateContact(Contact(
       publicKey: bob.identity.publicKey,
@@ -353,6 +388,40 @@ void main() {
     expect(msg.channelIdx, 0);
   });
 
+  test('channel text uses the client timestamp on air', () async {
+    const timestamp = 1700000123;
+    await alice.sendChannelMessage(0, 'stamped', timestamp: timestamp);
+    final raw = (alice.link as FakeDeviceLink).transmitted.last;
+    final packet = Packet.readFrom(raw)!;
+    final secret = channelSecret32(alice.getChannel(0)!.secret);
+    final plaintext = CryptoUtils.macThenDecrypt(
+      secret.sublist(0, 16),
+      secret,
+      packet.payload.sublist(1),
+    );
+    final r = BufferReader(plaintext);
+    expect(r.readUInt32Le(), timestamp);
+    expect(r.readByte(), 0); // flags
+    expect(r.readCString(), 'alice: stamped');
+  });
+
+  test('group text is capped to the companion raw-frame budget', () async {
+    await alice.sendChannelMessage(0, 'x' * 500);
+    final raw = (alice.link as FakeDeviceLink).transmitted.last;
+    expect(raw.length, lessThanOrEqualTo(maxCompanionPayloadSize - 2));
+    final packet = Packet.readFrom(raw)!;
+    final secret = channelSecret32(alice.getChannel(0)!.secret);
+    final plaintext = CryptoUtils.macThenDecrypt(
+      secret.sublist(0, 16),
+      secret,
+      packet.payload.sublist(1),
+    );
+    final r = BufferReader(plaintext)..skipBytes(5);
+    final content = r.readCString();
+    expect(content, hasLength(maxGroupTextContentOverCompanion));
+    expect(content, startsWith('alice: '));
+  });
+
   test('channel text is delivered despite a one-byte channel hash collision',
       () async {
     final ncbot = Uint8List.fromList(
@@ -385,6 +454,20 @@ void main() {
     expect(selftestMsg.text, 'alice: hello selftest');
   });
 
+  test('cleared channel slot does not absorb null-key group traffic', () async {
+    await bob.setChannel(2, '', Uint8List(16));
+    final packet = PacketBuilder.createGroupText(
+      channel: bob.getChannel(2)!,
+      message: 'spoofed',
+      senderName: 'ghost',
+      timestamp: 1700000000,
+    );
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, packet.writeTo());
+    await pump();
+
+    expect(await bob.syncNextMessage(), isNull);
+  });
+
   test('channel messages preserve the encoded path hash width', () async {
     final packet = PacketBuilder.createGroupText(
       channel: alice.getChannel(0)!,
@@ -402,7 +485,49 @@ void main() {
     expect(message!.pathLen, 0x42);
   });
 
-  test('a direct channel echo from the local name is not queued', () async {
+  test('group text with a non-plain type is ignored', () async {
+    final channel = bob.getChannel(0)!;
+    final secret = channelSecret32(channel.secret);
+    final plaintext = BufferWriter()
+      ..writeUInt32Le(1700000002)
+      ..writeByte(1 << 2) // non-plain group text type
+      ..writeString('alice: spoof')
+      ..writeByte(0);
+    final cipher = CryptoUtils.encryptThenMac(
+      secret.sublist(0, 16),
+      secret,
+      plaintext.toBytes(),
+    );
+    final packet = (Packet()
+          ..header = Packet.createHeader(payloadTypeGrpTxt, routeTypeFlood)
+          ..pathLenByte = 0
+          ..payload =
+              Uint8List.fromList([channelHash(channel.secret), ...cipher]))
+        .writeTo();
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, packet);
+    await pump();
+    expect(await bob.syncNextMessage(), isNull);
+  });
+
+  test('unsupported direct text types are ignored', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+    final before = (alice.link as FakeDeviceLink).transmitted.length;
+    final packet = await _encryptedTextPacket(
+      from: bob.identity,
+      to: alice.identity,
+      timestamp: 7201,
+      txtType: 4,
+      text: 'unsupported',
+    );
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, packet.writeTo());
+    await pumpAck();
+    expect(await alice.syncNextMessage(), isNull);
+    expect((alice.link as FakeDeviceLink).transmitted.length, before);
+  });
+
+  test('a channel text using our name from the mesh is still queued', () async {
     final packet = PacketBuilder.createGroupText(
       channel: alice.getChannel(0)!,
       message: 'Test',
@@ -411,7 +536,37 @@ void main() {
     );
     (alice.link as FakeDeviceLink).deliver(6.0, -70, packet.writeTo());
     await pump();
+    final msg = await alice.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.text, 'alice: Test');
+  });
+
+  test('a locally sent group data echo is not queued', () async {
+    final payload = Uint8List.fromList([1, 2, 3]);
+    await alice.sendChannelData(0, 0x1234, payload);
+    final echo = (alice.link as FakeDeviceLink).transmitted.last;
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, echo);
+    await pump();
     expect(await alice.syncNextMessage(), isNull);
+  });
+
+  test('a raw client packet is not pre-marked as seen', () async {
+    // Stock forwards CMD_SEND_RAW_PACKET through Dispatcher::sendPacket without
+    // marking it seen, so a repeater echo is still processed.
+    final packet = PacketBuilder.createGroupText(
+      channel: alice.getChannel(0)!,
+      message: 'raw echo',
+      senderName: 'alice',
+      timestamp: 1700000003,
+    );
+    expect(await alice.sendRawPacket(packet, 0), isTrue);
+    final echo = (alice.link as FakeDeviceLink).transmitted.last;
+    (alice.link as FakeDeviceLink).deliver(6.0, -70, echo);
+    await pump();
+
+    final msg = await alice.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.text, 'alice: raw echo');
   });
 
   test('syncNextMessage drains and returns null when empty', () async {
@@ -495,6 +650,13 @@ void main() {
     final contact = alice.getContactByKey(bob.identity.publicKey);
     expect(contact, isNotNull);
     expect(contact!.outPath, [0xAA, 0xBB]);
+
+    // Stock does not send a reciprocal return path for a path-discovery
+    // reply, so the peer still has to consume the reported paths.
+    final before = (alice.link as FakeDeviceLink).transmitted.length;
+    await Future<void>.delayed(const Duration(milliseconds: 700));
+    expect((alice.link as FakeDeviceLink).transmitted.length, before,
+        reason: 'path-discovery replies never trigger a reciprocal path');
   });
 
   test('login sends an ANON_REQ and pushes login success', () async {
@@ -554,6 +716,7 @@ void main() {
     await pump();
     expect(aliceSink.logins.length, 1);
 
+    alice.getContactByKey(bob.identity.publicKey)!.syncSince = 4242;
     await alice.sendKeepAlivesNow();
     await pump();
 
@@ -565,6 +728,7 @@ void main() {
     final plain = CryptoUtils.macThenDecrypt(
         secret.sublist(0, 16), secret, req.payload.sublist(2));
     expect(plain[4], reqTypeKeepAlive);
+    expect((BufferReader(plain)..skipBytes(5)).readUInt32Le(), 4242);
 
     // Deliver the discrete ACK the server would send; it must be consumed
     // silently and NOT surfaced as SEND_CONFIRMED.
@@ -618,6 +782,107 @@ void main() {
     (bob.link as FakeDeviceLink).deliver(6.0, -70, raw);
     await pump();
     expect(await bob.syncNextMessage(), isNull);
+  });
+
+  test('channel data with reserved type 0 is delivered on receive', () async {
+    (bob.link as FakeDeviceLink).deliver(
+      6.0,
+      -70,
+      _groupDataPacket(bob.getChannel(0)!, 0, Uint8List.fromList([9])),
+    );
+    await pump();
+
+    final msg = await bob.syncNextMessage();
+    expect(msg, isNotNull);
+    expect(msg!.isChannelData, isTrue);
+    expect(msg.channelDataType, 0);
+    expect(msg.channelDataPayload, [9]);
+  });
+
+  test('queue full evicts the oldest channel message, then drops new',
+      () async {
+    final id = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 77);
+    final link = FakeDeviceLink();
+    await link.connect();
+    final node = MeshNode(
+      identity: id,
+      link: link,
+      prefs: NodePrefs(nodeName: 'queue'),
+      maxQueueSize: 2,
+    )..start();
+    addTearDown(node.stop);
+    await node.addUpdateContact(Contact(
+      publicKey: bob.identity.publicKey,
+      name: 'bob',
+      outPathLen: -1,
+    ));
+
+    Future<void> deliverDirect(int timestamp, String text) async {
+      final packet = await _encryptedTextPacket(
+        from: bob.identity,
+        to: id,
+        timestamp: timestamp,
+        txtType: txtTypePlain,
+        text: text,
+      );
+      link.deliver(6.0, -70, packet.writeTo());
+      await pump();
+    }
+
+    await deliverDirect(100, 'd1');
+    link.deliver(6.0, -70,
+        _groupDataPacket(node.getChannel(0)!, 0x1234, Uint8List.fromList([1])));
+    await pump();
+    await deliverDirect(101, 'd2');
+
+    // The channel message is evicted even though it is newer than d1.
+    expect((await node.syncNextMessage())!.text, 'd1');
+    expect((await node.syncNextMessage())!.text, 'd2');
+    expect(await node.syncNextMessage(), isNull);
+
+    // With no channel message to evict, the incoming message is dropped.
+    await deliverDirect(102, 'd3');
+    await deliverDirect(103, 'd4');
+    await deliverDirect(104, 'd5');
+    expect((await node.syncNextMessage())!.text, 'd3');
+    expect((await node.syncNextMessage())!.text, 'd4');
+    expect(await node.syncNextMessage(), isNull);
+  });
+
+  test('oversized packets fail before reaching the radio', () async {
+    final link = alice.link as FakeDeviceLink;
+    final before = link.transmitted.length;
+
+    await expectLater(
+      alice.sendRawData(Uint8List(180), Uint8List(0), 0),
+      throwsA(isA<CompanionOperationError>()
+          .having((e) => e.code, 'code', errCodeTableFull)),
+    );
+    expect(link.transmitted.length, before);
+
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+    final result =
+        await alice.sendTextMessage(bob.identity.publicKey, 'x' * 160);
+    expect(result.success, isFalse);
+  });
+
+  test('a dropped link during send maps to BAD_STATE', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+    final link = alice.link as FakeDeviceLink;
+    link.rawTxError =
+        const DeviceCommandError.disconnected(message: 'radio gone');
+
+    await expectLater(
+      alice.sendTextMessage(bob.identity.publicKey, 'hello'),
+      throwsA(isA<CompanionOperationError>()
+          .having((e) => e.code, 'code', errCodeBadState)),
+      reason: 'a physical link failure is not a handler bug',
+    );
+    link.rawTxError = null;
   });
 
   test('group_tx157_channel_rx167_are_distinct', () async {
@@ -742,6 +1007,40 @@ void main() {
     expect(aliceSink.confirmed, isEmpty);
   });
 
+  test('direct text over the firmware length limit is rejected', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+    final before = (alice.link as FakeDeviceLink).transmitted.length;
+    final result = await alice.sendTextMessage(
+      bob.identity.publicKey,
+      'x' * (maxTextLength + 1),
+    );
+    expect(result.success, isFalse);
+    expect((alice.link as FakeDeviceLink).transmitted.length, before);
+
+    // Stock reserves two extra bytes for the extended-attempt tail.
+    final retry = await alice.sendTextMessage(
+      bob.identity.publicKey,
+      'x' * (maxTextLength - 1),
+      attempt: 4,
+    );
+    expect(retry.success, isFalse);
+    expect((alice.link as FakeDeviceLink).transmitted.length, before);
+  });
+
+  test('direct text refreshes the sender contact lastmod', () async {
+    await alice.advertise();
+    await bob.advertise();
+    await pump();
+    final contact = bob.getContactByKey(alice.identity.publicKey)!..lastmod = 1;
+
+    await alice.sendTextMessage(bob.identity.publicKey, 'heard you');
+    await pump();
+
+    expect(contact.lastmod, greaterThan(1));
+  });
+
   test('signed direct messages are parsed, queued, and ACKed', () async {
     await alice.advertise();
     await bob.advertise();
@@ -773,6 +1072,7 @@ void main() {
     expect(msg, isNotNull);
     expect(msg!.txtType, txtTypeSigned);
     expect(msg.text, 'signed hi');
+    expect(msg.senderPrefix, bob.identity.publicKey.sublist(0, 4));
     expect(aliceLink.transmitted.length - ackedBefore, 1); // ACK sent
   });
 
@@ -895,6 +1195,14 @@ void main() {
     await pump();
     expect(bobSink.controlData.length, 1);
     expect(bobSink.controlData.first, [0, 0x80, 1, 2, 3]);
+
+    // A zero-hop control payload without the marker is not surfaced.
+    final noMarker = Packet()
+      ..header = Packet.createHeader(payloadTypeControl, routeTypeDirect)
+      ..payload = Uint8List.fromList([1, 2, 3]);
+    (bob.link as FakeDeviceLink).deliver(6.0, -70, noMarker.writeTo());
+    await pump();
+    expect(bobSink.controlData.length, 1);
   });
 
   test('setRadioParams updates prefs and forwards to the device link',
@@ -982,6 +1290,25 @@ void main() {
     // A scoped advert is still valid on air and accepted by a peer.
     expect(bob.contacts.length, 1);
     expect(bob.contacts.first.publicKey, alice.identity.publicKey);
+  });
+
+  test('flooded request commands use the default flood scope', () async {
+    final key = Uint8List.fromList(List.generate(16, (i) => i + 1));
+    await alice.setDefaultFloodScope('RegionOne', key);
+    final peer = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 241);
+    await alice.addUpdateContact(Contact(
+      publicKey: peer.publicKey,
+      name: 'peer',
+      outPathLen: -1,
+    ));
+
+    final result = await alice.sendStatusReq(peer.publicKey);
+    expect(result.isFlood, isTrue);
+    final pkt =
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
+    expect(pkt.hasTransportCodes, isTrue);
+    expect(pkt.transportCode0,
+        CryptoUtils.transportCode(key, pkt.payloadType, pkt.payload));
   });
 
   test('flood scope override, unscoped flag, and reboot reset', () async {
@@ -1362,6 +1689,21 @@ void main() {
     expect(anonResp.sublist(1, 5), [5, 6, 7, 8]);
   });
 
+  test('anonymous request to an unknown key defaults to zero-hop direct',
+      () async {
+    final unknown = await LocalIdentity.fromSeed(Uint8List(32)..[0] = 249);
+    final result = await alice.sendAnonReq(
+      unknown.publicKey,
+      Uint8List.fromList([1]),
+    );
+    expect(result.success, isTrue);
+    expect(result.isFlood, isFalse);
+    final packet =
+        Packet.readFrom((alice.link as FakeDeviceLink).transmitted.last)!;
+    expect(packet.isRouteDirect, isTrue);
+    expect(packet.pathHashCount, 0);
+  });
+
   test('exportContact(self) returns a valid advert blob', () async {
     final blob = await alice.exportContact(null);
     expect(blob, isNotNull);
@@ -1497,6 +1839,8 @@ void main() {
     r.readUInt32Le(); // tag
     expect(r.readByte(), reqTypeGetTelemetryData);
     expect(r.readByte(), telemPermEnvironment);
+    expect(r.readBytes(3), [0, 0, 0]);
+    expect(r.remaining, greaterThanOrEqualTo(4)); // random bytes + padding
   });
 
   test('telemetry request pushes a matching telemetry response', () async {
@@ -2063,9 +2407,9 @@ void main() {
   });
 
   test('sendTracePathRaw transmits a trace packet', () async {
-    final ok =
+    final result =
         await alice.sendTracePathRaw(0x1234, 0, 0, Uint8List.fromList([1, 2]));
-    expect(ok, isTrue);
+    expect(result.success, isTrue);
     final sent = (alice.link as FakeDeviceLink).transmitted.last;
     final packet = Packet.readFrom(sent)!;
     expect(packet.payloadType, payloadTypeTrace);
@@ -2828,6 +3172,61 @@ void main() {
     expect(signedAck.payload, expectedSigned);
   });
 
+  test('plain ACK hashes the raw text bytes, not a UTF-8 re-encode', () async {
+    final (a, b, _, bLink, scheduler) = await _schedulerPair();
+    addTearDown(a.stop);
+    addTearDown(b.stop);
+    await b.addUpdateContact(Contact(
+      publicKey: a.identity.publicKey,
+      name: 'a',
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+
+    const timestamp = 7300;
+    // "a" + invalid UTF-8 + "b": decoding and re-encoding would replace the
+    // invalid sequence with U+FFFD and break the sender's ACK hash.
+    final rawText = Uint8List.fromList([0x61, 0xFF, 0xFE, 0x62]);
+    final plaintext = BufferWriter()
+      ..writeUInt32Le(timestamp)
+      ..writeByte(txtTypePlain << 2)
+      ..writeBytes(rawText)
+      ..writeByte(0);
+    final secret = await a.identity.sharedSecret(b.identity.publicKey);
+    final cipher = CryptoUtils.encryptThenMac(
+      secret.sublist(0, 16),
+      secret,
+      plaintext.toBytes(),
+    );
+    final packet = (Packet()
+          ..header = Packet.createHeader(payloadTypeTxtMsg, routeTypeDirect)
+          ..pathLenByte = 0
+          ..payload = Uint8List.fromList([
+            b.identity.publicKey[0],
+            a.identity.publicKey[0],
+            ...cipher,
+          ]))
+        .writeTo();
+
+    bLink.deliver(6.0, -70, packet);
+    await pump();
+    scheduler.advance(const Duration(milliseconds: 200));
+    await pump();
+
+    final ack = Packet.readFrom(bLink.transmitted.last)!;
+    expect(ack.payloadType, payloadTypeAck);
+    expect(
+      ack.payload.sublist(0, 4),
+      PacketBuilder.ackHash(
+        timestamp: timestamp,
+        flagsByte: txtTypePlain << 2,
+        text: rawText,
+        senderPubkey: a.identity.publicKey,
+      ),
+    );
+    expect(ack.payload[4], 0);
+  });
+
   test('flood_text_timeout_matches_firmware_airtime_estimate', () async {
     final (a, bNode, aLink, _, _) = await _schedulerPair();
     addTearDown(a.stop);
@@ -2881,6 +3280,12 @@ void main() {
     expect(learned.outPathLen, 0,
         reason: 'a zero-hop path-return must not be discarded');
     expect(learned.hasDirectRoute, isTrue);
+
+    // The reciprocal path-return teaches b the route back to a.
+    scheduler.advance(const Duration(milliseconds: 600));
+    await pump();
+    final learnedBack = b.getContactByKey(a.identity.publicKey)!;
+    expect(learnedBack.hasDirectRoute, isTrue);
 
     final second = await a.sendTextMessage(b.identity.publicKey, 'direct now');
     expect(second.isFlood, isFalse);
@@ -3314,6 +3719,37 @@ void main() {
       return packet?.payloadType == payloadTypeAck ||
           packet?.payloadType == payloadTypeMultipart;
     }), isEmpty);
+    bob.stop();
+  });
+
+  test('a scheduled ACK that fails after a link drop is contained', () async {
+    final (alice, bob, _, bobLink, scheduler) = await _schedulerPair();
+    await bob.addUpdateContact(Contact(
+      publicKey: alice.identity.publicKey,
+      name: 'alice',
+      outPathLen: 0,
+    ));
+    scheduler.resetJobs();
+
+    final packet = await _encryptedTextPacket(
+      from: alice.identity,
+      to: bob.identity,
+      timestamp: 1000,
+      txtType: txtTypePlain,
+      text: 'ack me',
+    );
+    bobLink.deliver(6, -70, packet.writeTo());
+    await pump();
+
+    // Drop the link before the 200ms ACK timer fires. The failed scheduled
+    // send must not surface as an unhandled asynchronous error.
+    bobLink.rawTxError =
+        const DeviceCommandError.disconnected(message: 'radio gone');
+    scheduler.advance(const Duration(milliseconds: 300));
+    await pump();
+    expect(bobLink.transmitted, isEmpty);
+
+    alice.stop();
     bob.stop();
   });
 
