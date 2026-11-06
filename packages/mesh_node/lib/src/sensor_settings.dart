@@ -14,6 +14,13 @@ abstract class VirtualSensorSettingsProvider {
 
   /// Validate/normalize [value] for [key], or return `null` to reject it.
   String? normalize(String key, String value);
+
+  /// Notify the provider that the node's accepted settings changed.
+  ///
+  /// Called after load, start, SET, and reset so hosts can react (for example
+  /// starting or stopping a location timer). [normalize] is also called while
+  /// loading persisted state and must stay free of side effects.
+  void onSettingsChanged(Map<String, String> settings) {}
 }
 
 /// Default provider: this build has no virtual GPS/environment hardware, so it

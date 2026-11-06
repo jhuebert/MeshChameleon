@@ -8,6 +8,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Virtual telemetry now includes the phone battery percentage and optional
+  phone GPS (latitude/longitude/altitude) on the self channel. Phone GPS also
+  feeds adverts and `SELF_INFO`, with `gps`/`gps_interval` custom settings, a
+  single demand-driven app location timer, location permission UI, and the
+  Android background-location/foreground-service plumbing.
 - A dropped BLE or TCP companion now parks instead of ending the session: the
   proxy stops so the client sees the disconnect, but MeshChameleon keeps waiting
   (BLE `autoConnect` or a capped TCP retry schedule) and restores the live

@@ -22,6 +22,7 @@ import 'mesh_rx.dart';
 import 'node_store.dart';
 import 'packet_deduper.dart';
 import 'packet_transport.dart';
+import 'phone_location.dart';
 import 'physical_radio.dart';
 import 'request_tracker.dart';
 import 'reset.dart';
@@ -30,6 +31,7 @@ import 'scheduler.dart';
 import 'sensor_settings.dart';
 import 'serial_queue.dart';
 import 'state_persistence.dart';
+import 'telemetry_assembler.dart';
 import 'virtual_clock.dart';
 
 /// Maximum number of inbound messages held for the client. When the queue is
@@ -56,6 +58,7 @@ class MeshNode extends CompanionBridge implements CliHost {
     int maxQueueSize = defaultOfflineQueueSize,
     this.storageQuotaBytes = virtualStorageQuotaBytes,
     this.sensorSettings = const EmptyVirtualSensorSettingsProvider(),
+    this.readPhoneBatteryPercent,
     this.scheduler = const TimerMeshScheduler(),
     this.identityPersistence,
     this.onIdentityChanged,
@@ -78,6 +81,13 @@ class MeshNode extends CompanionBridge implements CliHost {
       },
       clock: this.clock,
       scheduler: scheduler,
+    );
+    _telemetry = TelemetryAssembler(
+      battery: battery,
+      prefs: this.prefs,
+      gpsEnabled: () => gpsEnabled,
+      locationFix: () => _locationFix,
+      readPhoneBatteryPercent: readPhoneBatteryPercent,
     );
     _floodScope = FloodScope();
     _contactTable = ContactTable(clock: this.clock);
@@ -127,7 +137,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       acks: _acks,
       sessions: _sessions,
       transport: _transport,
-      battery: battery,
+      telemetry: _telemetry,
       cli: _cli,
       pushSink: () => pushSink,
       guard: _guard,
@@ -258,6 +268,24 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// Coalesced physical-battery samples with virtual-only storage reporting.
   late final BatteryService battery;
 
+  /// Shared CayenneLPP assembler for remote replies and self telemetry.
+  late final TelemetryAssembler _telemetry;
+
+  /// Phone battery percentage source, or null when the host has no battery.
+  final Future<int?> Function()? readPhoneBatteryPercent;
+
+  /// Last phone location fix, kept in memory only for altitude/diagnostics.
+  VirtualLocationFix? _locationFix;
+
+  /// True when in-memory coordinates have not yet reached durable state.
+  bool _locationDirty = false;
+
+  /// Whether phone GPS is enabled through the `gps` custom variable.
+  bool get gpsEnabled => _customVars['gps'] == '1';
+
+  /// Last accepted phone fix, or null before the first fix/reset/manual set.
+  VirtualLocationFix? get locationFix => _locationFix;
+
   /// Capabilities of the attached physical radio modem. Kept separate from the
   /// virtual [DeviceInfo] advertised to clients.
   PhysicalCapabilities get physical => _radio.capabilities;
@@ -304,7 +332,10 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// channels, queue, and preferences.
   Future<void> load() async {
     final state = await store?.load();
-    if (state == null) return;
+    if (state == null) {
+      sensorSettings.onSettingsChanged(getCustomVars());
+      return;
+    }
     _applyState(state);
     // A persisted file may predate the current public-channel defaults or
     // contain provider settings that are no longer supported.
@@ -324,6 +355,7 @@ class MeshNode extends CompanionBridge implements CliHost {
       final normalized = sensorSettings.normalize(entry.key, entry.value);
       if (normalized != null) _customVars[entry.key] = normalized;
     }
+    sensorSettings.onSettingsChanged(getCustomVars());
   }
 
   /// Serialises identity replacement requests.
@@ -384,12 +416,24 @@ class MeshNode extends CompanionBridge implements CliHost {
     _startedAtMonotonicMillis = clock.monotonicMilliseconds;
     link.setRawRxListener(_onRawFrame);
     battery.start();
+    sensorSettings.onSettingsChanged(getCustomVars());
   }
 
   void stop() {
     link.setRawRxListener(null);
     battery.stop();
     _cancelTransientSessions();
+    _persistLocationIfDirty();
+  }
+
+  /// Schedule a state save when a phone fix has not yet reached durable state.
+  ///
+  /// [retire] waits for the persistence queue after calling [stop], so the save
+  /// is flushed before the runtime is released.
+  void _persistLocationIfDirty() {
+    if (!_locationDirty) return;
+    _locationDirty = false;
+    _persist();
   }
 
   void _cancelTransientSessions() {
@@ -403,6 +447,9 @@ class MeshNode extends CompanionBridge implements CliHost {
   /// can no longer save or recreate state after this completes.
   Future<void> retire() async {
     if (_guard.retired) return;
+    // Queue the last location save before the guard blocks further writes; the
+    // persistence queue is awaited below.
+    _persistLocationIfDirty();
     _guard.retire();
     stop();
     await _waitForPhysicalTxIdle();
@@ -662,7 +709,10 @@ class MeshNode extends CompanionBridge implements CliHost {
         await _state.replace(fresh, allowResetting: true);
 
         _clearIdentityRuntimeState();
+        _locationFix = null;
+        _locationDirty = false;
         _transport.resetCounters();
+        sensorSettings.onSettingsChanged(getCustomVars());
 
         if (candidate != null) {
           try {
@@ -869,6 +919,7 @@ class MeshNode extends CompanionBridge implements CliHost {
         ..[name] = normalized;
       return current.copyWith(customSettings: candidate);
     });
+    sensorSettings.onSettingsChanged(getCustomVars());
   }
 
   @override
@@ -1070,7 +1121,37 @@ class MeshNode extends CompanionBridge implements CliHost {
         ..longitude = lonMicros / 1e6;
       return current.copyWith(prefs: prefsCopy);
     });
+    // Manual coordinates must not be mixed with a stale phone altitude.
+    _locationFix = null;
+    _locationDirty = false;
   }
+
+  /// Apply a phone GPS fix while `gps=1`.
+  ///
+  /// Coordinates update the live preferences used by adverts and `SELF_INFO`
+  /// without an immediate state commit; the next normal save persists them and
+  /// [stop]/[retire] flush a pending dirty location.
+  Future<void> applyLocationFix(VirtualLocationFix fix) async {
+    if (!gpsEnabled) return;
+    if (!fix.latitude.isFinite ||
+        !fix.longitude.isFinite ||
+        fix.latitude < -90 ||
+        fix.latitude > 90 ||
+        fix.longitude < -180 ||
+        fix.longitude > 180) {
+      return;
+    }
+    prefs
+      ..latitude = fix.latitude
+      ..longitude = fix.longitude;
+    _locationFix = fix;
+    _locationDirty = true;
+  }
+
+  /// Build self telemetry with every locally available sensor.
+  @override
+  Future<Uint8List> getSelfTelemetry() =>
+      _telemetry.build(telemPermBase | telemPermLocation);
 
   @override
   AdvertPath? getAdvertPath(Uint8List prefix) =>

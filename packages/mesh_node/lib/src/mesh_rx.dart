@@ -8,7 +8,6 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'ack_tracker.dart';
 import 'advert_path_cache.dart';
-import 'battery_service.dart';
 import 'cli.dart';
 import 'cli_runtime.dart';
 import 'connection_sessions.dart';
@@ -19,6 +18,7 @@ import 'packet_deduper.dart';
 import 'packet_transport.dart';
 import 'request_tracker.dart';
 import 'runtime_guard.dart';
+import 'telemetry_assembler.dart';
 import 'virtual_clock.dart';
 
 /// Outcome of an advert commit, captured inside the persistence queue.
@@ -39,7 +39,7 @@ class MeshRxDeps {
     required this.acks,
     required this.sessions,
     required this.transport,
-    required this.battery,
+    required this.telemetry,
     required this.cli,
     required this.pushSink,
     required this.guard,
@@ -63,7 +63,7 @@ class MeshRxDeps {
   final AckTracker acks;
   final ConnectionSessions sessions;
   final PacketTransport transport;
-  final BatteryService battery;
+  final TelemetryAssembler telemetry;
   final CliRuntime cli;
   final CompanionPushSink? Function() pushSink;
   final RuntimeGuard guard;
@@ -121,7 +121,7 @@ class MeshRx {
   AckTracker get acks => deps.acks;
   ConnectionSessions get sessions => deps.sessions;
   PacketTransport get transport => deps.transport;
-  BatteryService get battery => deps.battery;
+  TelemetryAssembler get telemetry => deps.telemetry;
   CliRuntime get cli => deps.cli;
   CompanionPushSink? get pushSink => deps.pushSink();
 
@@ -792,12 +792,8 @@ class MeshRx {
     final permissions = _grantedTelemetryPermissions(sender, inverseMask);
     if ((permissions & telemPermBase) == 0) return;
 
-    final millivolts = await battery.refresh(force: true);
+    final lpp = await telemetry.build(permissions);
     if (!deps.isCurrent(generation)) return;
-    final lpp = _encodeTelemetryLpp(
-      millivolts,
-      includeLocation: (permissions & telemPermLocation) != 0,
-    );
     final reply = Uint8List.fromList([
       ...(BufferWriter()..writeUInt32Le(tag)).toBytes(),
       ...lpp,
@@ -838,32 +834,6 @@ class MeshRx {
       permissions |= telemPermEnvironment;
     }
     return permissions & (~inverseMask & 0xFF);
-  }
-
-  Uint8List _encodeTelemetryLpp(
-    int millivolts, {
-    required bool includeLocation,
-  }) {
-    final w = BufferWriter()
-      ..writeBytes(encodeSelfVoltageTelemetry(millivolts));
-    if (includeLocation) {
-      w
-        ..writeByte(telemChannelSelf)
-        ..writeByte(0x88); // CayenneLPP GPS
-      _writeSigned24(w, (prefs.latitude * 10000).round());
-      _writeSigned24(w, (prefs.longitude * 10000).round());
-      _writeSigned24(w, 0); // altitude
-    }
-    return w.toBytes();
-  }
-
-  void _writeSigned24(BufferWriter w, int value) {
-    final clamped = value.clamp(-0x800000, 0x7FFFFF);
-    final encoded = clamped < 0 ? clamped + 0x1000000 : clamped;
-    w
-      ..writeByte((encoded >> 16) & 0xFF)
-      ..writeByte((encoded >> 8) & 0xFF)
-      ..writeByte(encoded & 0xFF);
   }
 
   Future<void> _sendTelemetryReply(

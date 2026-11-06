@@ -18,7 +18,10 @@ class ForegroundController {
     required this.proxyStatus,
     required this.port,
     required this.log,
+    this.includeLocation = _noLocation,
   });
+
+  static bool _noLocation() => false;
 
   final ForegroundService service;
   final int Function() identityCount;
@@ -28,6 +31,11 @@ class ForegroundController {
   final ProxyStatus Function() proxyStatus;
   final int Function() port;
   final void Function(String message) log;
+
+  /// Whether location access is currently granted for the `location` type.
+  final bool Function() includeLocation;
+
+  bool get includesLocation => service.includesLocation;
 
   bool _started = false;
   String? _lastKey;
@@ -47,7 +55,11 @@ class ForegroundController {
     if (!service.isSupported) return;
     try {
       final value = content();
-      await service.start(title: value.title, text: value.text);
+      await service.start(
+        title: value.title,
+        text: value.text,
+        includeLocation: includeLocation(),
+      );
       _started = true;
       _lastKey = value.key;
     } catch (e) {
@@ -69,6 +81,22 @@ class ForegroundController {
   Future<void> updateIfChanged() async {
     final value = content();
     if (_started && value.key != _lastKey) await update();
+  }
+
+  /// Re-evaluate the declared service types after a permission change.
+  Future<void> refreshServiceTypes() async {
+    if (!service.isSupported || !_started) return;
+    try {
+      final value = content();
+      await service.start(
+        title: value.title,
+        text: value.text,
+        includeLocation: includeLocation(),
+      );
+      _lastKey = value.key;
+    } catch (e) {
+      log('Foreground service type update failed: $e');
+    }
   }
 
   Future<void> stop() async {

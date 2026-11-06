@@ -214,23 +214,28 @@ void _extraHomeTests() {
       ),
     );
 
+    final portField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField &&
+          widget.decoration?.labelText == 'Proxy server port',
+    );
     await tester.tap(find.byTooltip('Save port'));
     await tester.pump();
-    final field = tester.widget<TextField>(find.byType(TextField));
+    final field = tester.widget<TextField>(portField);
     expect(field.controller!.text, '5000');
 
-    await tester.enterText(find.byType(TextField), '0');
+    await tester.enterText(portField, '0');
     await tester.tap(find.byTooltip('Save port'));
     await tester.pump();
     expect(find.text('Enter a port between 1 and 65535'), findsOneWidget);
     expect(app.port, 5000);
 
-    await tester.enterText(find.byType(TextField), '70000');
+    await tester.enterText(portField, '70000');
     await tester.tap(find.byTooltip('Save port'));
     await tester.pump();
     expect(app.port, 5000);
 
-    await tester.enterText(find.byType(TextField), '1234');
+    await tester.enterText(portField, '1234');
     await tester.tap(find.byTooltip('Save port'));
     await tester.pump();
     expect(app.port, 1234);
@@ -351,6 +356,54 @@ void _extraHomeTests() {
     await tester.tap(find.text('Cancel'));
     await tester.pump();
     expect(app.cancelCalls, 1);
+  });
+
+  testWidgets('phone telemetry card shows state and writes GPS settings',
+      (tester) async {
+    _homeView(tester);
+    final summary = _homeSummary();
+    final app = FakeAppState()
+      ..summaries = [summary]
+      ..activeSummary = summary
+      ..phoneBatteryPercent = 42
+      ..phoneGpsRequested = true
+      ..phoneGpsIntervalSeconds = 60
+      ..phoneLocationPermissionLabel = 'Allow all the time';
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppViewState>.value(
+        value: app,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('Phone telemetry'), findsOneWidget);
+    expect(find.textContaining('Battery 42%'), findsOneWidget);
+    expect(find.textContaining('every 60s'), findsOneWidget);
+    expect(app.phoneTelemetryRefreshes, 1);
+
+    await tester.tap(find.widgetWithText(SwitchListTile, 'Share phone GPS'));
+    await tester.pump();
+    expect(app.gpsEnabledCalls, [false]);
+
+    final intervalField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField &&
+          widget.decoration?.labelText == 'GPS interval (seconds)',
+    );
+    await tester.enterText(intervalField, '30');
+    await tester.tap(find.byTooltip('Save GPS interval'));
+    await tester.pump();
+    expect(app.gpsIntervalCalls, [30]);
+
+    app.phonePermissionResult = true;
+    await tester.tap(find.text('Allow location'));
+    await tester.pumpAndSettle();
+    expect(find.text('Allow phone GPS?'), findsOneWidget);
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(app.phonePermissionGranted, isTrue);
   });
 
   testWidgets('the battery card is hidden off Android', (tester) async {

@@ -96,4 +96,18 @@ abstract class AppViewState extends ChangeNotifier {
   bool? get batteryOptimizationsIgnored;
   Future<void> refreshBatteryOptimizationStatus();
   Future<void> openBatteryOptimizationSettings();
+
+  // Phone telemetry.
+  int? get phoneBatteryPercent;
+  bool get phoneGpsRequested;
+  String get phoneLocationPermissionLabel;
+  int? get phoneGpsIntervalSeconds;
+  Duration? get phoneGpsLastFixAge;
+  String? get phoneGpsLastError;
+  bool get foregroundIncludesLocation;
+  Future<void> refreshPhoneTelemetry();
+  Future<bool> requestPhoneLocationPermission();
+  Future<bool> openPhoneLocationSettings();
+  Future<bool> setPhoneGpsEnabled(bool enabled);
+  Future<bool> setPhoneGpsInterval(int seconds);
 }

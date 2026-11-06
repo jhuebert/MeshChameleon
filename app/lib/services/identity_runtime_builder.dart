@@ -8,6 +8,8 @@ import 'identity_index.dart';
 import 'identity_repository.dart';
 import 'identity_runtime.dart';
 import 'local_mesh_router.dart';
+import 'phone_location_service.dart';
+import 'phone_sensor_settings.dart';
 
 /// Builds one live [IdentityRuntime] from a catalog record.
 ///
@@ -27,6 +29,8 @@ class IdentityRuntimeBuilder {
     required this.onPoweredOff,
     required this.validateImportedKey,
     required this.onRecordChanged,
+    this.phoneLocation,
+    this.readPhoneBatteryPercent,
   });
 
   final IdentityRepository repository;
@@ -41,6 +45,8 @@ class IdentityRuntimeBuilder {
   final Future<void> Function(String recordId, LocalIdentity candidate)
       validateImportedKey;
   final void Function(IdentityRecord record) onRecordChanged;
+  final PhoneLocationService? phoneLocation;
+  final Future<int?> Function()? readPhoneBatteryPercent;
 
   Future<IdentityRuntime> start(
     IdentityRecord record, {
@@ -103,6 +109,13 @@ class IdentityRuntimeBuilder {
     }
     final store = repository.openNodeStore(record.id);
     final linkView = hub.viewFor(record.id);
+    final location = phoneLocation;
+    final settingsProvider = location == null
+        ? const EmptyVirtualSensorSettingsProvider()
+        : PhoneSensorSettingsProvider(
+            identityId: record.id,
+            onChanged: location.updateSettings,
+          );
     final MeshNode node;
     try {
       node = MeshNode(
@@ -111,6 +124,8 @@ class IdentityRuntimeBuilder {
         physical: physical,
         store: store,
         prefs: NodePrefs(nodeName: effectiveRecord.name),
+        sensorSettings: settingsProvider,
+        readPhoneBatteryPercent: readPhoneBatteryPercent,
         identityPersistence: repository.persistenceFor(
           record.id,
           validate: (candidate) => validateImportedKey(record.id, candidate),
@@ -126,6 +141,10 @@ class IdentityRuntimeBuilder {
       node.adoptPhysicalCapabilities(physical);
       node.syncRadioParams(radioParams);
       if (tuning != null) node.syncPhysicalState(tuning: tuning);
+      if (location != null) {
+        location.bindNode(record.id, node);
+        settingsProvider.onSettingsChanged(node.getCustomVars());
+      }
     } catch (e) {
       runtime.unavailableReason = 'Could not load identity state';
       onLog?.call('Could not start identity ${record.id}: $e');

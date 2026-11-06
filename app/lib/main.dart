@@ -195,6 +195,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           const _BatteryOptimizationCard(),
+          const _PhoneTelemetryCard(),
           const _BackupCard(),
           if (app.busy) const LinearProgressIndicator(),
           const SizedBox(height: 8),
@@ -401,6 +402,184 @@ class _BatteryOptimizationCardState extends State<_BatteryOptimizationCard>
                 child: const Text('Open settings'),
               )
             : null,
+      ),
+    );
+  }
+}
+
+/// Phone battery and GPS controls for the active identity.
+///
+/// The switch writes the same `gps` custom variable the companion client uses;
+/// mesh telemetry permissions still decide which contacts receive the data.
+class _PhoneTelemetryCard extends StatefulWidget {
+  const _PhoneTelemetryCard();
+
+  @override
+  State<_PhoneTelemetryCard> createState() => _PhoneTelemetryCardState();
+}
+
+class _PhoneTelemetryCardState extends State<_PhoneTelemetryCard>
+    with WidgetsBindingObserver {
+  late final TextEditingController _interval;
+
+  @override
+  void initState() {
+    super.initState();
+    _interval = TextEditingController();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) context.read<AppViewState>().refreshPhoneTelemetry();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _interval.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      context.read<AppViewState>().refreshPhoneTelemetry();
+    }
+  }
+
+  Future<void> _requestLocation() async {
+    final app = context.read<AppViewState>();
+    final proceed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Allow phone GPS?'),
+        content: const Text(
+          'MeshChameleon needs location access to include phone coordinates '
+          'in adverts and location telemetry. Contacts still need location '
+          'telemetry permission to receive them.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Continue'),
+          ),
+        ],
+      ),
+    );
+    if (proceed == true) await app.requestPhoneLocationPermission();
+  }
+
+  Future<void> _saveInterval() async {
+    final app = context.read<AppViewState>();
+    final seconds = int.tryParse(_interval.text.trim());
+    if (seconds == null || seconds < 0 || seconds > 86400) {
+      _interval.text = '${app.phoneGpsIntervalSeconds ?? 900}';
+      if (mounted) {
+        showAppSnackBar(
+          context,
+          'Enter a GPS interval between 0 and 86400 seconds',
+          replace: false,
+        );
+      }
+      return;
+    }
+    await app.setPhoneGpsInterval(seconds);
+    if (mounted) FocusScope.of(context).unfocus();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final app = context.watch<AppViewState>();
+    final hasNode = app.activeIdentity?.live ?? false;
+    final fixAge = app.phoneGpsLastFixAge;
+    final interval = app.phoneGpsIntervalSeconds;
+    final subtitle = [
+      app.phoneBatteryPercent == null
+          ? 'Battery unavailable'
+          : 'Battery ${app.phoneBatteryPercent}%',
+      app.phoneGpsRequested ? 'GPS on' : 'GPS off',
+      app.phoneLocationPermissionLabel,
+      if (interval != null) 'every ${interval}s',
+      if (fixAge != null) 'fix ${fixAge.inSeconds}s old',
+    ].join(' · ');
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.phone_android),
+                const SizedBox(width: 8),
+                Text(
+                  'Phone telemetry',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(subtitle),
+            if (app.phoneGpsLastError != null)
+              Text(
+                app.phoneGpsLastError!,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Share phone GPS'),
+              subtitle: Text(
+                app.phoneGpsRequested
+                    ? 'Enabled. Contacts still need location permission.'
+                    : 'Enable to include phone coordinates in adverts and '
+                        'location telemetry.',
+              ),
+              value: app.phoneGpsRequested,
+              onChanged:
+                  hasNode ? (value) => app.setPhoneGpsEnabled(value) : null,
+            ),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _interval,
+                    enabled: hasNode,
+                    keyboardType: TextInputType.number,
+                    decoration: InputDecoration(
+                      labelText: 'GPS interval (seconds)',
+                      helperText: interval == null
+                          ? '0-86400; 0 means 1 second'
+                          : 'Effective now: ${interval}s',
+                    ),
+                    onSubmitted: (_) => _saveInterval(),
+                  ),
+                ),
+                IconButton(
+                  onPressed: hasNode ? _saveInterval : null,
+                  icon: const Icon(Icons.check),
+                  tooltip: 'Save GPS interval',
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton(
+                  onPressed: _requestLocation,
+                  child: const Text('Allow location'),
+                ),
+                TextButton(
+                  onPressed: app.openPhoneLocationSettings,
+                  child: const Text('System settings'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

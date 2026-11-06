@@ -131,6 +131,7 @@ abstract interface class StatsHost {
   Future<MeshStats> getStats(int statsType);
   int getTime();
   bool setTime(int seconds);
+  Future<Uint8List> getSelfTelemetry();
 }
 
 abstract interface class LifecycleHost {

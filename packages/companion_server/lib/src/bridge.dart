@@ -452,6 +452,12 @@ class CompanionBridge
   @override
   Future<QueuedMessage?> syncNextMessage() async => null;
 
+  /// Local CayenneLPP telemetry for this node, independent of any remote
+  /// telemetry permissions (`CMD_SEND_TELEMETRY_REQ` with a 3-byte payload).
+  @override
+  Future<Uint8List> getSelfTelemetry() async =>
+      _unsupported('getSelfTelemetry');
+
   @override
   Future<MeshStats> getStats(int statsType) async => _unsupported('getStats');
 

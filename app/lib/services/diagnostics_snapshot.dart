@@ -121,6 +121,13 @@ class DiagnosticsSnapshot {
     required this.link,
     required this.identities,
     required this.recentLogs,
+    this.phoneBatteryPercent,
+    this.phoneGpsRequested = false,
+    this.phoneLocationPermission = 'Unknown',
+    this.phoneGpsIntervalSeconds,
+    this.phoneGpsLastFixAge,
+    this.phoneGpsLastError,
+    this.foregroundIncludesLocation = false,
   });
 
   final BuildInfo buildInfo;
@@ -147,6 +154,27 @@ class DiagnosticsSnapshot {
   final LinkMetrics link;
   final List<IdentityDiagnostics> identities;
   final List<String> recentLogs;
+
+  /// Latest phone battery percentage, or null when unavailable.
+  final int? phoneBatteryPercent;
+
+  /// Whether any identity has the phone `gps` setting enabled.
+  final bool phoneGpsRequested;
+
+  /// Human-readable location permission state (no coordinates).
+  final String phoneLocationPermission;
+
+  /// Effective one-shot sampling cadence, or null when GPS has no demand.
+  final int? phoneGpsIntervalSeconds;
+
+  /// Age of the last accepted fix, or null before the first fix.
+  final Duration? phoneGpsLastFixAge;
+
+  /// Last location sampling error (no coordinates).
+  final String? phoneGpsLastError;
+
+  /// Whether the foreground service declares the `location` type.
+  final bool foregroundIncludesLocation;
 
   int get liveIdentityCount =>
       identities.where((identity) => identity.live).length;
@@ -206,6 +234,21 @@ class DiagnosticsSnapshot {
     line('Resume on launch: ${autoResume ? 'On' : 'Off'}');
     if (identityDatabaseError != null) {
       line('Identity database: $identityDatabaseError');
+    }
+    line(
+        'Phone battery: ${phoneBatteryPercent == null ? 'unavailable' : '$phoneBatteryPercent%'}');
+    line('Phone GPS: ${phoneGpsRequested ? 'enabled' : 'disabled'}; '
+        'permission: $phoneLocationPermission');
+    line('Phone GPS service type: '
+        '${foregroundIncludesLocation ? 'location' : 'not included'}');
+    if (phoneGpsIntervalSeconds != null) {
+      line('Phone GPS interval: ${phoneGpsIntervalSeconds}s');
+    }
+    if (phoneGpsLastFixAge != null) {
+      line('Phone GPS last fix: ${formatDuration(phoneGpsLastFixAge!)} old');
+    }
+    if (phoneGpsLastError != null) {
+      line('Phone GPS error: $phoneGpsLastError');
     }
 
     section('MeshCore app -> MeshChameleon');

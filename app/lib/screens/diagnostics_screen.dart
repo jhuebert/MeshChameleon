@@ -94,6 +94,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           children: [
             RepaintBoundary(child: _buildCard(_snapshot.value)),
             _liveSection(_statusCard),
+            _liveSection(_phoneCard),
             _liveSection(_clientCard),
             _liveSection(_deviceCard),
             _liveSection(_meshCard),
@@ -144,6 +145,48 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
             _InfoRow(
               label: 'Database',
               value: snapshot.identityDatabaseError!,
+            ),
+        ],
+      );
+
+  Widget _phoneCard(DiagnosticsSnapshot snapshot) => _SectionCard(
+        title: 'Phone telemetry',
+        icon: Icons.phone_android,
+        children: [
+          _InfoRow(
+            label: 'Battery',
+            value: snapshot.phoneBatteryPercent == null
+                ? 'Unavailable'
+                : '${snapshot.phoneBatteryPercent}%',
+          ),
+          _InfoRow(
+            label: 'GPS',
+            value: snapshot.phoneGpsRequested ? 'Enabled' : 'Disabled',
+          ),
+          _InfoRow(
+            label: 'Location permission',
+            value: snapshot.phoneLocationPermission,
+          ),
+          if (snapshot.phoneGpsIntervalSeconds != null)
+            _InfoRow(
+              label: 'Interval',
+              value: '${snapshot.phoneGpsIntervalSeconds}s',
+            ),
+          if (snapshot.phoneGpsLastFixAge != null)
+            _InfoRow(
+              label: 'Last fix',
+              value: '${formatDuration(snapshot.phoneGpsLastFixAge!)} ago',
+            ),
+          _InfoRow(
+            label: 'Service type',
+            value: snapshot.foregroundIncludesLocation
+                ? 'Includes location'
+                : 'No location type',
+          ),
+          if (snapshot.phoneGpsLastError != null)
+            _InfoRow(
+              label: 'Last error',
+              value: snapshot.phoneGpsLastError!,
             ),
         ],
       );

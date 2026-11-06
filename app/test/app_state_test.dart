@@ -6,6 +6,7 @@ import 'package:device_link/device_link.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
@@ -13,6 +14,8 @@ import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_store.dart';
 import 'package:meshchameleon/services/network_connection_store.dart';
+import 'package:meshchameleon/services/phone_battery_service.dart';
+import 'package:meshchameleon/services/phone_location_service.dart';
 import 'package:meshchameleon/services/session_store.dart';
 import 'package:test_support/test_support.dart';
 
@@ -94,6 +97,8 @@ void main() {
     BleLinkFactory? bleLinkFactory,
     DeviceCapabilities capabilities = _capabilities,
     RecoveryTimerFactory? recoveryTimerFactory,
+    PhoneBatteryService? phoneBattery,
+    PhoneLocationService? phoneLocation,
   }) =>
       AppState(
         repository: repository,
@@ -103,6 +108,8 @@ void main() {
         bleLinkFactory: bleLinkFactory,
         recoveryTimerFactory: recoveryTimerFactory,
         capabilities: capabilities,
+        phoneBattery: phoneBattery,
+        phoneLocation: phoneLocation,
         reconnectDelay: const Duration(milliseconds: 10),
       );
 
@@ -137,6 +144,48 @@ void main() {
     expect(info[0], respCodeSelfInfo);
     return info.sublist(4, 36);
   }
+
+  test('phone telemetry wiring exposes status and writes GPS settings',
+      () async {
+    var settingsOpened = 0;
+    final battery = PhoneBatteryService(readLevel: () async => 42);
+    final location = PhoneLocationService(
+      checkPermission: () async => LocationPermission.denied,
+      requestPermission: () async => LocationPermission.denied,
+      openSettings: () async {
+        settingsOpened++;
+        return true;
+      },
+    );
+    app = buildApp(phoneBattery: battery, phoneLocation: location);
+    await app.loadIdentities();
+
+    // No active node yet: controls report failure instead of throwing.
+    expect(await app.setPhoneGpsEnabled(true), isFalse);
+    expect(await app.setPhoneGpsInterval(60), isFalse);
+
+    await app.refreshPhoneTelemetry();
+    expect(app.phoneBatteryPercent, 42);
+    expect(app.phoneGpsRequested, isFalse);
+    expect(app.phoneLocationPermissionLabel, 'Denied');
+    expect(app.phoneGpsIntervalSeconds, isNull);
+    expect(app.phoneGpsLastFixAge, isNull);
+    expect(app.phoneGpsLastError, isNull);
+    expect(app.foregroundIncludesLocation, isFalse);
+    expect(await app.requestPhoneLocationPermission(), isFalse);
+    expect(await app.openPhoneLocationSettings(), isTrue);
+    expect(settingsOpened, 1);
+
+    await app.connectSimulated();
+    addTearDown(app.disconnectDevice);
+    expect(app.node, isNotNull, reason: app.logs.join('\n'));
+
+    expect(await app.setPhoneGpsEnabled(true), isTrue);
+    expect(app.node!.gpsEnabled, isTrue);
+    expect(await app.setPhoneGpsInterval(30), isTrue);
+    expect(app.node!.getCustomVars()['gps_interval'], '30');
+    expect(app.phoneGpsIntervalSeconds, 30);
+  });
 
   test('cancelling an idle app is a no-op', () async {
     await app.cancelDeviceAttempt();
