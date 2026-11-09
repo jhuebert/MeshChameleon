@@ -26,6 +26,8 @@ class TcpDeviceLink implements RadioLink {
     required this.host,
     this.port = defaultCompanionPort,
     this.requestTimeout = const Duration(seconds: 5),
+    this.transmitTimeout = const Duration(seconds: 30),
+    this.replyDrainTimeout = const Duration(seconds: 5),
     this.onLog,
     this.socketConnector = _connectSocket,
   });
@@ -33,6 +35,19 @@ class TcpDeviceLink implements RadioLink {
   final String host;
   final int port;
   final Duration requestTimeout;
+
+  /// How long to wait for the physical radio to acknowledge a raw transmit.
+  ///
+  /// Stock firmware replies as soon as the packet is queued, but other
+  /// companion implementations may wait for the on-air transmission (including
+  /// duty-cycle/LBT deferral), so this must be much longer than
+  /// [requestTimeout].
+  final Duration transmitTimeout;
+
+  /// How long to keep a timed-out transmit reply quarantined before allowing
+  /// the next request to start.
+  final Duration replyDrainTimeout;
+
   final void Function(String message)? onLog;
   final TcpSocketConnector socketConnector;
 
@@ -47,6 +62,13 @@ class TcpDeviceLink implements RadioLink {
   Completer<Uint8List>? _pending;
   Set<int> _expected = const {};
   Future<void> _lock = Future<void>.value();
+
+  /// Replies that may still arrive for a timed-out transmit.
+  ///
+  /// The device link has no request ids, so a late `OK`/`ERR` must be discarded
+  /// before it can complete a different request.
+  final List<_StaleReply> _staleReplies = [];
+  Completer<void>? _staleWaiter;
 
   /// Invalidates an in-flight [Socket.connect] when the connection is canceled.
   ///
@@ -137,6 +159,7 @@ class TcpDeviceLink implements RadioLink {
         if (raw != null) _rawRxListener?.call(raw.snr, raw.rssi, raw.raw);
         continue;
       }
+      if (_consumeStale(frame[0])) continue;
       final pending = _pending;
       if (pending != null && !pending.isCompleted) {
         if (frame[0] == respCodeErr) {
@@ -161,7 +184,55 @@ class TcpDeviceLink implements RadioLink {
   void _failAll(Object error) {
     final pending = _pending;
     _pending = null;
+    _staleReplies.clear();
+    _notifyStaleChanged();
     if (pending != null && !pending.isCompleted) pending.completeError(error);
+  }
+
+  bool _consumeStale(int code) {
+    _pruneStale();
+    final index =
+        _staleReplies.indexWhere((reply) => reply.expected.contains(code));
+    if (index < 0) return false;
+    _staleReplies.removeAt(index);
+    _notifyStaleChanged();
+    return true;
+  }
+
+  void _pruneStale() {
+    final now = DateTime.now();
+    _staleReplies.removeWhere((reply) => !reply.deadline.isAfter(now));
+  }
+
+  void _notifyStaleChanged() {
+    final waiter = _staleWaiter;
+    _staleWaiter = null;
+    if (waiter != null && !waiter.isCompleted) waiter.complete();
+  }
+
+  /// Wait for late replies to a timed-out transmit before issuing another
+  /// request.
+  ///
+  /// Without request ids a late reply is indistinguishable from the next
+  /// request's reply. Waiting keeps the link alive while ensuring the stale
+  /// frame is consumed first. The wait is bounded by [replyDrainTimeout].
+  Future<void> _drainStaleReplies() async {
+    while (true) {
+      _pruneStale();
+      if (_staleReplies.isEmpty) return;
+      final deadline = _staleReplies
+          .map((reply) => reply.deadline)
+          .reduce((a, b) => a.isBefore(b) ? a : b);
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) continue;
+      final waiter = Completer<void>();
+      _staleWaiter = waiter;
+      try {
+        await waiter.future.timeout(remaining, onTimeout: () {});
+      } finally {
+        if (identical(_staleWaiter, waiter)) _staleWaiter = null;
+      }
+    }
   }
 
   /// Serialize request/response exchanges (one outstanding request at a time).
@@ -187,12 +258,19 @@ class TcpDeviceLink implements RadioLink {
     return socket;
   }
 
-  Future<Uint8List> _request(Uint8List frame, Set<int> expected) {
+  Future<Uint8List> _request(
+    Uint8List frame,
+    Set<int> expected, {
+    Duration? timeout,
+    bool keepLinkOnTimeout = false,
+  }) {
     return _runExclusive(() async {
+      await _drainStaleReplies();
       final socket = _requireSocket();
       final completer = Completer<Uint8List>();
       _pending = completer;
       _expected = expected;
+      final effectiveTimeout = timeout ?? requestTimeout;
       try {
         socket.add(_codec.encodeFrame(frame, prefix: frameInboundPrefix));
       } on SocketException catch (e) {
@@ -202,16 +280,25 @@ class TcpDeviceLink implements RadioLink {
         );
       }
       try {
-        return await completer.future.timeout(requestTimeout);
+        return await completer.future.timeout(effectiveTimeout);
       } on TimeoutException {
-        // A reply that arrives after the timeout cannot be matched to this
-        // request. Drop the connection so it cannot satisfy the next request
-        // with the same expected response code.
         _pending = null;
-        await disconnect();
+        if (keepLinkOnTimeout) {
+          // A raw transmit may still be in flight. Keep the link and quarantine
+          // any late reply instead of dropping the whole session.
+          _staleReplies.add(_StaleReply(
+            {...expected, respCodeErr},
+            DateTime.now().add(replyDrainTimeout),
+          ));
+        } else {
+          // A reply that arrives after the timeout cannot be matched to this
+          // request. Drop the connection so it cannot satisfy the next request
+          // with the same expected response code.
+          await disconnect();
+        }
         throw DeviceCommandError.timeout(
           message: 'device reply timed out after '
-              '${requestTimeout.inMilliseconds}ms',
+              '${effectiveTimeout.inMilliseconds}ms',
         );
       } finally {
         _pending = null;
@@ -244,10 +331,14 @@ class TcpDeviceLink implements RadioLink {
   @override
   Future<void> sendRawPacket(Uint8List packet, [int priority = 0]) async {
     // The firmware replies OK/ERR for raw TX. Await it so a stray response
-    // cannot be mistaken for another in-flight request's reply.
+    // cannot be mistaken for another in-flight request's reply. A timeout is
+    // left uncorrelated instead of dropping the link, because the radio may
+    // still be transmitting.
     await _request(
       DeviceFrames.sendRawPacket(packet, priority),
       {respCodeOk},
+      timeout: transmitTimeout,
+      keepLinkOnTimeout: true,
     );
   }
 
@@ -432,4 +523,12 @@ class TcpDeviceLink implements RadioLink {
       pathHashMode: frame.length >= 82 ? (frame[81] & 0xFF).clamp(0, 3) : 0,
     );
   }
+}
+
+/// A reply that may still arrive for a timed-out raw transmit.
+class _StaleReply {
+  const _StaleReply(this.expected, this.deadline);
+
+  final Set<int> expected;
+  final DateTime deadline;
 }

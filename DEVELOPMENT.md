@@ -286,9 +286,18 @@ to every enabled interface. The proxy cannot serialize an external client. Do no
 run another configuration client against the same radio during a session.
 
 The device link correlates replies only by response code, not by a request id.
-A request timeout therefore drops the link instead of leaving it open, so a late
-`OK`/`DEVICE_INFO`/`CLI_REPLY` cannot be mistaken for the next request's reply;
-the app reconnects through its normal link watcher.
+A query timeout therefore drops the link instead of leaving it open, so a late
+`DEVICE_INFO`/`CLI_REPLY` cannot be mistaken for the next request's reply; the
+app reconnects through its normal link watcher.
+
+Raw transmits use a separate, longer timeout (30 s). Stock firmware acknowledges
+`SEND_RAW_PACKET` as soon as the packet is queued, but some companion
+implementations wait for the local transmission (including duty-cycle or LBT
+deferral), so a 5 s request timeout can expire while the packet is still going
+out. A timed-out transmit does not drop the link: its late `OK`/`ERR` is
+quarantined, and the next request waits up to 5 s for that reply to arrive or
+expire before it is sent. This keeps a slow radio from turning a successful send
+into a session outage and a duplicate client retry.
 
 Device-link recovery has two stages. A dropped device first enters
 `reconnecting`: the link is retried with the normal connect backoff for three

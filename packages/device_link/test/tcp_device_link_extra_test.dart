@@ -17,6 +17,8 @@ void main() {
 
   Future<TcpDeviceLink> newLink({
     Duration requestTimeout = const Duration(seconds: 2),
+    Duration transmitTimeout = const Duration(seconds: 30),
+    Duration replyDrainTimeout = const Duration(seconds: 5),
     void Function(String message)? onLog,
     bool connect = true,
   }) async {
@@ -24,6 +26,8 @@ void main() {
       host: '127.0.0.1',
       port: device.port,
       requestTimeout: requestTimeout,
+      transmitTimeout: transmitTimeout,
+      replyDrainTimeout: replyDrainTimeout,
       onLog: onLog,
     );
     if (connect) await link.connect();
@@ -257,8 +261,7 @@ void main() {
     );
   });
 
-  test('a timeout drops the link so a late reply cannot satisfy the next call',
-      () async {
+  test('a query timeout drops the link before another call', () async {
     device = await _ScriptedDevice.start((frame, socket) {
       if (frame[0] != cmdDeviceQuery) return;
       Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -279,6 +282,80 @@ void main() {
       throwsA(isA<DeviceCommandError>()
           .having((e) => e.kind, 'kind', DeviceCommandErrorKind.disconnected)),
     );
+  });
+
+  test('raw transmit uses the longer transmit timeout', () async {
+    device = await _ScriptedDevice.start((frame, socket) {
+      if (frame[0] != cmdSendRawPacket) return;
+      Future<void>.delayed(const Duration(milliseconds: 60), () {
+        _reply(socket, [respCodeOk]);
+      });
+    });
+    await newLink(
+      requestTimeout: const Duration(milliseconds: 20),
+      transmitTimeout: const Duration(milliseconds: 200),
+    );
+
+    await link.sendRawPacket(Uint8List.fromList([1, 2, 3]));
+    expect(link.currentState, LinkState.connected);
+  });
+
+  test('a late transmit reply is drained before the next request', () async {
+    var sends = 0;
+    device = await _ScriptedDevice.start((frame, socket) {
+      if (frame[0] != cmdSendRawPacket) return;
+      sends++;
+      if (sends == 1) {
+        Future<void>.delayed(const Duration(milliseconds: 60), () {
+          _reply(socket, [respCodeOk]);
+        });
+      }
+    });
+    await newLink(
+      requestTimeout: const Duration(milliseconds: 20),
+      transmitTimeout: const Duration(milliseconds: 20),
+      replyDrainTimeout: const Duration(milliseconds: 200),
+    );
+
+    await expectLater(
+      link.sendRawPacket(Uint8List.fromList([1])),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    expect(link.currentState, LinkState.connected);
+
+    // The first send's late OK arrives during the drain and must not complete
+    // the second send, which the device never answers.
+    await expectLater(
+      link.sendRawPacket(Uint8List.fromList([2])),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    expect(link.currentState, LinkState.connected);
+    expect(sends, 2);
+  });
+
+  test('a timed-out transmit drains then reuses the link', () async {
+    var sends = 0;
+    device = await _ScriptedDevice.start((frame, socket) {
+      if (frame[0] != cmdSendRawPacket) return;
+      sends++;
+      if (sends == 2) _reply(socket, [respCodeOk]);
+    });
+    await newLink(
+      requestTimeout: const Duration(milliseconds: 20),
+      transmitTimeout: const Duration(milliseconds: 20),
+      replyDrainTimeout: const Duration(milliseconds: 60),
+    );
+
+    await expectLater(
+      link.sendRawPacket(Uint8List.fromList([1])),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    await link.sendRawPacket(Uint8List.fromList([2]));
+    expect(link.currentState, LinkState.connected);
+    expect(sends, 2);
   });
 
   test('a closed device link fails the pending request', () async {

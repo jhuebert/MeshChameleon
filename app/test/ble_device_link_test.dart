@@ -28,12 +28,16 @@ void main() {
 
   BleDeviceLink newLink({
     Duration requestTimeout = const Duration(seconds: 1),
+    Duration transmitTimeout = const Duration(seconds: 30),
+    Duration replyDrainTimeout = const Duration(seconds: 5),
     List<String>? logs,
   }) {
     final device = BluetoothDevice.fromId('AA:BB:CC:DD:EE:$deviceCounter');
     return BleDeviceLink(
       device: device,
       requestTimeout: requestTimeout,
+      transmitTimeout: transmitTimeout,
+      replyDrainTimeout: replyDrainTimeout,
       onLog: logs?.add,
     );
   }
@@ -214,6 +218,66 @@ void main() {
       throwsA(isA<DeviceCommandError>()
           .having((e) => e.kind, 'kind', DeviceCommandErrorKind.disconnected)),
     );
+  });
+
+  test('raw transmit uses the longer transmit timeout', () async {
+    final link = newLink(
+      requestTimeout: const Duration(milliseconds: 20),
+      transmitTimeout: const Duration(milliseconds: 200),
+    );
+    await link.connect();
+    platform.replyDelay = const Duration(milliseconds: 60);
+
+    await link.sendRawPacket(Uint8List.fromList([1, 2, 3]));
+    expect(link.currentState, LinkState.connected);
+  });
+
+  test('a late transmit reply is drained before the next request', () async {
+    final link = newLink(
+      requestTimeout: const Duration(milliseconds: 20),
+      transmitTimeout: const Duration(milliseconds: 20),
+      replyDrainTimeout: const Duration(milliseconds: 200),
+    );
+    await link.connect();
+    platform.replyDelay = const Duration(milliseconds: 60);
+
+    await expectLater(
+      link.sendRawPacket(Uint8List.fromList([1])),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    expect(link.currentState, LinkState.connected);
+
+    // The first send's late OK arrives during the drain and must not complete
+    // the second send, which the device never answers.
+    platform
+      ..replyDelay = null
+      ..silent = true;
+    await expectLater(
+      link.sendRawPacket(Uint8List.fromList([2])),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    expect(link.currentState, LinkState.connected);
+  });
+
+  test('a timed-out transmit drains then reuses the link', () async {
+    final link = newLink(
+      requestTimeout: const Duration(milliseconds: 20),
+      transmitTimeout: const Duration(milliseconds: 20),
+      replyDrainTimeout: const Duration(milliseconds: 60),
+    );
+    await link.connect();
+    platform.silent = true;
+
+    await expectLater(
+      link.sendRawPacket(Uint8List.fromList([1])),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)),
+    );
+    platform.silent = false;
+    await link.sendRawPacket(Uint8List.fromList([2]));
+    expect(link.currentState, LinkState.connected);
   });
 
   test('oversized frames are rejected before writing', () async {
@@ -582,6 +646,7 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
   bool silent = false;
   List<int>? errReply;
   List<int>? extraReply;
+  Duration? replyDelay;
   Completer<void>? writeGate;
   DeviceIdentifier? activeRemoteId;
 
@@ -598,6 +663,7 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
     silent = false;
     errReply = null;
     extraReply = null;
+    replyDelay = null;
     writeGate = null;
     activeRemoteId = null;
   }
@@ -744,13 +810,22 @@ base class _FakeBlePlatform extends FlutterBluePlusPlatform {
         errorString: '',
       ));
       if (silent) return;
-      final extra = extraReply;
-      if (extra != null) {
-        extraReply = null;
-        _emitReply(request.remoteId, extra);
+      void emitReplies() {
+        final extra = extraReply;
+        if (extra != null) {
+          extraReply = null;
+          _emitReply(request.remoteId, extra);
+        }
+        final reply = errReply ?? _replyFor(request.value);
+        if (reply != null) _emitReply(request.remoteId, reply);
       }
-      final reply = errReply ?? _replyFor(request.value);
-      if (reply != null) _emitReply(request.remoteId, reply);
+
+      final delay = replyDelay;
+      if (delay != null && delay > Duration.zero) {
+        Future<void>.delayed(delay, emitReplies);
+      } else {
+        emitReplies();
+      }
     });
     final gate = writeGate;
     if (gate != null) await gate.future;

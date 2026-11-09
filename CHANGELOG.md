@@ -41,8 +41,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   restores, including old key snapshots, on the next launch.
 - Serialized connect, disconnect, reconnect, and proxy start/stop transitions;
   cancelling during startup no longer leaves a ghost connected session.
-- Dropped the device link after a request timeout so a late reply cannot satisfy
+- Dropped the device link after a query timeout so a late reply cannot satisfy
   the next command.
+- Kept the device link alive after a raw-transmit timeout, quarantined the late
+  reply, and gave raw transmits a 30 s acknowledgement window so a slow physical
+  transmission no longer surfaces as a failed send and a duplicate client retry.
 - Validated saved-session ports and kept a successful connection when the
   session or connection-history write fails.
 - Isolated unreadable secure-storage slots to one unavailable identity.
