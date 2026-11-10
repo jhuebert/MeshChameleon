@@ -220,6 +220,29 @@ void main() {
     );
   });
 
+  test('a stalled write times out and drops the link', () async {
+    final link = newLink(requestTimeout: const Duration(milliseconds: 30));
+    await link.connect();
+    platform
+      ..silent = true
+      ..writeGate = Completer<void>();
+
+    final expectation = expectLater(
+      link.deviceInfo(),
+      throwsA(isA<DeviceCommandError>()
+          .having((e) => e.kind, 'kind', DeviceCommandErrorKind.timeout)
+          .having((e) => e.message, 'message', contains('write timed out'))),
+    );
+    // The write timeout cannot finish disconnecting until the stalled platform
+    // call returns, which mirrors the real platform queue.
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    platform.writeGate!.complete();
+    platform.writeGate = null;
+
+    await expectation;
+    expect(link.currentState, LinkState.disconnected);
+  });
+
   test('raw transmit uses the longer transmit timeout', () async {
     final link = newLink(
       requestTimeout: const Duration(milliseconds: 20),
