@@ -152,6 +152,13 @@ class TestBridge extends CompanionBridge {
     return batteryReading;
   }
 
+  Uint8List? selfTelemetryOverride;
+
+  @override
+  Future<Uint8List> getSelfTelemetry() async =>
+      selfTelemetryOverride ??
+      encodeSelfVoltageTelemetry(batteryReading.millivolts);
+
   int statsReads = 0;
 
   @override

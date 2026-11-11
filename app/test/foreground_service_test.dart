@@ -57,6 +57,44 @@ void main() {
     expect(platform.lastTitle, 'new');
   });
 
+  test('start includes the location type and restarts when it changes',
+      () async {
+    await service.start(
+      title: 'MeshChameleon',
+      text: 'Running',
+      includeLocation: true,
+    );
+    expect(service.includesLocation, isTrue);
+    expect(
+      platform.lastServiceTypes,
+      contains(ForegroundServiceTypes.location),
+    );
+
+    await service.start(
+      title: 'MeshChameleon',
+      text: 'Running',
+      includeLocation: true,
+    );
+    expect(platform.startCalls, 1);
+    expect(platform.updateCalls, 1);
+
+    await service.start(
+      title: 'MeshChameleon',
+      text: 'Running',
+      includeLocation: false,
+    );
+    expect(platform.stopCalls, 1);
+    expect(platform.startCalls, 2);
+    expect(service.includesLocation, isFalse);
+    expect(
+      platform.lastServiceTypes,
+      isNot(contains(ForegroundServiceTypes.location)),
+    );
+
+    await service.stop();
+    expect(service.includesLocation, isFalse);
+  });
+
   test('start surfaces plugin failures', () async {
     platform.failStart = true;
     await expectLater(
@@ -120,6 +158,7 @@ class _FakeForegroundPlatform extends FlutterForegroundTaskPlatform {
   String? lastTitle;
   String? lastText;
   String? launchedRoute;
+  List<ForegroundServiceTypes>? lastServiceTypes;
   TaskHandler? taskHandler;
 
   @override
@@ -142,6 +181,7 @@ class _FakeForegroundPlatform extends FlutterForegroundTaskPlatform {
     running = true;
     lastTitle = notificationTitle;
     lastText = notificationText;
+    lastServiceTypes = serviceTypes;
   }
 
   @override

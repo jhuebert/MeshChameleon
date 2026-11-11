@@ -128,6 +128,18 @@ telemetry permissions use the owner's mode plus contact class flags and the
 requester's inverse mask; a base grant is required. Raw/control packets from
 unconsumed routes remain in the raw RX log but are not executed locally.
 
+Phone battery percentage uses the base telemetry grant. Phone GPS additionally
+requires the location grant and the local `gps=1` setting. Enabling `gps` is not
+a sharing decision by itself: mesh telemetry permissions still decide which
+contacts receive coordinates, while adverts include them only when
+`advertLocPolicy` allows it. The app asks for Android location permission
+(including background location for sampling while backgrounded) just in time;
+denial leaves the setting persisted but suppresses fixes and diagnostics report
+the blocker. Coordinates are never written to normal logs or copied diagnostics.
+Backups include node preferences, so a backup carries each identity's last
+known location. The foreground service declares the `location` type only while
+location access is granted.
+
 ## Identity entry points
 
 - **First run** — one identity is generated automatically with a 32-byte CSPRNG

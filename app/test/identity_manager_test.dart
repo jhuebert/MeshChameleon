@@ -6,12 +6,14 @@ import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/services/identity_manager.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
 import 'package:meshchameleon/services/identity_runtime.dart';
 import 'package:meshchameleon/services/identity_store.dart';
+import 'package:meshchameleon/services/phone_location_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -57,6 +59,40 @@ void main() {
         physical: const PhysicalCapabilities(firmwareVerCode: 14),
         radioParams: link.initialRadioParams,
       );
+
+  test('binds live identities to the phone location service and unbinds',
+      () async {
+    final location = PhoneLocationService(
+      checkPermission: () async => LocationPermission.denied,
+    );
+    manager = IdentityManager(
+      repository: repository,
+      phoneLocation: location,
+      notifyDebounce: const Duration(milliseconds: 1),
+    );
+    await manager.load();
+    final active = manager.summaries.single.id;
+    final second = await repository.create(name: 'Second');
+    await manager.load();
+    await start();
+
+    expect(location.isBound(active), isTrue);
+    expect(location.isBound(second.id), isTrue);
+
+    final third = await repository.create(name: 'Third');
+    await manager.load();
+    await start();
+    expect(location.isBound(third.id), isTrue);
+    await manager.delete(third.id);
+    expect(location.isBound(third.id), isFalse);
+
+    expect(await manager.setEnabled(second.id, false), isTrue);
+    expect(location.isBound(second.id), isFalse);
+
+    await manager.stopLive();
+    expect(location.isBound(active), isFalse);
+    location.dispose();
+  });
 
   test('load_auto_creates_one_active_summary', () async {
     await manager.load();

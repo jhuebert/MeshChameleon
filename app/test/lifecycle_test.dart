@@ -28,7 +28,11 @@ class _FakeForegroundService extends ForegroundService {
   bool get isSupported => true;
 
   @override
-  Future<void> start({required String title, required String text}) async {
+  Future<void> start({
+    required String title,
+    required String text,
+    bool includeLocation = false,
+  }) async {
     starts++;
     lastTitle = title;
     lastText = text;

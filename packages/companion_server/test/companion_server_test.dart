@@ -279,7 +279,7 @@ void main() {
     expect(stats[0], respCodeStats);
     expect(stats[1], statsTypeCore);
     expect(BufferReader(stats.sublist(2)).readUInt16Le(), 3700);
-    expect(bridge.batteryReads, 2);
+    expect(bridge.batteryReads, 1);
     expect(bridge.statsReads, 1);
   });
 
@@ -1193,6 +1193,19 @@ void main() {
     expect(resp.sublist(2, 8), identity.publicKey.sublist(0, 6));
     expect(resp[8], telemChannelSelf); // CayenneLPP self channel
     expect(resp[9], 0x74); // voltage
+  });
+
+  test('self telemetry forwards every bridge-provided LPP entry', () async {
+    bridge.selfTelemetryOverride = Uint8List.fromList([
+      1, 0x74, 0x01, 0x72, // voltage
+      1, 0x88, 0, 0, 0, 0, 0, 0, 0, 0, 0, // GPS
+      1, 0x78, 42, // phone percentage
+    ]);
+    client.send([cmdSendTelemetryReq, 0, 0, 0]);
+    final resp = await client.frames.next();
+    expect(resp[0], pushCodeTelemetryResponse);
+    expect(resp.sublist(8), bridge.selfTelemetryOverride);
+    expect(bridge.batteryReads, 0);
   });
 
   test('RUN_CLI_COMMAND uses a CLI_REPLY text even for unsupported', () async {

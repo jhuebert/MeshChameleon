@@ -28,6 +28,8 @@ dependencies:
   package_info_plus: ^10.2.2
   cryptography: ^2.7.0
   flutter_file_dialog: ^3.3.3
+  battery_plus: ^7.1.2
+  geolocator: ^14.1.2
 
 dev_dependencies:
   flutter_test:

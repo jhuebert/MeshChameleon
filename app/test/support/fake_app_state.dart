@@ -52,6 +52,28 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   int restoreCalls = 0;
   Completer<void>? createGate;
 
+  // Phone telemetry.
+  @override
+  int? phoneBatteryPercent;
+  @override
+  bool phoneGpsRequested = false;
+  @override
+  String phoneLocationPermissionLabel = 'Denied';
+  @override
+  int? phoneGpsIntervalSeconds;
+  @override
+  Duration? phoneGpsLastFixAge;
+  @override
+  String? phoneGpsLastError;
+  @override
+  bool foregroundIncludesLocation = false;
+  int phoneTelemetryRefreshes = 0;
+  final gpsEnabledCalls = <bool>[];
+  final gpsIntervalCalls = <int>[];
+  bool phonePermissionGranted = false;
+  bool phonePermissionResult = false;
+  int phoneSettingsOpened = 0;
+
   // Diagnostics.
   final DiagnosticsSnapshot Function()? diagnosticsBuilder;
   int refreshes = 0;
@@ -282,6 +304,41 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   Future<bool> restoreBackup(BackupPreview preview) async {
     restoreCalls++;
     return restoreResult;
+  }
+
+  @override
+  Future<void> refreshPhoneTelemetry() async {
+    phoneTelemetryRefreshes++;
+    notifyListeners();
+  }
+
+  @override
+  Future<bool> requestPhoneLocationPermission() async {
+    phonePermissionGranted = phonePermissionResult;
+    notifyListeners();
+    return phonePermissionResult;
+  }
+
+  @override
+  Future<bool> openPhoneLocationSettings() async {
+    phoneSettingsOpened++;
+    return true;
+  }
+
+  @override
+  Future<bool> setPhoneGpsEnabled(bool enabled) async {
+    gpsEnabledCalls.add(enabled);
+    phoneGpsRequested = enabled;
+    notifyListeners();
+    return true;
+  }
+
+  @override
+  Future<bool> setPhoneGpsInterval(int seconds) async {
+    gpsIntervalCalls.add(seconds);
+    phoneGpsIntervalSeconds = seconds;
+    notifyListeners();
+    return true;
   }
 
   @override

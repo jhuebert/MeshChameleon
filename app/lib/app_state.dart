@@ -24,6 +24,8 @@ import 'services/identity_runtime.dart';
 import 'services/identity_store.dart';
 import 'services/network_connection_history.dart';
 import 'services/network_connection_store.dart';
+import 'services/phone_battery_service.dart';
+import 'services/phone_location_service.dart';
 import 'services/proxy_controller.dart';
 import 'services/session_settings.dart';
 import 'services/session_store.dart';
@@ -50,9 +52,13 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     CompanionMetrics? companionMetrics,
     LinkMetrics? linkMetrics,
     ForegroundService? foregroundService,
+    PhoneBatteryService? phoneBattery,
+    PhoneLocationService? phoneLocation,
     DateTime? startedAt,
     this.reconnectDelay = const Duration(seconds: 3),
-  })  : _repository = repository,
+  })  : phoneBattery = phoneBattery ?? PhoneBatteryService(),
+        phoneLocation = phoneLocation ?? PhoneLocationService(),
+        _repository = repository,
         identityStore = identityStore ?? IdentityStore(),
         sessionStore = sessionStore ?? SessionStore(),
         networkConnectionStore =
@@ -120,6 +126,13 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
       identityDatabaseError: identityDatabaseError,
       companion: companionMetrics,
       link: linkMetrics,
+      phoneBatteryPercent: phoneBattery.lastValue,
+      phoneGpsRequested: phoneLocation.gpsRequested,
+      phoneLocationPermission: phoneLocation.permissionLabel,
+      phoneGpsIntervalSeconds: phoneLocation.effectiveIntervalSeconds,
+      phoneGpsLastFixAge: phoneLocation.lastFixAge,
+      phoneGpsLastError: phoneLocation.lastError,
+      foregroundIncludesLocation: _foreground.includesLocation,
       identities: [
         for (final summary in identities)
           IdentityDiagnostics(
@@ -166,6 +179,12 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
 
   /// Foreground service that keeps the process alive while backgrounded.
   final ForegroundService _foregroundService;
+
+  /// Phone battery percentage used by virtual telemetry and the UI.
+  final PhoneBatteryService phoneBattery;
+
+  /// One demand-driven location service shared by every live identity.
+  final PhoneLocationService phoneLocation;
 
   IdentityRepository? _repository;
   IdentityManager? _manager;
@@ -295,6 +314,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     proxyStatus: () => proxyStatus,
     port: () => port,
     log: log,
+    includeLocation: () => phoneLocation.permissionGranted,
   );
 
   /// Whether the OS exempts the app from battery optimizations (null until
@@ -306,6 +326,79 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   int? get batterySampleAgeSeconds => node?.batterySampleAgeSeconds;
   bool get batteryStale => node?.batteryStale ?? true;
   String? get batteryDiagnostic => node?.batteryDiagnostic;
+
+  // -------------------------------------------------------------------------
+  // Phone telemetry
+  // -------------------------------------------------------------------------
+
+  @override
+  int? get phoneBatteryPercent => phoneBattery.lastValue;
+
+  @override
+  bool get phoneGpsRequested => phoneLocation.gpsRequested;
+
+  @override
+  String get phoneLocationPermissionLabel => phoneLocation.permissionLabel;
+
+  @override
+  int? get phoneGpsIntervalSeconds => phoneLocation.effectiveIntervalSeconds;
+
+  @override
+  Duration? get phoneGpsLastFixAge => phoneLocation.lastFixAge;
+
+  @override
+  String? get phoneGpsLastError => phoneLocation.lastError;
+
+  @override
+  bool get foregroundIncludesLocation => _foreground.includesLocation;
+
+  @override
+  Future<void> refreshPhoneTelemetry() async {
+    await phoneBattery.read();
+    await phoneLocation.refreshPermission();
+    await _foreground.refreshServiceTypes();
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  Future<bool> requestPhoneLocationPermission() async {
+    final granted = await phoneLocation.requestForegroundPermission();
+    await _foreground.refreshServiceTypes();
+    if (!_disposed) notifyListeners();
+    return granted;
+  }
+
+  @override
+  Future<bool> openPhoneLocationSettings() =>
+      phoneLocation.openLocationSettings();
+
+  @override
+  Future<bool> setPhoneGpsEnabled(bool enabled) async {
+    final active = node;
+    if (active == null) return false;
+    try {
+      await active.setCustomVar('gps', enabled ? '1' : '0');
+      notifyListeners();
+      return true;
+    } catch (e) {
+      log('Could not change phone GPS: $e');
+      return false;
+    }
+  }
+
+  @override
+  Future<bool> setPhoneGpsInterval(int seconds) async {
+    final active = node;
+    if (active == null) return false;
+    try {
+      await active.setCustomVar('gps_interval', '$seconds');
+      notifyListeners();
+      return true;
+    } catch (e) {
+      log('Could not change phone GPS interval: $e');
+      return false;
+    }
+  }
 
   @override
   final List<String> logs = [];
@@ -374,6 +467,8 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
       onChanged: _onManagerChanged,
       onLog: log,
       onPoweredOff: _connection.handlePoweredOff,
+      phoneLocation: phoneLocation,
+      phoneBattery: phoneBattery,
     );
     _manager = created;
     return created;
@@ -627,6 +722,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
     _connection.dispose();
     _proxy.dispose();
     unawaited(_manager?.dispose());
+    phoneLocation.dispose();
     super.dispose();
   }
 }

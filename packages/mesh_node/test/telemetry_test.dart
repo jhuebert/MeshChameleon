@@ -78,6 +78,42 @@ class _FakeScheduler implements MeshScheduler {
   }
 }
 
+class _GpsProvider extends VirtualSensorSettingsProvider {
+  const _GpsProvider();
+
+  @override
+  Map<String, String> get initialSettings =>
+      const {'gps': '1', 'gps_interval': '900'};
+
+  @override
+  bool supports(String key) => key == 'gps' || key == 'gps_interval';
+
+  @override
+  String? normalize(String key, String value) => value;
+}
+
+class _RecordingProvider extends VirtualSensorSettingsProvider {
+  final List<Map<String, String>> changes = [];
+
+  @override
+  Map<String, String> get initialSettings =>
+      const {'gps': '0', 'gps_interval': '900'};
+
+  @override
+  bool supports(String key) => key == 'gps' || key == 'gps_interval';
+
+  @override
+  String? normalize(String key, String value) {
+    if (key == 'gps') return value == '0' || value == '1' ? value : null;
+    final seconds = int.tryParse(value);
+    return seconds?.clamp(0, 86400).toString();
+  }
+
+  @override
+  void onSettingsChanged(Map<String, String> settings) =>
+      changes.add(Map<String, String>.of(settings));
+}
+
 class _Job {
   _Job(this.at, this.action);
   final int at;
@@ -110,6 +146,9 @@ Future<(MeshNode, FakeDeviceLink, _TestSink, _FakeScheduler)> _makeNode({
   NodePrefs? prefs,
   int batteryMillivolts = 3700,
   FakeRadioBus? bus,
+  VirtualSensorSettingsProvider sensorSettings =
+      const EmptyVirtualSensorSettingsProvider(),
+  Future<int?> Function()? readPhoneBatteryPercent,
 }) async {
   final link = FakeDeviceLink(
     batteryReading_: BatteryReading(
@@ -126,6 +165,8 @@ Future<(MeshNode, FakeDeviceLink, _TestSink, _FakeScheduler)> _makeNode({
     identity: identity,
     link: link,
     prefs: prefs,
+    sensorSettings: sensorSettings,
+    readPhoneBatteryPercent: readPhoneBatteryPercent,
     scheduler: scheduler,
   )
     ..setPushSink(sink)
@@ -252,7 +293,13 @@ void main() {
   test('permission table modes_and_class_flags_and_inverse_mask', () async {
     final alice = await _identity(10);
     final bob = await _identity(11);
-    final (node, link, _, scheduler) = await _makeNode(identity: bob);
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      prefs: NodePrefs()
+        ..latitude = 12.3456
+        ..longitude = -45.6789,
+      sensorSettings: const _GpsProvider(),
+    );
     addTearDown(node.stop);
     var tag = 1000;
 
@@ -328,8 +375,12 @@ void main() {
       ..longitude = -45.6789
       ..telemetryModeBase = teleModeAllowAll
       ..telemetryModeLocation = teleModeAllowAll;
-    final (node, link, _, scheduler) =
-        await _makeNode(identity: bob, prefs: prefs, batteryMillivolts: 4000);
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      prefs: prefs,
+      batteryMillivolts: 4000,
+      sensorSettings: const _GpsProvider(),
+    );
     addTearDown(node.stop);
     await _addContact(node, alice, flags: 0);
     await node.battery.refresh(force: true);
@@ -779,4 +830,405 @@ void main() {
     await pump();
     expect(sink.confirmed, contains(crc));
   });
+
+  test('base telemetry appends the phone percentage when available', () async {
+    final alice = await _identity(30);
+    final bob = await _identity(31);
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      readPhoneBatteryPercent: () async => 42,
+    );
+    addTearDown(node.stop);
+    node.prefs.telemetryModeBase = teleModeAllowAll;
+    await _addContact(node, alice);
+
+    final reply = await _requestTelemetry(
+      node: node,
+      link: link,
+      scheduler: scheduler,
+      from: alice,
+      to: bob,
+      inverse: 0,
+    );
+    expect(reply.sublist(4, 11), [1, 0x74, 0x01, 0x72, 1, 0x78, 42]);
+  });
+
+  test('phone battery failure leaves the radio voltage reply intact', () async {
+    final alice = await _identity(32);
+    final bob = await _identity(33);
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      readPhoneBatteryPercent: () async => throw StateError('no battery'),
+    );
+    addTearDown(node.stop);
+    node.prefs.telemetryModeBase = teleModeAllowAll;
+    await _addContact(node, alice);
+
+    final reply = await _requestTelemetry(
+      node: node,
+      link: link,
+      scheduler: scheduler,
+      from: alice,
+      to: bob,
+      inverse: 0,
+    );
+    expect(reply.sublist(4, 8), [1, 0x74, 0x01, 0x72]);
+  });
+
+  test('location telemetry includes GPS with the phone altitude', () async {
+    final alice = await _identity(34);
+    final bob = await _identity(35);
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      prefs: NodePrefs()
+        ..latitude = 12.3456
+        ..longitude = -45.6789
+        ..telemetryModeBase = teleModeAllowAll
+        ..telemetryModeLocation = teleModeAllowAll,
+      sensorSettings: const _GpsProvider(),
+    );
+    addTearDown(node.stop);
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 12.3456,
+      longitude: -45.6789,
+      altitudeMeters: 12.34,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+    await _addContact(node, alice);
+
+    final reply = await _requestTelemetry(
+      node: node,
+      link: link,
+      scheduler: scheduler,
+      from: alice,
+      to: bob,
+      inverse: 0,
+    );
+    expect(
+      reply.sublist(4, 19),
+      [
+        1, 0x74, 0x01, 0x72, // voltage
+        1, 0x88, 0x01, 0xE2, 0x40, // lat
+        0xF9, 0x07, 0xAB, // lon
+        0x00, 0x04, 0xD2, // altitude 12.34 m
+      ],
+    );
+  });
+
+  test('gps=0 omits GPS telemetry but keeps manual coordinates for adverts',
+      () async {
+    final alice = await _identity(36);
+    final bob = await _identity(37);
+    final prefs = NodePrefs()
+      ..latitude = 12.5
+      ..longitude = -3.25
+      ..telemetryModeBase = teleModeAllowAll
+      ..telemetryModeLocation = teleModeAllowAll
+      ..advertLocPolicy = advertLocShare;
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      prefs: prefs,
+    );
+    addTearDown(node.stop);
+    await _addContact(node, alice);
+
+    final reply = await _requestTelemetry(
+      node: node,
+      link: link,
+      scheduler: scheduler,
+      from: alice,
+      to: bob,
+      inverse: 0,
+    );
+    expect(reply.sublist(4, 8), [1, 0x74, 0x01, 0x72]);
+
+    await node.advertise();
+    await pump();
+    final advert = Packet.readFrom(link.transmitted.last)!;
+    final decoded = PacketBuilder.decodeAdvertData(
+      advert.payload.sublist(pubKeySize + timestampSize + signatureSize),
+    );
+    expect(decoded.lat, closeTo(12.5, 1e-6));
+    expect(decoded.lon, closeTo(-3.25, 1e-6));
+  });
+
+  test('gps=1 without coordinates omits GPS telemetry', () async {
+    final alice = await _identity(38);
+    final bob = await _identity(39);
+    final (node, link, _, scheduler) = await _makeNode(
+      identity: bob,
+      prefs: NodePrefs()
+        ..telemetryModeBase = teleModeAllowAll
+        ..telemetryModeLocation = teleModeAllowAll,
+      sensorSettings: const _GpsProvider(),
+    );
+    addTearDown(node.stop);
+    await _addContact(node, alice);
+
+    final reply = await _requestTelemetry(
+      node: node,
+      link: link,
+      scheduler: scheduler,
+      from: alice,
+      to: bob,
+      inverse: 0,
+    );
+    expect(reply.sublist(4, 8), [1, 0x74, 0x01, 0x72]);
+  });
+
+  test('self telemetry includes phone data regardless of remote modes',
+      () async {
+    final bob = await _identity(40);
+    final (node, _, _, _) = await _makeNode(
+      identity: bob,
+      prefs: NodePrefs()
+        ..latitude = 12.3456
+        ..longitude = -45.6789,
+      sensorSettings: const _GpsProvider(),
+      readPhoneBatteryPercent: () async => 77,
+    );
+    addTearDown(node.stop);
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 12.3456,
+      longitude: -45.6789,
+      altitudeMeters: 5,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+
+    final lpp = await node.getSelfTelemetry();
+    expect(
+      lpp,
+      [
+        1,
+        0x74,
+        0x01,
+        0x72,
+        1,
+        0x88,
+        0x01,
+        0xE2,
+        0x40,
+        0xF9,
+        0x07,
+        0xAB,
+        0x00,
+        0x01,
+        0xF4,
+        1,
+        0x78,
+        77,
+      ],
+    );
+  });
+
+  test('applyLocationFix updates adverts and reset clears it', () async {
+    final bob = await _identity(41);
+    final (node, link, _, _) = await _makeNode(
+      identity: bob,
+      prefs: NodePrefs()..advertLocPolicy = advertLocShare,
+      sensorSettings: const _GpsProvider(),
+    );
+    addTearDown(node.stop);
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 51.5,
+      longitude: -0.12,
+      altitudeMeters: 33,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+    expect(node.prefs.latitude, 51.5);
+    expect(node.prefs.longitude, -0.12);
+    expect(node.locationFix?.altitudeMeters, 33);
+
+    await node.advertise();
+    await pump();
+    final advert = Packet.readFrom(link.transmitted.last)!;
+    final decoded = PacketBuilder.decodeAdvertData(
+      advert.payload.sublist(pubKeySize + timestampSize + signatureSize),
+    );
+    expect(decoded.lat, closeTo(51.5, 1e-6));
+    expect(decoded.lon, closeTo(-0.12, 1e-6));
+
+    await node.resetVirtualData();
+    expect(node.locationFix, isNull);
+    expect(node.prefs.latitude, 0);
+    expect(node.prefs.longitude, 0);
+  });
+
+  test('applyLocationFix is ignored when gps is off and clears on manual set',
+      () async {
+    final bob = await _identity(42);
+    final (node, _, _, _) = await _makeNode(
+      identity: bob,
+      sensorSettings: const _GpsProvider(),
+    );
+    addTearDown(node.stop);
+
+    await node.setCustomVar('gps', '0');
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 10,
+      longitude: 20,
+      altitudeMeters: 5,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+    expect(node.locationFix, isNull);
+    expect(node.prefs.latitude, 0);
+
+    await node.setCustomVar('gps', '1');
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 10,
+      longitude: 20,
+      altitudeMeters: 5,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+    expect(node.locationFix, isNotNull);
+    await node.setAdvertLatLon(1, 2);
+    expect(node.locationFix, isNull);
+    expect(node.prefs.latitude, 1);
+    expect(node.prefs.longitude, 2);
+  });
+
+  test('applyLocationFix rejects out-of-range and non-finite coordinates',
+      () async {
+    final bob = await _identity(43);
+    final (node, _, _, _) = await _makeNode(
+      identity: bob,
+      sensorSettings: const _GpsProvider(),
+    );
+    addTearDown(node.stop);
+    for (final fix in [
+      VirtualLocationFix(
+        latitude: 91,
+        longitude: 0,
+        capturedAt: DateTime.utc(2026, 1, 1),
+      ),
+      VirtualLocationFix(
+        latitude: double.nan,
+        longitude: 0,
+        capturedAt: DateTime.utc(2026, 1, 1),
+      ),
+    ]) {
+      await node.applyLocationFix(fix);
+      expect(node.locationFix, isNull);
+      expect(node.prefs.latitude, 0);
+    }
+  });
+
+  test('settings callback fires on load, start, set, and reset', () async {
+    final bob = await _identity(45);
+    final provider = _RecordingProvider();
+    final node = MeshNode(
+      identity: bob,
+      link: FakeDeviceLink(),
+      store: InMemoryNodeStore(),
+      sensorSettings: provider,
+    );
+    addTearDown(node.stop);
+
+    await node.load();
+    expect(provider.changes, hasLength(1));
+    expect(node.getCustomVars(), {'gps': '0', 'gps_interval': '900'});
+    node.start();
+    expect(provider.changes, hasLength(2));
+    await node.setCustomVar('gps', '1');
+    expect(provider.changes.last['gps'], '1');
+    await node.setCustomVar('gps_interval', '99999');
+    expect(provider.changes.last['gps_interval'], '86400');
+    await expectLater(
+      node.setCustomVar('gps', 'yes'),
+      throwsA(isA<CompanionOperationError>()),
+    );
+    await node.resetVirtualData();
+    expect(provider.changes.last['gps'], '0');
+    expect(node.gpsEnabled, isFalse);
+  });
+
+  test('dirty phone location is persisted before retire', () async {
+    final bob = await _identity(46);
+    final store = InMemoryNodeStore();
+    final node = MeshNode(
+      identity: bob,
+      link: FakeDeviceLink(),
+      store: store,
+      sensorSettings: const _GpsProvider(),
+    );
+    await node.load();
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 51.5,
+      longitude: -0.12,
+      altitudeMeters: 20,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+    expect(await store.load(), isNull);
+    await node.retire();
+
+    final saved = await store.load();
+    expect(saved!.prefs.latitude, closeTo(51.5, 1e-6));
+    expect(saved.prefs.longitude, closeTo(-0.12, 1e-6));
+  });
+
+  test('a phone battery timeout omits only the percentage', () async {
+    final assembler = TelemetryAssembler(
+      battery: BatteryService(
+        readVoltage: () async => 3700,
+        clock: VirtualClock(),
+        scheduler: _FakeScheduler(),
+      ),
+      prefs: NodePrefs(),
+      gpsEnabled: () => false,
+      locationFix: () => null,
+      readPhoneBatteryPercent: () => Completer<int?>().future,
+      phoneBatteryTimeout: const Duration(milliseconds: 5),
+    );
+    expect(
+      await assembler.build(telemPermBase),
+      [1, 0x74, 0x01, 0x72],
+    );
+  });
+
+  test('maximum phone telemetry fits the packet budget', () async {
+    final bob = await _identity(44);
+    final (node, _, _, _) = await _makeNode(
+      identity: bob,
+      prefs: NodePrefs()
+        ..latitude = 12.3456
+        ..longitude = -45.6789,
+      sensorSettings: const _GpsProvider(),
+      readPhoneBatteryPercent: () async => 100,
+    );
+    addTearDown(node.stop);
+    await node.applyLocationFix(VirtualLocationFix(
+      latitude: 12.3456,
+      longitude: -45.6789,
+      altitudeMeters: 123.45,
+      capturedAt: DateTime.utc(2026, 1, 1),
+    ));
+    final lpp = await node.getSelfTelemetry();
+    expect(lpp.length, 18);
+    expect(lpp.length + timestampSize, lessThanOrEqualTo(maxPacketPayloadSize));
+  });
+}
+
+Future<Uint8List> _requestTelemetry({
+  required MeshNode node,
+  required FakeDeviceLink link,
+  required _FakeScheduler scheduler,
+  required LocalIdentity from,
+  required LocalIdentity to,
+  required int inverse,
+  int tag = 0x55667788,
+}) async {
+  link.transmitted.clear();
+  scheduler.resetJobs();
+  final request = await _requestPacket(
+    from: from,
+    to: to,
+    tag: tag,
+    code: reqTypeGetTelemetryData,
+    data: [inverse],
+  );
+  link.deliver(6, -70, request.writeTo());
+  await pump();
+  scheduler.advance(const Duration(milliseconds: 300));
+  await pump();
+  return _decodeTelemetryReply(link.transmitted.single, from, to);
 }

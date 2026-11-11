@@ -11,6 +11,8 @@ import 'identity_repository.dart';
 import 'identity_runtime.dart';
 import 'identity_runtime_builder.dart';
 import 'local_mesh_router.dart';
+import 'phone_battery_service.dart';
+import 'phone_location_service.dart';
 
 /// Owns the identity catalog, all live runtimes, the shared radio hub, and the
 /// local mirror between virtual identities.
@@ -20,6 +22,8 @@ class IdentityManager {
     this.onChanged,
     this.onLog,
     this.onPoweredOff,
+    this.phoneLocation,
+    this.phoneBattery,
     this.notifyDebounce = const Duration(milliseconds: 250),
   });
 
@@ -27,6 +31,8 @@ class IdentityManager {
   final void Function()? onChanged;
   final void Function(String message)? onLog;
   final Future<void> Function()? onPoweredOff;
+  final PhoneLocationService? phoneLocation;
+  final PhoneBatteryService? phoneBattery;
   final Duration notifyDebounce;
 
   IdentityIndex? _index;
@@ -223,6 +229,8 @@ class IdentityManager {
         onPoweredOff: onPoweredOff,
         validateImportedKey: _validateImportedKey,
         onRecordChanged: _replaceRecord,
+        phoneLocation: phoneLocation,
+        readPhoneBatteryPercent: phoneBattery?.read,
       );
 
   Future<void> _startRuntime(
@@ -258,6 +266,7 @@ class IdentityManager {
 
   Future<void> stopLive({bool notify = true}) async {
     for (final runtime in List<IdentityRuntime>.of(_runtimes)) {
+      phoneLocation?.unbindNode(runtime.record.id);
       try {
         await runtime.node?.retire();
       } catch (e) {
@@ -430,6 +439,7 @@ class IdentityManager {
     }
     final runtime = _runtimeById[id];
     if (runtime != null) {
+      phoneLocation?.unbindNode(id);
       await runtime.node?.retire();
       _runtimes.remove(runtime);
       _runtimeById.remove(id);
@@ -465,6 +475,7 @@ class IdentityManager {
       if (!enabled) {
         final runtime = _runtimeById[id];
         if (runtime != null) {
+          phoneLocation?.unbindNode(id);
           try {
             await runtime.node?.retire();
           } catch (e) {

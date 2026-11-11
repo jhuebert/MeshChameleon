@@ -162,6 +162,7 @@ void main() {
     await expectLater(bridge.sendLogin(empty, 'pw'), unsupported);
     await expectLater(bridge.sendStatusReq(empty), unsupported);
     await expectLater(bridge.sendControlData(Uint8List(1)), unsupported);
+    await expectLater(bridge.getSelfTelemetry(), unsupported);
   });
 
   test('empty-state queries stay quiet', () async {

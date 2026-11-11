@@ -68,9 +68,16 @@ void main() {
     expect(find.text('192.168.1.20'), findsOneWidget);
     expect(find.text('Connected for'), findsOneWidget);
     expect(find.text('Last disconnect'), findsOneWidget);
+    expect(find.text('Phone telemetry'), findsOneWidget);
+    expect(find.text('42%'), findsOneWidget);
+    expect(find.text('Allow all the time'), findsOneWidget);
+    expect(find.text('60s'), findsOneWidget);
+    expect(find.text('5s ago'), findsOneWidget);
+    expect(find.text('Includes location'), findsOneWidget);
+    expect(find.text('gps timeout'), findsOneWidget);
     expect(find.text('client closed'), findsOneWidget);
     expect(find.text('Firmware'), findsOneWidget);
-    expect(find.text('Last error'), findsOneWidget);
+    expect(find.text('Last error'), findsNWidgets(2));
     expect(find.textContaining('link error'), findsOneWidget);
     expect(find.text('Signal'), findsNWidgets(2));
     expect(find.textContaining('-70 dBm'), findsWidgets);
@@ -222,6 +229,13 @@ DiagnosticsSnapshot _richSnapshot(
     identityDatabaseError: 'catalog damaged',
     companion: companion,
     link: link,
+    phoneBatteryPercent: 42,
+    phoneGpsRequested: true,
+    phoneLocationPermission: 'Allow all the time',
+    phoneGpsIntervalSeconds: 60,
+    phoneGpsLastFixAge: const Duration(seconds: 5),
+    phoneGpsLastError: 'gps timeout',
+    foregroundIncludesLocation: true,
     identities: const [
       IdentityDiagnostics(
         id: 'id-active',

@@ -9,6 +9,10 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 /// isolate, but for shape A it intentionally does no work there.
 class ForegroundService {
   bool _initialized = false;
+  bool _includesLocation = false;
+
+  /// Whether the running service currently declares the `location` type.
+  bool get includesLocation => _includesLocation;
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
 
@@ -41,16 +45,28 @@ class ForegroundService {
     _initialized = true;
   }
 
-  Future<void> start({required String title, required String text}) async {
+  Future<void> start({
+    required String title,
+    required String text,
+    bool includeLocation = false,
+  }) async {
     if (!_isAndroid) return;
     if (!_initialized) await initialize();
     if (await FlutterForegroundTask.isRunningService) {
-      await update(title: title, text: text);
-      return;
+      if (includeLocation == _includesLocation) {
+        await update(title: title, text: text);
+        return;
+      }
+      // Android service types cannot change in place; restart from the
+      // foreground so the permission and declared type stay consistent.
+      await FlutterForegroundTask.stopService();
     }
     await FlutterForegroundTask.requestNotificationPermission();
     final result = await FlutterForegroundTask.startService(
-      serviceTypes: const [ForegroundServiceTypes.connectedDevice],
+      serviceTypes: [
+        ForegroundServiceTypes.connectedDevice,
+        if (includeLocation) ForegroundServiceTypes.location,
+      ],
       notificationTitle: title,
       notificationText: text,
       callback: startCallback,
@@ -58,6 +74,7 @@ class ForegroundService {
     if (result is ServiceRequestFailure) {
       throw StateError('foreground service start failed: ${result.error}');
     }
+    _includesLocation = includeLocation;
   }
 
   Future<void> update({required String title, required String text}) async {
@@ -73,6 +90,7 @@ class ForegroundService {
     if (!_isAndroid) return;
     if (!await FlutterForegroundTask.isRunningService) return;
     await FlutterForegroundTask.stopService();
+    _includesLocation = false;
   }
 
   /// Whether the OS has exempted the app from battery optimizations.

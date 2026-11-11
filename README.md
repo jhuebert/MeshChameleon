@@ -56,6 +56,7 @@ does through a companion:
 - join channels and exchange group messages
 - manage contacts and announce yourself to the mesh
 - request status and sensor telemetry where the mesh supports it
+- share the phone's battery percentage and optional GPS with permitted contacts
 - see radio battery and storage information
 - switch between identities without touching the radio
 - use the same identity with a home radio or a portable node

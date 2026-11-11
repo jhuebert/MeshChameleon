@@ -150,9 +150,10 @@ differences from a bare physical companion are intentional and are not bugs:
   back SELF_INFO and treat `saved-only` state separately from active RF.
 - The virtual clock is host-derived. SET_DEVICE_TIME and timezone changes never
   touch the phone/radio RTC.
-- Only a minimal telemetry surface is synthesized: fresh physical voltage plus
-  virtual GPS when permitted. No physical GPS, MCU temperature, environment
-  sensors, or sensor-node subscription server is fabricated.
+- Remote telemetry sends the attached radio's fresh voltage first, then optional
+  phone GPS, then the phone battery percentage. No MCU temperature, environment
+  sensors, or sensor-node subscription server is fabricated. See
+  [Phone telemetry and GPS](#phone-telemetry-and-gps).
 - PIN and factory reset remain disabled; there is no remote or binary reset
   alias. The only reset is the explicit app-only virtual reset.
 - Remote physical administration is denied. A remote CLI peer can run virtual
@@ -437,8 +438,60 @@ is AES-block-padded, so a trailing partial block may be zero-filled.
 `RESP_CODE_CLI_REPLY (29)` (`[29][utf8 text]`), matching the firmware; on older
 firmware the proxy answers `ERR`. `CMD_SEND_TELEMETRY_REQ (39)` with a 3-byte
 payload is the `'self'` telemetry request (firmware `len == 4`): the proxy
-answers with its own CayenneLPP telemetry (battery voltage on the self channel)
-as `PUSH_CODE_TELEMETRY_RESPONSE (0x8B)`.
+answers with all locally available telemetry (radio voltage, optional phone GPS,
+and phone battery percentage) as `PUSH_CODE_TELEMETRY_RESPONSE (0x8B)`,
+independent of any remote telemetry permission.
+
+## Phone telemetry and GPS
+
+The virtual companion adds two phone-sourced values to the stock base/location
+telemetry surface. Both are optional and are omitted rather than defaulted:
+
+| Order | Channel | Permission | LPP type | Value |
+|---:|---:|---|---|---|
+| 1 | 1 | Base | `0x74` voltage | Attached radio voltage, 0.01 V |
+| 2 | 1 | Location | `0x88` GPS | Phone latitude/longitude, altitude 0.01 m |
+| 3 | 1 | Base | `0x78` percentage | Phone battery 0-100% |
+
+A phone battery failure or 1-second read timeout never suppresses the voltage
+reply. GPS is only emitted when `gps=1`, the location permission is granted, and
+the live coordinates are not the fresh-install `0,0`. Incoming telemetry
+requests read the node's last known fix; they never trigger a GPS sample.
+
+`gps` and `gps_interval` are normal custom variables, persisted in the existing
+`NodeState.customSettings` map (no schema change):
+
+- `gps`: `0` or `1`; default `0`. Enabling it keeps the setting even when
+  location permission is denied.
+- `gps_interval`: `0..86400` seconds; default `900`. Stored `0` means an
+  effective 1-second cadence for stock compatibility.
+
+`GET_CUSTOM_VARS` advertises both settings because the phone has GPS hardware.
+Stock firmware accepts `gps_interval` but does not advertise it, and its default
+cadence is effectively 1 second; this is an intentional virtual-only difference.
+
+One app-level `PhoneLocationService` owns one demand-driven timer for every
+identity. The shortest `gps_interval` among bound identities with `gps=1`
+controls the cadence, and all enabled identities receive each accepted fix. The
+service uses one-shot `getLastKnownPosition`/`getCurrentPosition` calls with
+medium accuracy, never a continuous position stream, and never overlaps
+samples. Very small intervals can therefore be slower than the configured value
+when a request takes longer than the interval.
+
+Accepted fixes update `NodePrefs.latitude/longitude` in memory so adverts,
+contact export, and `SELF_INFO` use them. Altitude lives only in memory for the
+LPP entry. Fixes are persisted through normal state saves and flushed on
+stop/retire; manual `SET_ADVERT_LATLON` clears the in-memory altitude so stale
+GPS details are not mixed with manual coordinates. A real GPS fix overwrites
+manual coordinates on the next update, matching stock. Persisted coordinates
+survive restart, so a cold start can report the last location (including a
+manual one) before a new fix arrives.
+
+`SET_CUSTOM_VAR` never prompts for Android permissions. The app shows the
+permission state and provides explicit request/system-settings actions. The
+foreground service includes the `location` type when location access is
+granted; changing that type restarts the service from the foreground while
+preserving the notification text.
 
 Flooded request replies (login/status/telemetry/binary) can take **~15-25 s** to
 arrive, because the repeater has to complete/return the path.

@@ -238,7 +238,11 @@ class _RecordingForegroundService extends ForegroundService {
   Future<void> initialize() async {}
 
   @override
-  Future<void> start({required String title, required String text}) async {
+  Future<void> start({
+    required String title,
+    required String text,
+    bool includeLocation = false,
+  }) async {
     events.add('start|$title|$text');
     started = true;
   }
