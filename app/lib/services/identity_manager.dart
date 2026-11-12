@@ -63,6 +63,12 @@ class IdentityManager {
   String? get databaseError => _databaseError;
   String? get activeId => _activeId;
   List<IdentitySummary> get summaries => List.unmodifiable(_summaries);
+
+  /// The last successful physical battery/storage sample from the shared
+  /// radio hub, or null before the first successful read or after a
+  /// detach/restore. Read-only: never triggers a device request.
+  BatteryReading? get lastRadioBatterySample => _hub?.lastBatterySample;
+  DateTime? get lastRadioBatterySampleAt => _hub?.lastBatterySampleAt;
   List<IdentityRuntime> get runtimes => List.unmodifiable(_runtimes);
 
   IdentityRuntime? get activeRuntime {

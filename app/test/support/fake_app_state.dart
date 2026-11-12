@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:companion_server/companion_server.dart';
 import 'package:device_link/device_link.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
@@ -25,6 +26,7 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   String suggestion = 'MeshChameleon 2';
   IdentityRecord? createResult;
   bool activateResult = true;
+  Completer<bool>? activateGate;
   bool toggleResult = true;
   bool deleteResult = true;
   bool clearResult = true;
@@ -41,6 +43,23 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   int cancelCalls = 0;
   int rearmCalls = 0;
   int batteryRefreshes = 0;
+  int batteryOpened = 0;
+  bool startProxyResult = true;
+  bool portSaveResult = true;
+  Completer<bool>? portSaveGate;
+
+  // Phase 1 projection seams.
+  @override
+  RadioHealth? radioHealth;
+
+  GpsScope? gpsScope;
+
+  @override
+  GpsScope? get activeGpsScope => gpsScope;
+
+  /// Injectable metrics for the default snapshot fixture.
+  final CompanionMetrics companionMetricsValue = CompanionMetrics();
+  final LinkMetrics linkMetricsValue = LinkMetrics();
 
   // Backup workflow.
   final createPassphrases = <String>[];
@@ -72,6 +91,7 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   final gpsIntervalCalls = <int>[];
   bool phonePermissionGranted = false;
   bool phonePermissionResult = false;
+  bool gpsSaveResult = true;
   int phoneSettingsOpened = 0;
 
   // Diagnostics.
@@ -166,7 +186,7 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   @override
   Future<bool> activateIdentity(String id) async {
     activateCalls.add(id);
-    return activateResult;
+    return activateGate == null ? activateResult : await activateGate!.future;
   }
 
   @override
@@ -223,7 +243,9 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
 
   @override
   Future<void> startProxy({int? serverPort}) async {
-    proxyStatus = ProxyStatus.running;
+    if (startProxyResult) {
+      proxyStatus = ProxyStatus.running;
+    }
     notifyListeners();
   }
 
@@ -245,6 +267,8 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
 
   @override
   Future<bool> setProxyPort(int value) async {
+    if (portSaveGate != null && !await portSaveGate!.future) return false;
+    if (!portSaveResult) return false;
     port = value;
     notifyListeners();
     return true;
@@ -280,7 +304,9 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   }
 
   @override
-  Future<void> openBatteryOptimizationSettings() async {}
+  Future<void> openBatteryOptimizationSettings() async {
+    batteryOpened++;
+  }
 
   @override
   Future<Uint8List> createBackup(String passphrase) async {
@@ -328,7 +354,16 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   @override
   Future<bool> setPhoneGpsEnabled(bool enabled) async {
     gpsEnabledCalls.add(enabled);
-    phoneGpsRequested = enabled;
+    if (!gpsSaveResult) return false;
+    final scope = gpsScope;
+    if (scope != null) {
+      gpsScope = GpsScope(
+        identityId: scope.identityId,
+        identityName: scope.identityName,
+        requested: enabled,
+        configuredIntervalSeconds: scope.configuredIntervalSeconds,
+      );
+    }
     notifyListeners();
     return true;
   }
@@ -336,7 +371,16 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   @override
   Future<bool> setPhoneGpsInterval(int seconds) async {
     gpsIntervalCalls.add(seconds);
-    phoneGpsIntervalSeconds = seconds;
+    if (!gpsSaveResult) return false;
+    final scope = gpsScope;
+    if (scope != null) {
+      gpsScope = GpsScope(
+        identityId: scope.identityId,
+        identityName: scope.identityName,
+        requested: scope.requested,
+        configuredIntervalSeconds: seconds,
+      );
+    }
     notifyListeners();
     return true;
   }
@@ -344,6 +388,52 @@ class FakeAppState extends ChangeNotifier implements AppViewState {
   @override
   DiagnosticsSnapshot diagnosticsSnapshot() {
     refreshes++;
-    return diagnosticsBuilder!();
+    final builder = diagnosticsBuilder;
+    if (builder != null) return builder();
+    return DiagnosticsSnapshot(
+      buildInfo: BuildInfo.fallback(),
+      generatedAt: DateTime.utc(2026, 1, 1),
+      appUptime: const Duration(minutes: 5),
+      proxyRunning: proxyStatus == ProxyStatus.running,
+      proxyPort: port,
+      deviceConnected: deviceConnected,
+      deviceLabel: deviceLabel,
+      devicePhase: devicePhase,
+      deviceInfo: null,
+      deviceSessionDuration: null,
+      reconnectAttempts: 0,
+      reconnectSuccesses: 0,
+      foregroundServiceRunning: false,
+      batteryOptimizationsIgnored: batteryOptimizationsIgnored,
+      autoResume: autoResume,
+      identityDatabaseError: dbError,
+      companion: companionMetricsValue,
+      link: linkMetricsValue,
+      radioHealth: radioHealth,
+      identities: [
+        for (final summary in summaries)
+          IdentityDiagnostics(
+            id: summary.id,
+            name: summary.name,
+            prefixHex: summary.prefixHex,
+            active: summary.active,
+            live: summary.live,
+            enabled: summary.enabled,
+            contactCount: summary.contactCount,
+            channelCount: summary.channelCount,
+            queuedDirect: summary.queuedDirect,
+            queuedChannel: summary.queuedChannel,
+            unavailableReason: summary.unavailableReason,
+          ),
+      ],
+      recentLogs: List<String>.of(logs),
+      phoneBatteryPercent: phoneBatteryPercent,
+      phoneGpsRequested: phoneGpsRequested,
+      phoneLocationPermission: phoneLocationPermissionLabel,
+      phoneGpsIntervalSeconds: phoneGpsIntervalSeconds,
+      phoneGpsLastFixAge: phoneGpsLastFixAge,
+      phoneGpsLastError: phoneGpsLastError,
+      foregroundIncludesLocation: foregroundIncludesLocation,
+    );
   }
 }

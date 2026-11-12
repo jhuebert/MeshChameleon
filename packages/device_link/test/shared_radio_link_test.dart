@@ -259,4 +259,47 @@ void main() {
     base.deliver(0, 0, Uint8List.fromList([1]));
     expect(count, 0);
   });
+
+  test('lastBatterySample exposes the cached sample without new I/O', () async {
+    final view = hub.viewFor('a');
+    expect(hub.lastBatterySample, isNull);
+    expect(hub.lastBatterySampleAt, isNull);
+
+    await view.battery();
+    // Reading the cache must not trigger another device request.
+    final reads = base.batteryReads;
+    expect(hub.lastBatterySample, isNotNull);
+    expect(hub.lastBatterySample!.millivolts, 4000);
+    expect(hub.lastBatterySampleAt, isNotNull);
+    expect(base.batteryReads, reads);
+  });
+
+  test('detach clears the exposed sample until the next read', () async {
+    final view = hub.viewFor('a');
+    await view.battery();
+    expect(hub.lastBatterySample, isNotNull);
+
+    await hub.detach();
+    expect(hub.lastBatterySample, isNull);
+    expect(hub.lastBatterySampleAt, isNull);
+  });
+
+  test('failed and null reads preserve the last successful timestamp',
+      () async {
+    var now = DateTime.utc(2026);
+    final clocked = SharedRadioHub(base, now: () => now);
+    addTearDown(clocked.dispose);
+    final view = clocked.viewFor('a');
+    await view.battery();
+    final successfulAt = clocked.lastBatterySampleAt;
+    now = now.add(const Duration(seconds: 11));
+    base.batteryReading_ = null;
+    expect(await view.battery(), isNull);
+    expect(clocked.lastBatterySampleAt, successfulAt);
+    expect(clocked.lastBatterySample!.millivolts, 4000);
+    base.batteryError = StateError('offline');
+    await expectLater(view.battery(), throwsStateError);
+    expect(clocked.lastBatterySampleAt, successfulAt);
+    expect(clocked.lastBatterySample!.millivolts, 4000);
+  });
 }

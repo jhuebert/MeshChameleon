@@ -51,3 +51,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/branding/icon.png
+    # Verbatim copies of the repository legal text (keep in sync; see
+    # DEVELOPMENT.md). Bundled so the app can show its own notices.
+    - assets/legal/LICENSE.md
+    - assets/legal/ATTRIBUTION.md

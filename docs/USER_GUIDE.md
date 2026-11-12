@@ -11,8 +11,9 @@ between companion radios without exporting or re-importing keys.
 This guide covers installation, connecting a radio, starting the proxy, managing
 identities, background operation, backups, and troubleshooting.
 
-> Screenshots show the app in dark mode with sample identities. The Android build
-> also has a **Battery optimization** card on the home screen, described below.
+> The Home, Settings, About, switcher, and recovery images are synthetic Flutter
+> test renders, not Android screenshots. Other images predate the UI overhaul.
+> Android visual and TalkBack review remains pending (2026-11-11).
 
 ## Contents
 
@@ -47,9 +48,8 @@ identities, background operation, backups, and troubleshooting.
 - No local network is needed when the client runs on the same phone. If it runs
   on another device, both must be on the same trusted local network.
 - Bluetooth and notification permissions granted when Android asks.
-- For reliable background operation, set MeshChameleon to **Unrestricted** in
-  Android's battery settings. The home-screen **Battery optimization** card
-  opens the right screen.
+- To reduce background interruptions, set MeshChameleon to **Unrestricted** in
+  Android's battery settings. **Settings → Battery optimization** opens the system settings.
 
 You do **not** need an internet connection. The MeshCore app normally connects
 to MeshChameleon over `127.0.0.1` on the same phone; a local network is only
@@ -81,37 +81,30 @@ identity named `MeshChameleon`.
   <img src="screenshots/home.png" alt="MeshChameleon home screen in dark mode" width="380">
 </p>
 
-The home screen is the control panel for the whole app.
+The home screen is the control panel for the whole app. The active identity is
+held on your phone, not on the radio. Tap **Switch** to choose another identity;
+**Manage identities** in the sheet opens the management screen.
 
-| Card | What it does |
-|---|---|
-| **Status** | Shows the active identity, how many identities exist and are live, whether a device is connected, and whether the proxy is running. |
-| **Device link** | Opens the connection screen. It shows **Disconnect** while connected and **Cancel** while connecting, reconnecting, or waiting for the radio to return. |
-| **Identity card** | Opens the identities screen. The title is the active identity's name. |
-| **Proxy server port** | Shows the local port your MeshCore app will connect to. It can only be edited while the proxy is stopped. |
-| **Proxy server** | Starts or stops the local companion server. The proxy needs a connected device and an available identity. |
-| **Resume on launch** | Reconnects the last device on a cold start. Recovery of a session that dropped while running happens even when this is off. |
-| **Battery optimization** (Android only) | Shows whether Android is throttling the app. Tap **Open settings** and set MeshChameleon to **Unrestricted**. |
-| **Backup & restore** | Saves or restores all identities, contacts, channels, messages, and settings in one encrypted file. |
+**Device link** connects MeshChameleon to the radio. **Proxy server** serves a
+separate connection to your MeshCore app. The MeshCore app section shows whether
+that client is connected, waiting, or the server is stopped. The copy icon copies
+`127.0.0.1:<port>` for a client on this phone. A client on another device must use
+the phone's local network address instead.
 
-The receipt icon in the top-right corner opens the **Log** screen. The info icon
-opens the **Information** page. The version footer at the bottom of the home
-screen opens the same page.
+The identity's waiting count is received direct and channel messages awaiting
+client sync, not unread messages or unsent messages. **Radio activity** shows
+raw TX/RX totals for all identities since this app opened. TX means a successful
+raw send, not confirmed delivery. Expand it for last mesh-packet RSSI/SNR,
+physical radio voltage and storage, and Information. These are not Bluetooth
+signal strength or per-identity storage; the counts survive radio changes during
+this app run. Unknown readings are shown as unavailable.
 
-> The footer shows the installed version and, for builds made with
-> `scripts/build.sh`, the short Git commit. A build made with a plain
-> `flutter build` shows **dev build** instead of an invented hash/date.
+The **Settings** gear opens connection preferences, per-identity phone GPS,
+backup and identity management, Information, Log, and About. The Android battery
+optimization action is in Settings.
 
-### Status card
-
-The status card is a quick health check:
-
-- **Identity** — the name and public-key prefix of the identity your MeshCore
-  app is currently using.
-- **Identities** — total identities and how many are **live**. A live identity
-  is running and receiving; this requires a connected device.
-- **Device** — `connected` or `disconnected`.
-- **Proxy** — `stopped` or `running (port 5000)`.
+<p align="center"><img src="screenshots/switcher.png" alt="Switch identity sheet" width="380"></p>
+<p align="center"><img src="screenshots/settings.png" alt="Settings screen" width="380"></p>
 
 ## Connect a radio
 
@@ -178,9 +171,8 @@ If the connection fails:
 
 When a device link is active:
 
-- The home screen shows **Device: connected**.
-- Every enabled identity in the catalog starts running; the status card shows how
-  many are live.
+- **Device link** shows the connected radio.
+- Every enabled identity starts running; the switch sheet shows how many are live.
 - Android shows an ongoing **MeshChameleon** notification. Keep it visible;
   it is what keeps the link alive when you switch apps.
 - The radio's own MeshCore identity is not used or exposed by MeshChameleon.
@@ -222,8 +214,8 @@ The proxy is the TCP endpoint your MeshCore app uses. It only runs after a radio
 is connected.
 
 1. Connect the radio first.
-2. On the home screen, set **Proxy server port** if you do not want the default
-   `5000`. The port can only be changed while the proxy is stopped.
+2. In **Settings → Proxy server port**, choose a port if you do not want the
+   default `5000`. The port can only be changed while the proxy is stopped.
 3. Turn on **Proxy server**. The card should say **Listening on port 5000** (or
    the port you chose).
 4. In your MeshCore app on the same phone, add or connect to a **network**,
@@ -265,7 +257,8 @@ one of them to your MeshCore app at a time.
   <img src="screenshots/identities.png" alt="Identities screen with three sample identities" width="380">
 </p>
 
-Open the identities screen by tapping the identity card on the home screen.
+Tap **Switch** on Home, then **Manage identities**. You can also open
+**Settings → Identities**.
 
 ### Create an identity
 
@@ -285,11 +278,11 @@ there updates the identity's stored name.
 
 ### Switch the active identity
 
-Tap an inactive identity in the list. MeshChameleon makes it active, closes the
-current client connection, and serves the new identity. Your MeshCore app
-reconnects and sees the new identity.
+Tap **Switch** on Home and select an available identity. MeshChameleon closes
+the current client connection and serves the new identity. Reconnect your
+MeshCore app if it does not reconnect automatically.
 
-The currently active identity is marked **Active**. Tapping it again does
+The currently active identity is marked in the switch sheet. Tapping it again does
 nothing.
 
 ### Active vs. live
@@ -314,6 +307,16 @@ The active identity cannot be disabled. Activate another identity first. Message
 already queued while the identity was disabled stay in its queue until they are
 synced or the identity is enabled again.
 
+### Phone GPS
+
+In **Settings → Phone telemetry**, **Use phone GPS** and the GPS interval
+apply to the active live identity. Shared phone status reports whether any
+identity requests GPS and the effective shared cadence. The default interval is
+900 seconds; a stored value of 0 requests a 1-second cadence and can consume
+more battery. Permission requests are explicit. Location exposure also depends
+on telemetry permissions and advert policy. Turning GPS off does not erase saved
+coordinates or stop another identity from requesting GPS.
+
 ### Queued messages
 
 The identity cards show how many direct and channel messages are waiting. A
@@ -332,7 +335,7 @@ Open the three-dot menu on an identity and choose **Clear local data**.
 
 This keeps the identity key and its current name, but removes its contacts,
 channels, queued messages, advert paths, and preferences. If the identity is
-active, the MeshCore app reconnects.
+active, reconnect the MeshCore app if it does not reconnect automatically.
 
 ### Delete an identity
 
@@ -399,12 +402,13 @@ tapping it returns to the app.
 
 ### Battery optimization
 
-On Android, the home screen has a **Battery optimization** card:
+On Android, open **Settings → Battery optimization**:
 
 - **Optimized** — Android may pause the app in the background. Tap **Open
   settings**, find MeshChameleon in the list, and choose **Unrestricted**
   (older Android versions: **Don't optimize**).
-- **Unrestricted** — the app can keep the link running in the background.
+- **Unrestricted** — reduces one source of interruption. Android and phone
+  manufacturer restrictions can still interrupt the link.
 
 MeshChameleon opens the system battery-optimization settings; it does not show
 a one-tap exemption prompt.
@@ -415,7 +419,7 @@ settings for MeshChameleon.
 
 ### Resume on launch
 
-Turn on **Resume on launch** to reconnect the last device and restart the proxy
+In **Settings**, turn on **Resume on launch** to reconnect the last device and restart the proxy
 when you open the app. It is a cold-start setting only: a session that dropped
 while MeshChameleon was running recovers in the background even when this is off.
 
@@ -424,8 +428,11 @@ relying on the proxy again.
 
 ## Version and diagnostics
 
-Open the **Information** page from the info icon or the version footer on the
-home screen.
+Open **Settings → Information** for live diagnostics, or expand **Radio
+activity** on Home. **Settings → About MeshChameleon** shows the installed
+version, build details, and open-source licenses.
+
+<p align="center"><img src="screenshots/about.png" alt="About MeshChameleon" width="380"></p>
 
 - **Build** shows the installed version, build/version code, Git commit (with a
   dirty marker when the working tree had changes), UTC compile time, and build
@@ -457,7 +464,7 @@ before sharing.
   <img src="screenshots/logs.png" alt="MeshChameleon log screen" width="380">
 </p>
 
-Tap the receipt icon in the top-right corner of the home screen. The newest
+Open **Settings → Log**. The newest
 entries are at the top. The log is the first place to check when a connection,
 the proxy, or an identity does not behave as expected.
 
@@ -576,7 +583,7 @@ releases.
 
 ### Backing up and restoring
 
-Tap **Backup & restore** on the home screen.
+Open **Settings → Backup & restore**.
 
 - **Back up now** asks for a passphrase and saves one encrypted `.mcbackup`
   file. It contains all identities and their keys, contacts, channels,
@@ -595,9 +602,9 @@ removed.
 
 ### Moving to a new phone
 
-1. On the old phone, tap **Backup & restore → Back up now** on the home screen.
+1. On the old phone, open **Settings → Backup & restore → Back up now**.
 2. Move the file to the new phone and install MeshChameleon.
-3. Open **Backup & restore → Restore from backup** from the home screen.
+3. Open **Settings → Backup & restore → Restore from backup**.
 4. Enter the passphrase and confirm.
 
 A MeshCore client can also export the active identity's key, but that carries

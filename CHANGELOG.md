@@ -8,6 +8,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- Reorganized Home around the active identity, device link, proxy and client;
+  added a quick identity switcher, copyable client endpoint, and radio activity.
+- Added Settings and About, clarified per-identity GPS versus shared phone
+  sampling, and improved connection, port, and recovery feedback.
+- Added a static light/dark theme, deterministic UI goldens, and refreshed
+  navigation documentation. Android visual, TalkBack, BLE, and background
+  survival validation remains pending.
 - Virtual telemetry now includes the phone battery percentage and optional
   phone GPS (latitude/longitude/altitude) on the self channel. Phone GPS also
   feeds adverts and `SELF_INFO`, with `gps`/`gps_interval` custom settings, a

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../app_view_state.dart';
 import '../widgets/app_snack_bar.dart';
+import '../widgets/content_width.dart';
 
 class LogScreen extends StatelessWidget {
   const LogScreen({super.key});
@@ -28,17 +29,29 @@ class LogScreen extends StatelessWidget {
           ),
         ],
       ),
-      body: ListView.builder(
-        padding: const EdgeInsets.all(12),
-        itemCount: logs.length,
-        itemBuilder: (context, index) {
-          final line = logs[logs.length - 1 - index];
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 2),
-            child: Text(line,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 11)),
-          );
-        },
+      body: SafeArea(
+        child: ContentWidth(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(12),
+            itemCount: logs.length,
+            itemBuilder: (context, index) {
+              final line = logs[logs.length - 1 - index];
+              // Long lines wrap instead of ellipsizing; monospace keeps the
+              // timestamps and codes aligned for support reading.
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: SelectableText(
+                  line,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    height: 1.35,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
       ),
     );
   }

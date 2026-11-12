@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshchameleon/app_state.dart';
-import 'package:meshchameleon/main.dart';
+import 'package:meshchameleon/screens/home_screen.dart';
 import 'package:meshchameleon/screens/backup_screen.dart';
 import 'package:provider/provider.dart';
 
@@ -19,7 +19,9 @@ void main() {
       ),
     );
 
-    expect(find.text('Backup & restore'), findsOneWidget);
+    // Backup lives under Settings → Data.
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Backup & restore'));
     await tester.pumpAndSettle();
 

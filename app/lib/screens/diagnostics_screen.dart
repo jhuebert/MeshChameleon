@@ -8,6 +8,8 @@ import '../app_view_state.dart';
 import '../services/diagnostics_snapshot.dart';
 import '../widgets/app_snack_bar.dart';
 import '../widgets/app_surfaces.dart';
+import '../widgets/content_width.dart';
+import '../widgets/info_row.dart';
 
 class DiagnosticsScreen extends StatefulWidget {
   const DiagnosticsScreen({super.key});
@@ -89,17 +91,31 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
           if (notification is ScrollEndNotification) _resumeRefresh();
           return false;
         },
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            RepaintBoundary(child: _buildCard(_snapshot.value)),
-            _liveSection(_statusCard),
-            _liveSection(_phoneCard),
-            _liveSection(_clientCard),
-            _liveSection(_deviceCard),
-            _liveSection(_meshCard),
-            _liveSection(_identitiesCard),
-          ],
+        child: SafeArea(
+          child: ContentWidth(
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'The copied report includes addresses, names, and recent '
+                    'log lines. Review it before sharing.',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+                RepaintBoundary(child: _buildCard(_snapshot.value)),
+                _liveSection(_statusCard),
+                _liveSection(_phoneCard),
+                _liveSection(_clientCard),
+                _liveSection(_deviceCard),
+                _liveSection(_meshCard),
+                _liveSection(_identitiesCard),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -118,7 +134,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         icon: Icons.info_outline,
         children: [
           for (final entry in snapshot.buildInfo.cardDetails)
-            _InfoRow(label: entry.key, value: entry.value),
+            InfoRow(label: entry.key, value: entry.value),
         ],
       );
 
@@ -126,23 +142,23 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         title: 'Status',
         icon: Icons.monitor_heart_outlined,
         children: [
-          _InfoRow(
+          InfoRow(
             label: 'Uptime',
             value: formatDuration(snapshot.appUptime),
           ),
-          _InfoRow(label: 'Proxy', value: snapshot.proxyLabel),
-          _InfoRow(label: 'Device', value: snapshot.deviceLabelText),
-          _InfoRow(
+          InfoRow(label: 'Proxy', value: snapshot.proxyLabel),
+          InfoRow(label: 'Device', value: snapshot.deviceLabelText),
+          InfoRow(
             label: 'Identities',
             value: '${snapshot.identities.length} '
                 '(${snapshot.liveIdentityCount} live)',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Service',
             value: snapshot.foregroundServiceRunning ? 'Running' : 'Stopped',
           ),
           if (snapshot.identityDatabaseError != null)
-            _InfoRow(
+            InfoRow(
               label: 'Database',
               value: snapshot.identityDatabaseError!,
             ),
@@ -153,38 +169,38 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
         title: 'Phone telemetry',
         icon: Icons.phone_android,
         children: [
-          _InfoRow(
+          InfoRow(
             label: 'Battery',
             value: snapshot.phoneBatteryPercent == null
                 ? 'Unavailable'
                 : '${snapshot.phoneBatteryPercent}%',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'GPS',
             value: snapshot.phoneGpsRequested ? 'Enabled' : 'Disabled',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Location permission',
             value: snapshot.phoneLocationPermission,
           ),
           if (snapshot.phoneGpsIntervalSeconds != null)
-            _InfoRow(
+            InfoRow(
               label: 'Interval',
               value: '${snapshot.phoneGpsIntervalSeconds}s',
             ),
           if (snapshot.phoneGpsLastFixAge != null)
-            _InfoRow(
+            InfoRow(
               label: 'Last fix',
               value: '${formatDuration(snapshot.phoneGpsLastFixAge!)} ago',
             ),
-          _InfoRow(
+          InfoRow(
             label: 'Service type',
             value: snapshot.foregroundIncludesLocation
                 ? 'Includes location'
                 : 'No location type',
           ),
           if (snapshot.phoneGpsLastError != null)
-            _InfoRow(
+            InfoRow(
               label: 'Last error',
               value: snapshot.phoneGpsLastError!,
             ),
@@ -197,43 +213,43 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       title: 'MeshCore app',
       icon: Icons.smartphone,
       children: [
-        _InfoRow(
+        InfoRow(
           label: 'Status',
           value: metrics.clientConnected ? 'Connected' : 'Not connected',
         ),
         if (metrics.clientConnected) ...[
-          _InfoRow(
+          InfoRow(
             label: 'Address',
             value: metrics.currentClientAddress ?? 'unknown',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Connected for',
             value: formatDuration(metrics.currentClientDuration),
           ),
         ],
-        _InfoRow(
+        InfoRow(
           label: 'Protocol',
           value: metrics.appTargetVer?.toString() ?? 'unknown',
         ),
-        _InfoRow(
+        InfoRow(
           label: 'Disconnects',
           value: '${formatCount(metrics.clientDisconnects)} '
               '(${formatCount(metrics.evictions)} evictions, '
               '${formatCount(metrics.idleTimeouts)} idle, '
               '${formatCount(metrics.clientErrors)} errors)',
         ),
-        _InfoRow(
+        InfoRow(
           label: 'Errors',
           value: '${formatCount(metrics.errorReplyFrames)} replies, '
               '${formatCount(metrics.disabledReplyFrames)} disabled, '
               '${formatCount(metrics.unsupportedCommands)} unsupported',
         ),
-        _InfoRow(
+        InfoRow(
           label: 'Write errors',
           value: formatCount(metrics.writeErrors),
         ),
         if (metrics.lastDisconnectReason != null)
-          _InfoRow(
+          InfoRow(
             label: 'Last disconnect',
             value: metrics.lastDisconnectReason!,
           ),
@@ -243,13 +259,15 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
 
   Widget _deviceCard(DiagnosticsSnapshot snapshot) {
     final metrics = snapshot.link;
+    final radio = snapshot.radioHealth;
+    final now = DateTime.now();
     return _SectionCard(
       title: 'Device link',
       icon: Icons.router_outlined,
       children: [
-        _InfoRow(label: 'Status', value: snapshot.deviceLabelText),
+        InfoRow(label: 'Status', value: snapshot.deviceLabelText),
         if (snapshot.deviceInfo != null) ...[
-          _InfoRow(
+          InfoRow(
             label: 'Firmware',
             value: 'code ${snapshot.deviceInfo!.firmwareVerCode}, '
                     '${snapshot.deviceInfo!.manufacturer} '
@@ -257,7 +275,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                 .trim(),
           ),
         ],
-        _InfoRow(
+        InfoRow(
           label: 'Connection',
           value: '${formatCount(metrics.connectAttempts)} attempts, '
               '${formatCount(metrics.connectSuccesses)} connected, '
@@ -265,12 +283,28 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               '${formatCount(snapshot.reconnectSuccesses)} reconnected',
         ),
         if (snapshot.deviceConnected)
-          _InfoRow(
+          InfoRow(
             label: 'Connected',
             value: formatDuration(metrics.currentSessionDuration),
           ),
+        if (radio == null)
+          const InfoRow(label: 'Physical radio', value: 'Unavailable')
+        else ...[
+          InfoRow(
+            label: 'Physical radio',
+            value: '${radio.volts.toStringAsFixed(2)} V; '
+                '${formatCount(radio.storageUsedKb)} of '
+                '${formatCount(radio.storageTotalKb)} KiB used; '
+                'sampled ${_ageLabel(radio.ageAt(now))} ago',
+          ),
+        ],
+        if (metrics.lastRawRxAt != null)
+          InfoRow(
+            label: 'Last raw RX',
+            value: '${_ageLabel(now.difference(metrics.lastRawRxAt!))} ago',
+          ),
         if (metrics.lastError != null)
-          _InfoRow(label: 'Last error', value: metrics.lastError!),
+          InfoRow(label: 'Last error', value: metrics.lastError!),
       ],
     );
   }
@@ -281,22 +315,22 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
       title: 'Mesh traffic',
       icon: Icons.cell_tower,
       children: [
-        _InfoRow(
+        InfoRow(
           label: 'TX / RX',
           value: '${formatCount(metrics.rawTxPackets)} / '
               '${formatCount(metrics.rawRxPackets)} packets',
         ),
-        _InfoRow(
+        InfoRow(
           label: 'Bytes',
           value: '${formatBytes(metrics.rawTxBytes)} / '
               '${formatBytes(metrics.rawRxBytes)}',
         ),
-        _InfoRow(
+        InfoRow(
           label: 'TX errors',
           value: formatCount(metrics.rawTxFailures),
         ),
         if (metrics.lastRssi != null)
-          _InfoRow(
+          InfoRow(
             label: 'Signal',
             value: '${metrics.lastRssi!.round()} dBm, '
                 '${metrics.lastSnr?.toStringAsFixed(1) ?? '?'} dB SNR',
@@ -316,6 +350,13 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
               _IdentityTile(identity: identity),
         ],
       );
+}
+
+String _ageLabel(Duration age) {
+  if (age.isNegative) age = Duration.zero;
+  if (age.inSeconds < 60) return '${age.inSeconds}s';
+  if (age.inMinutes < 60) return '${age.inMinutes}m';
+  return '${age.inHours}h';
 }
 
 class _IdentityTile extends StatelessWidget {
@@ -347,56 +388,56 @@ class _IdentityTile extends StatelessWidget {
       subtitle: Text(subtitle),
       children: [
         if (packets == null) ...[
-          _InfoRow(
+          InfoRow(
             label: 'Status',
             value: identity.enabled ? 'Not live' : 'Disabled',
           ),
           if (identity.unavailableReason != null)
-            _InfoRow(label: 'Reason', value: identity.unavailableReason!),
+            InfoRow(label: 'Reason', value: identity.unavailableReason!),
         ] else ...[
-          _InfoRow(
+          InfoRow(
             label: 'TX / RX',
             value: '${formatCount(packets.sent)} / '
                 '${formatCount(packets.received)}',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Flood TX / RX',
             value: '${formatCount(packets.floodTx)} / '
                 '${formatCount(packets.floodRx)}',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Direct TX / RX',
             value: '${formatCount(packets.directTx)} / '
                 '${formatCount(packets.directRx)}',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'RX errors',
             value: formatCount(packets.receiveErrors),
           ),
           if (packets.lastRssi != 0)
-            _InfoRow(
+            InfoRow(
               label: 'Signal',
               value: '${packets.lastRssi} dBm, '
                   '${packets.lastSnr.toStringAsFixed(1)} dB SNR, '
                   'noise ${packets.noiseFloor} dBm',
             ),
-          _InfoRow(
+          InfoRow(
             label: 'Queue',
             value: '${formatCount(packets.queueLength)} messages',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Airtime',
             value:
                 '${formatDuration(Duration(seconds: packets.txAirSeconds))} / '
                 '${formatDuration(Duration(seconds: packets.rxAirSeconds))}',
           ),
-          _InfoRow(
+          InfoRow(
             label: 'Queued',
             value: '${formatCount(identity.queuedDirect)} direct, '
                 '${formatCount(identity.queuedChannel)} channel',
           ),
           if (identity.unavailableReason != null)
-            _InfoRow(label: 'Reason', value: identity.unavailableReason!),
+            InfoRow(label: 'Reason', value: identity.unavailableReason!),
         ],
       ],
     );
@@ -430,35 +471,6 @@ class _SectionCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           ...children,
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
-
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 128,
-            child: Text(
-              label,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ),
-          Expanded(child: Text(value)),
         ],
       ),
     );

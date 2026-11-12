@@ -15,7 +15,7 @@ const String _gitDirtyDefine =
 const String _buildTimeDefine =
     String.fromEnvironment('MESHCHAMELEON_BUILD_TIME');
 
-/// Installed build identity shown on the Information page and the Home footer.
+/// Installed build identity shown on the About and Information pages.
 class BuildInfo {
   const BuildInfo({
     required this.version,
@@ -103,11 +103,6 @@ class BuildInfo {
   String get versionLabel => (buildNumber == null || buildNumber!.isEmpty)
       ? version
       : '$version ($buildNumber)';
-
-  /// Compact text for the Home footer.
-  String get footerLabel => hasCommit
-      ? '$versionLabel · $shortCommit${commitDirty ? ' · dirty' : ''}'
-      : '$version · dev build';
 
   /// Shared key/value rows for the About page and copied diagnostics.
   List<MapEntry<String, String>> get details => [

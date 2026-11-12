@@ -9,6 +9,7 @@ import '../app_view_state.dart';
 import '../services/backup_codec.dart';
 import '../widgets/app_snack_bar.dart';
 import '../widgets/app_surfaces.dart';
+import '../widgets/content_width.dart';
 
 /// User-facing backup and restore, reachable from the Home screen.
 ///
@@ -135,57 +136,61 @@ class _BackupScreenState extends State<BackupScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Backup & restore')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          StatusCard(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.lock_outline,
-                  size: 32,
-                  color: theme.colorScheme.primary,
+      body: SafeArea(
+        child: ContentWidth(
+          child: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              StatusCard(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(
+                      Icons.lock_outline,
+                      size: 32,
+                      color: theme.colorScheme.primary,
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'One encrypted file',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Save your identities, contacts, channels, messages, and '
+                      'settings in one file. You choose the passphrase; without '
+                      'it the file cannot be opened.',
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'One encrypted file',
-                  style: theme.textTheme.titleMedium,
-                ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Save your identities, contacts, channels, messages, and '
-                  'settings in one file. You choose the passphrase; without '
-                  'it the file cannot be opened.',
-                ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: _working ? null : _backUp,
+                icon: const Icon(Icons.save_alt),
+                label: const Text('Back up now'),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: _working ? null : _restore,
+                icon: const Icon(Icons.restore),
+                label: const Text('Restore from backup'),
+              ),
+              if (_working) const BusyStrip(),
+              const SizedBox(height: 24),
+              Text(
+                'Keep the file and passphrase safe',
+                style: theme.textTheme.titleSmall,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'The backup contains your private identity keys. Anyone with the '
+                'file and passphrase can use your identities. MeshChameleon cannot '
+                'recover a lost passphrase.',
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: _working ? null : _backUp,
-            icon: const Icon(Icons.save_alt),
-            label: const Text('Back up now'),
-          ),
-          const SizedBox(height: 10),
-          OutlinedButton.icon(
-            onPressed: _working ? null : _restore,
-            icon: const Icon(Icons.restore),
-            label: const Text('Restore from backup'),
-          ),
-          if (_working) const BusyStrip(),
-          const SizedBox(height: 24),
-          Text(
-            'Keep the file and passphrase safe',
-            style: theme.textTheme.titleSmall,
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'The backup contains your private identity keys. Anyone with the '
-            'file and passphrase can use your identities. MeshChameleon cannot '
-            'recover a lost passphrase.',
-          ),
-        ],
+        ),
       ),
     );
   }

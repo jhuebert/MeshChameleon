@@ -586,8 +586,7 @@ its caveats.
 The proxy keeps the device link and the app-facing `ServerSocket` alive under a
 `flutter_foreground_task` service (M0 shape A: the engine runs in the main
 isolate). `ForegroundService` is injected into `AppState`, so tests can exercise
-the start/update/stop lifecycle without an Android platform. Two home-screen
-controls make that reliable:
+the start/update/stop lifecycle without an Android platform. Two Settings controls support background operation:
 
 - **Battery optimization** — shows the current status and opens the system
   battery-optimization settings; the status is re-checked whenever the app
@@ -630,7 +629,12 @@ that screens and widget tests use. Controllers own one workflow each:
 
 Screens read `AppViewState` through `ChangeNotifierProvider`; `FakeAppState`
 implements that interface instead of constructing the real repository,
-secure-storage, and manager graph.
+secure-storage, and manager graph. Home projects cached diagnostics into immutable
+presentation values and samples them while visible and resumed; foreground
+recovery rearming remains independent of that display timer. Physical battery
+and storage observations come from the shared hub's existing success cache; UI
+reads never request radio data. Editable GPS preferences come from the active
+live node, while shared phone sampling retains aggregate demand and cadence.
 
 ## Device connection history
 
@@ -849,7 +853,7 @@ automation. Artifacts expire after 14 days. The local
 
 ## Build metadata and session diagnostics
 
-The Home footer and **Information** page share one `BuildInfo`
+**About** and **Information** share one `BuildInfo`
 (`app/lib/services/build_info.dart`): version/build number from
 `package_info_plus`, plus the wrapper-injected commit and UTC compile time.
 Android split APKs may report an ABI-adjusted version code (for example `1001`)
@@ -877,6 +881,29 @@ Keep physical totals in **Mesh traffic** and per-identity totals under
 **Identities**; do not combine them. Copying diagnostics is a user-initiated
 local action and includes local addresses, device names, and recent log lines,
 but never private key material.
+
+## UI review captures
+
+`app/test/ui_review_capture_test.dart` generates synthetic 360 × 800 Flutter
+test renders (2× pixel output) using sample identities and the Flutter SDK's
+Roboto and Material icon fonts. Set `FLUTTER_ROOT` and `UI_REVIEW_OUTPUT`, then
+run `flutter test test/ui_review_capture_test.dart` from `app/`. Captures in
+`docs/screenshots/` for Home, Settings, About, switching, and recovery were
+produced on 2026-11-11. They are not Android screenshots or hardware validation.
+Other guide images predate the overhaul. Android emulator/device visual review,
+TalkBack, display scaling, and background/Doze survival remain unvalidated.
+
+Project legal notices are bundled as copies in `app/assets/legal/`; keep them
+in sync with root `LICENSE` and `ATTRIBUTION.md`.
+
+`app/test/goldens/ui_goldens_test.dart` holds the deterministic render
+fixtures for the same review states (Home idle/connected/waiting, the switch
+sheet, Settings and About, both themes, 2× text scale). Goldens are compared
+with the Flutter test font environment, so they catch layout regressions only;
+they do not validate Android typography, icons, or rendering. Regenerate them
+with `flutter test --update-goldens test/goldens/ui_goldens_test.dart` and
+document intentional updates in the commit message. Keep goldens free of
+wall-clock timers and unsorted data.
 
 ## Branding (icon + splash)
 

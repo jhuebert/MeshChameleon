@@ -65,17 +65,17 @@ does through a companion:
 - reconnect on launch, if **Resume on launch** is enabled, and recover a dropped
   session while running even when it is off
 - check the installed version and live link statistics in
-  **Information**
+  **Settings → Information**, and the version in **Settings → About MeshChameleon**
 
 ## Using more than one identity
 
 Each identity has its own name, key, contacts, channels, and message queue. While
 a device is connected, **all enabled identities keep receiving**, so messages
 still arrive for the ones you are not currently using. The **active** identity is
-the one your MeshCore app sees; tap another identity to switch, and the MeshCore
-app reconnects to that identity.
+the one your MeshCore app sees; tap another identity to switch. The client is
+disconnected and may need to reconnect to the new identity.
 
-You can create extra identities from the identity screen. Disable an identity to
+You can create extra identities from **Switch → Manage identities**. Disable an identity to
 stop it from running and receiving while keeping its key, contacts, channels, and
 queue for later; re-enable it whenever you want. **Clear local data** keeps the
 identity and its name but resets its contacts, channels, and messages. **Delete**
@@ -122,9 +122,9 @@ The important part: **your phone owns the identity, not the radio.**
   TCP-capable client. It normally runs on the same phone as MeshChameleon.
 - No local network is needed when the client runs on the same phone. If it runs
   on another device, both must be on the same trusted local network.
-- For reliable background operation, set MeshChameleon to **Unrestricted** in
-  Android's battery settings. The home-screen **Battery optimization** card
-  opens the right screen.
+- To reduce background interruptions, set MeshChameleon to **Unrestricted** in
+  Android's battery settings. **Settings → Battery optimization** opens the
+  right screen; other background restrictions may still interrupt the link.
 
 ## Getting started
 
@@ -145,15 +145,15 @@ Short version:
 2. Tap **Device link** and connect your companion. Use **Bluetooth** for a
    nearby radio, or **Network** for a radio on Wi-Fi or Ethernet.
 3. Turn on **Proxy server**. It listens on port `5000` by default; you can
-   change the port before starting it.
+   change the port in **Settings → Proxy server port** before starting it.
 4. In your MeshCore app on the same phone, add a **TCP** or **network**
    companion at `127.0.0.1` (or `localhost`) and the same port. If the client is
    on another device, use the phone's local IP address instead.
-5. Optional: turn on **Resume on launch**. For reliable background operation,
-   open the **Battery optimization** card and set MeshChameleon to
+5. Optional: turn on **Settings → Resume on launch**. For background operation,
+   open **Settings → Battery optimization** and set MeshChameleon to
    **Unrestricted** in Android's battery settings.
-6. Optional: open the identity card and tap **Create identity** to add another
-   identity. Tap an identity to make it active.
+6. Optional: tap **Switch → Manage identities** to create another identity.
+   Use **Switch** to select which identity the client sees.
 7. To use a different radio, disconnect the current one and connect the other.
    Your identity and data stay on the phone.
 

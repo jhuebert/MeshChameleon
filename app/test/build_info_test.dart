@@ -27,7 +27,6 @@ void main() {
     expect(info.shortCommit, 'abcdef123456');
     expect(info.commitLabel, 'abcdef123456 · dirty');
     expect(info.buildTimeLabel, '2026-10-26 18:57 UTC');
-    expect(info.footerLabel, '0.1.0 (1) · abcdef123456 · dirty');
     expect(info.hasFullBuildMetadata, isTrue);
   });
 
@@ -41,7 +40,6 @@ void main() {
 
     expect(info.commit, isNull);
     expect(info.buildTime, isNull);
-    expect(info.footerLabel, '0.1.0 · dev build');
     expect(info.commitLabel, 'unavailable');
     expect(info.buildTimeLabel, 'unavailable');
   });
@@ -56,6 +54,12 @@ void main() {
     expect(info.buildNumber, isNull);
     expect(info.commit, isNull);
     expect(info.buildTime, isNull);
+  });
+
+  test('loads installed package information when available', () async {
+    final info =
+        await BuildInfo.load(loadPackageInfo: () async => _packageInfo());
+    expect(info.versionLabel, '0.1.0 (1)');
   });
 
   test('keeps the installed build number distinct from the version name', () {

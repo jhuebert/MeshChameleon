@@ -6,8 +6,11 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:provider/provider.dart';
 
 import '../app_view_state.dart';
+import '../services/identity_presentation.dart';
 import '../widgets/app_snack_bar.dart';
 import '../widgets/app_surfaces.dart';
+import '../widgets/content_width.dart';
+import '../widgets/identity_avatar.dart';
 
 class IdentitiesScreen extends StatefulWidget {
   const IdentitiesScreen({super.key});
@@ -158,25 +161,46 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
       body: Column(
         children: [
           if (app.busy) const BusyStrip(padding: EdgeInsets.zero),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'The active identity is the one the MeshCore app uses. '
+                    'Switching disconnects the app; reconnect it if it does '
+                    'not reconnect automatically.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
           Expanded(
             child: identities.isEmpty
                 ? _EmptyState(onCreate: app.busy ? null : _create)
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
-                    itemCount: identities.length,
-                    itemBuilder: (context, index) {
-                      final summary = identities[index];
-                      return _IdentityCard(
-                        summary: summary,
-                        busy: app.busy,
-                        canDelete: summary.canDelete && identities.length > 1,
-                        canDisable: summary.canDisable,
-                        onTap: () => _activate(summary),
-                        onToggle: () => _setEnabled(summary, !summary.enabled),
-                        onClear: () => _clear(summary),
-                        onDelete: () => _delete(summary),
-                      );
-                    },
+                : ContentWidth(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+                      itemCount: identities.length,
+                      itemBuilder: (context, index) {
+                        final summary = identities[index];
+                        return _IdentityCard(
+                          summary: summary,
+                          busy: app.busy,
+                          canDelete: summary.canDelete && identities.length > 1,
+                          canDisable: summary.canDisable,
+                          onTap: () => _activate(summary),
+                          onToggle: () =>
+                              _setEnabled(summary, !summary.enabled),
+                          onClear: () => _clear(summary),
+                          onDelete: () => _delete(summary),
+                        );
+                      },
+                    ),
                   ),
           ),
         ],
@@ -308,6 +332,28 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+class _AvatarWithRing extends StatelessWidget {
+  const _AvatarWithRing({required this.name, required this.active});
+
+  final String name;
+  final bool active;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final avatar = IdentityAvatar(name: name, size: 40);
+    if (!active) return avatar;
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: theme.colorScheme.primary, width: 2),
+      ),
+      child: avatar,
+    );
+  }
+}
+
 class _IdentityCard extends StatelessWidget {
   const _IdentityCard({
     required this.summary,
@@ -332,11 +378,7 @@ class _IdentityCard extends StatelessWidget {
   String get _toggleLabel =>
       summary.enabled ? 'Disable identity' : 'Enable identity';
 
-  String get _status {
-    if (!summary.enabled) return 'Disabled';
-    if (summary.live) return 'Live';
-    return 'Inactive';
-  }
+  String get _status => identityAvailabilityLabel(summary);
 
   @override
   Widget build(BuildContext context) {
@@ -344,11 +386,9 @@ class _IdentityCard extends StatelessWidget {
     return Card(
       child: ListTile(
         onTap: busy || !summary.keyAvailable || !summary.enabled ? null : onTap,
-        leading: Icon(
-          summary.enabled
-              ? (summary.active ? Icons.key : Icons.key_outlined)
-              : Icons.key_off,
-          color: summary.active ? theme.colorScheme.primary : null,
+        leading: _AvatarWithRing(
+          name: summary.name,
+          active: summary.active,
         ),
         title: Row(
           children: [
@@ -387,8 +427,9 @@ class _IdentityCard extends StatelessWidget {
               message:
                   'Waiting to sync; clears when the MeshCore app receives them.',
               child: Text(
-                '${summary.queuedDirect} DMs queued · '
-                '${summary.queuedChannel} channel messages queued',
+                '${waitingToSyncLabel(summary.queuedDirect + summary.queuedChannel)} '
+                '(${summary.queuedDirect} direct, '
+                '${summary.queuedChannel} channel)',
               ),
             ),
             if (!summary.keyAvailable || summary.unavailableReason != null)

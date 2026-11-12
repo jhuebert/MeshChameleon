@@ -35,6 +35,16 @@ class LinkMetrics {
   DateTime? connectedSince;
   Duration _completedConnected = Duration.zero;
 
+  /// Wall-clock time of the last raw RX observation, or null before the first
+  /// packet this app run. Passive observation only: nothing polls for it.
+  DateTime? lastRawRxAt;
+
+  /// Observations from the current physical connection only. Historical
+  /// diagnostics remain in [lastRssi], [lastSnr], and [lastRawRxAt].
+  DateTime? currentRawRxAt;
+  double? currentRssi;
+  double? currentSnr;
+
   double? lastRssi;
   double? lastSnr;
   String? lastError;
@@ -65,6 +75,7 @@ class LinkMetrics {
   }
 
   void disconnected({bool unexpected = false}) {
+    clearCurrentRx();
     final wasConnected = connectedSince != null;
     if (wasConnected) {
       _completedConnected += _now().difference(connectedSince!);
@@ -92,7 +103,24 @@ class LinkMetrics {
     rawRxBytes += bytes;
     lastSnr = snr;
     lastRssi = rssi.toDouble();
+    lastRawRxAt = _now();
+    currentRawRxAt = lastRawRxAt;
+    currentSnr = snr;
+    currentRssi = rssi.toDouble();
   }
+
+  /// Start a fresh source boundary without changing cumulative diagnostics.
+  void clearCurrentRx() {
+    currentRawRxAt = null;
+    currentRssi = null;
+    currentSnr = null;
+  }
+
+  /// True when the last raw RX falls inside the current connected period.
+  ///
+  /// A reconnect starts a new [connectedSince]; signal observed before it is
+  /// kept in the app-run counters but is not current-link signal.
+  bool get rxObservedThisSession => currentRawRxAt != null && connected;
 
   void deviceRequest() => deviceRequests++;
 
@@ -126,6 +154,7 @@ class MeteredRadioLink implements RadioLink {
 
   @override
   Future<void> connect() async {
+    metrics.clearCurrentRx();
     metrics.connectionAttempt();
     try {
       await _inner.connect();
