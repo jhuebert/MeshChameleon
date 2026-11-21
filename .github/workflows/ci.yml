@@ -4,9 +4,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Lets the release workflow post the required `check` status on a branch
-  # before it is merged; GITHUB_TOKEN may trigger dispatch events.
-  workflow_dispatch:
 
 permissions:
   contents: read
