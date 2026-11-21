@@ -9,7 +9,9 @@
   "schedule": ["at any time"],
   "minimumReleaseAge": "7 days",
   "osvVulnerabilityAlerts": true,
-  "dependencyDashboard": true,
+  "dependencyDashboard": {
+    "enabled": true
+  },
   "dependencyDashboardApproval": false,
   "automerge": false,
   "platformAutomerge": false,
