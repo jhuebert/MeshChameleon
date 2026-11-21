@@ -168,7 +168,7 @@ void main() {
     );
 
     expect(find.text('Network companion'), findsOneWidget);
-    expect(find.text('Host'), findsOneWidget);
+    expect(find.text('Radio host'), findsOneWidget);
     expect(find.text('Bluetooth companion'), findsNothing);
   });
 
@@ -494,7 +494,8 @@ void main() {
     expect(find.text('BLE MeshCore-nc3'), findsOneWidget);
     expect(
       find.text(
-          'Waiting for the companion. The proxy restarts when it returns.'),
+          'Waiting for the companion to return. The proxy restarts only if it '
+          'was running before the link was lost.'),
       findsOneWidget,
     );
     expect(find.text('Cancel'), findsOneWidget);

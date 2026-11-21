@@ -9,9 +9,12 @@ import '../app_view_state.dart';
 import '../services/ble_device_link.dart';
 import '../services/device_capabilities.dart';
 import '../services/network_connection_store.dart';
+import '../services/scan_session.dart';
 import '../widgets/app_snack_bar.dart';
 import '../widgets/app_surfaces.dart';
 import '../widgets/device_target_icon.dart';
+import '../widgets/simulation_badge.dart';
+import 'log_screen.dart';
 
 enum _ConnectTab {
   bluetooth('Bluetooth'),
@@ -24,10 +27,13 @@ enum _ConnectTab {
 }
 
 class ConnectScreen extends StatefulWidget {
-  const ConnectScreen({super.key, this.capabilities});
+  const ConnectScreen({super.key, this.capabilities, this.scanSession});
 
   /// Overrides the detected platform capabilities (tests).
   final DeviceCapabilities? capabilities;
+
+  /// Overrides the BLE scan session (tests).
+  final ScanSession? scanSession;
 
   @override
   State<ConnectScreen> createState() => _ConnectScreenState();
@@ -43,8 +49,14 @@ class _ConnectScreenState extends State<ConnectScreen>
   final _portController = TextEditingController();
   late final TabController _tabController;
   late final Stream<List<ScanResult>> _scanResults;
+  late final ScanSession _scanSession =
+      widget.scanSession ?? const BleScanSession();
+  StreamSubscription<bool>? _scanningSubscription;
   bool _scanning = false;
+  bool _scanAttempted = false;
+  String? _scanError;
   bool _cancelRequested = false;
+  String? _connectionFailure;
   int _lastTabIndex = 0;
 
   @override
@@ -67,7 +79,14 @@ class _ConnectScreenState extends State<ConnectScreen>
     _tabController.addListener(_handleTabChanged);
     // Reading scan results reaches the plugin, which is absent off mobile.
     if (_capabilities.supportsBle) {
-      _scanResults = MeshCoreUuids.scanResults;
+      _scanResults = _scanSession.results;
+      // The plugin owns the 15 s scan timeout; mirror it instead of
+      // trusting a local flag.
+      _scanningSubscription = _scanSession.isScanning.listen((scanning) {
+        if (mounted && _scanning != scanning) {
+          setState(() => _scanning = scanning);
+        }
+      });
     }
   }
 
@@ -75,6 +94,7 @@ class _ConnectScreenState extends State<ConnectScreen>
   void dispose() {
     _tabController.removeListener(_handleTabChanged);
     _tabController.dispose();
+    _scanningSubscription?.cancel();
     if (_scanning) unawaited(_stopScan(updateUi: false));
     _scanning = false;
     _hostController.dispose();
@@ -127,11 +147,19 @@ class _ConnectScreenState extends State<ConnectScreen>
   }
 
   Future<void> _startScan() async {
-    setState(() => _scanning = true);
+    setState(() {
+      _scanning = true;
+      _scanAttempted = true;
+      _scanError = null;
+    });
     try {
-      await MeshCoreUuids.startScan();
+      await _scanSession.start();
     } catch (_) {
-      if (mounted) setState(() => _scanning = false);
+      if (!mounted) return;
+      setState(() {
+        _scanning = false;
+        _scanError = 'Could not start scanning. Check Bluetooth permissions.';
+      });
     }
   }
 
@@ -141,7 +169,7 @@ class _ConnectScreenState extends State<ConnectScreen>
       setState(() => _scanning = false);
     }
     try {
-      await FlutterBluePlus.stopScan();
+      await _scanSession.stop();
     } catch (_) {}
   }
 
@@ -164,6 +192,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     final host = _hostController.text.trim();
     final port = int.parse(_portController.text.trim());
     FocusScope.of(context).unfocus();
+    setState(() => _connectionFailure = null);
     _cancelRequested = false;
     final ok = await app.connectTcp(host: host, tcpPort: port);
     _finishConnection(
@@ -210,6 +239,8 @@ class _ConnectScreenState extends State<ConnectScreen>
     final app = context.read<AppViewState>();
     final name = bleCompanionDisplayName(result);
     await _stopScan();
+    if (!mounted) return;
+    setState(() => _connectionFailure = null);
     _cancelRequested = false;
     final ok = await app.connectBle(result.device, displayName: name);
     _finishConnection(
@@ -220,6 +251,7 @@ class _ConnectScreenState extends State<ConnectScreen>
 
   Future<void> _connectSimulated() async {
     final app = context.read<AppViewState>();
+    setState(() => _connectionFailure = null);
     _cancelRequested = false;
     final ok = await app.connectSimulated();
     _finishConnection(
@@ -243,7 +275,7 @@ class _ConnectScreenState extends State<ConnectScreen>
         app.deviceWaiting) {
       return;
     }
-    _showFailure(failureMessage);
+    setState(() => _connectionFailure = failureMessage);
   }
 
   Future<void> _cancel() async {
@@ -272,6 +304,16 @@ class _ConnectScreenState extends State<ConnectScreen>
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                 child: _ConnectionStatusCard(app: app, onCancel: _cancel),
+              ),
+            if (_connectionFailure != null)
+              ListTile(
+                title: Text(_connectionFailure!),
+                trailing: TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const LogScreen()),
+                  ),
+                  child: const Text('View log'),
+                ),
               ),
             TabBar(
               controller: _tabController,
@@ -312,7 +354,7 @@ class _ConnectScreenState extends State<ConnectScreen>
         if (!_scanning)
           OutlinedButton.icon(
             icon: const Icon(Icons.search),
-            label: const Text('Scan for devices'),
+            label: Text(_scanAttempted ? 'Rescan' : 'Scan for devices'),
             onPressed: app.busy ? null : _startScan,
           )
         else ...[
@@ -327,26 +369,66 @@ class _ConnectScreenState extends State<ConnectScreen>
           ),
           const SizedBox(height: 8),
           const BusyStrip(),
-          const SizedBox(height: 8),
-          StreamBuilder<List<ScanResult>>(
-            stream: _scanResults,
-            builder: (context, snapshot) {
-              final results = snapshot.data ?? const <ScanResult>[];
-              return Column(
-                children: [
-                  for (final result in results)
-                    ListTile(
-                      leading: const Icon(Icons.bluetooth),
-                      title: Text(bleCompanionDisplayName(result)),
-                      subtitle: Text('RSSI ${result.rssi}'),
-                      trailing: const Icon(Icons.chevron_right),
-                      onTap: app.busy ? null : () => _connectBle(result),
-                    ),
-                ],
-              );
-            },
-          ),
         ],
+        const SizedBox(height: 8),
+        if (_scanError != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(_scanError!,
+                style: TextStyle(color: Theme.of(context).colorScheme.error)),
+          ),
+        StreamBuilder<List<ScanResult>>(
+          key: const ValueKey('ble-scan-results'),
+          stream: _scanResults,
+          builder: (context, snapshot) {
+            final results = snapshot.data ?? const <ScanResult>[];
+            if (results.isEmpty) {
+              if (_scanAttempted && !_scanning && _scanError == null) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 24),
+                  child: Column(
+                    children: [
+                      Icon(
+                        Icons.bluetooth_searching,
+                        size: 40,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No MeshCore companions found',
+                        style: Theme.of(context).textTheme.titleSmall,
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Move closer to the radio, wake it, then scan again.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
+                            ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                );
+              }
+              return const SizedBox.shrink();
+            }
+            return Column(
+              children: [
+                for (final result in results)
+                  ListTile(
+                    leading: const Icon(Icons.bluetooth),
+                    title: Text(bleCompanionDisplayName(result)),
+                    subtitle: Text('Bluetooth signal ${result.rssi} dBm'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: app.busy ? null : () => _connectBle(result),
+                  ),
+              ],
+            );
+          },
+        ),
       ],
     );
   }
@@ -359,7 +441,17 @@ class _ConnectScreenState extends State<ConnectScreen>
         Text('Network companion',
             style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 4),
-        const Text('Connect to a companion over Wi-Fi or Ethernet.'),
+        const Text(
+          'Connect to the radio itself over Wi-Fi or Ethernet.',
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'This is the radio’s address, not the MeshCore app’s proxy '
+          'endpoint (127.0.0.1:${app.port}).',
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
         const SizedBox(height: 16),
         Form(
           key: _formKey,
@@ -367,7 +459,10 @@ class _ConnectScreenState extends State<ConnectScreen>
             children: [
               TextFormField(
                 controller: _hostController,
-                decoration: const InputDecoration(labelText: 'Host'),
+                decoration: const InputDecoration(
+                  labelText: 'Radio host',
+                  helperText: 'Name or IP of the radio (IPv6 supported)',
+                ),
                 textInputAction: TextInputAction.next,
                 validator: _validateHost,
               ),
@@ -376,7 +471,10 @@ class _ConnectScreenState extends State<ConnectScreen>
                 controller: _portController,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.done,
-                decoration: const InputDecoration(labelText: 'Port'),
+                decoration: const InputDecoration(
+                  labelText: 'Radio port',
+                  helperText: 'The companion’s TCP port, not the proxy’s',
+                ),
                 validator: _validatePort,
                 onFieldSubmitted: app.busy ? null : (_) => _connectTcp(),
               ),
@@ -419,6 +517,8 @@ class _ConnectScreenState extends State<ConnectScreen>
           'Runs the proxy against an in-memory companion. No radio or BLE '
           'hardware is used and packets never leave the app.',
         ),
+        const SizedBox(height: 8),
+        const SimulationBadge(),
         const SizedBox(height: 16),
         OutlinedButton.icon(
           icon: const Icon(Icons.science_outlined),
@@ -491,7 +591,8 @@ class _ConnectionStatusCard extends StatelessWidget {
       DeviceLinkPhase.connected => 'Connected',
       DeviceLinkPhase.reconnecting => 'Reconnecting…',
       DeviceLinkPhase.waiting =>
-        'Waiting for the companion. The proxy restarts when it returns.',
+        'Waiting for the companion to return. The proxy restarts only if it '
+            'was running before the link was lost.',
       DeviceLinkPhase.disconnecting => 'Disconnecting…',
       DeviceLinkPhase.idle => '',
     };

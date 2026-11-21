@@ -29,7 +29,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
-import 'package:meshchameleon/main.dart';
+import 'package:meshchameleon/screens/home_screen.dart';
 import 'package:meshchameleon/screens/connect_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/foreground_service.dart';
@@ -1107,15 +1107,9 @@ void main() {
       ),
     );
     await _settle(tester);
-    expect(
-        find.text('Waiting for TCP 127.0.0.1:${relay.port}'), findsOneWidget);
-    expect(
-      find.text(
-        'Proxy stopped. It will restart automatically when the companion '
-        'returns.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.textContaining('Waiting for TCP 127.0.0.1:${relay.port}'),
+        findsOneWidget);
+    expect(find.textContaining('Waiting for the radio'), findsOneWidget);
     final proxySwitch = tester.widget<SwitchListTile>(
         find.widgetWithText(SwitchListTile, 'Proxy server'));
     expect(proxySwitch.value, isFalse);
@@ -1128,7 +1122,8 @@ void main() {
     expect(find.byType(ConnectScreen), findsOneWidget);
     expect(
       find.text(
-          'Waiting for the companion. The proxy restarts when it returns.'),
+          'Waiting for the companion to return. The proxy restarts only if it '
+          'was running before the link was lost.'),
       findsOneWidget,
     );
     await tester.pageBack();

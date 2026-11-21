@@ -80,7 +80,7 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
   final BleLinkFactory _bleLinkFactory;
   final RecoveryTimerFactory? _recoveryTimerFactory;
 
-  /// Installed build identity shown in the footer and diagnostics.
+  /// Installed build identity shown in About and Information.
   @override
   final BuildInfo buildInfo;
 
@@ -152,9 +152,40 @@ class AppState extends ChangeNotifier implements AppViewState, ConnectionHost {
                 : MeshPacketStats.fromMap(nodes[summary.id]!.sessionStats),
           ),
       ],
+      radioHealth: radioHealth,
       recentLogs: logs.length <= 100
           ? List<String>.of(logs)
           : logs.sublist(logs.length - 100),
+    );
+  }
+
+  @override
+  RadioHealth? get radioHealth {
+    final sample = _manager?.lastRadioBatterySample;
+    final sampledAt = _manager?.lastRadioBatterySampleAt;
+    if (sample == null || sampledAt == null) return null;
+    return RadioHealth(
+      millivolts: sample.millivolts,
+      storageUsedKb: sample.storageUsedKb,
+      storageTotalKb: sample.storageTotalKb,
+      sampledAt: sampledAt,
+    );
+  }
+
+  @override
+  GpsScope? get activeGpsScope {
+    final active = node;
+    final id = activeIdentityId;
+    final name = activeIdentity?.name;
+    if (active == null || id == null || name == null) return null;
+    final vars = active.getCustomVars();
+    final interval = int.tryParse(vars['gps_interval'] ?? '') ??
+        GpsScope.defaultIntervalSeconds;
+    return GpsScope(
+      identityId: id,
+      identityName: name,
+      requested: vars['gps'] == '1',
+      configuredIntervalSeconds: GpsScope.normalizeInterval(interval),
     );
   }
 

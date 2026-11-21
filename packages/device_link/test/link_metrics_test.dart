@@ -188,6 +188,43 @@ void main() {
     expect(metrics.currentSessionDuration, Duration.zero);
     expect(metrics.totalConnected, const Duration(seconds: 3));
   });
+
+  test('lastRawRxAt comes from the reception observation, not from reads', () {
+    var now = DateTime.utc(2026, 1, 1, 12, 0, 0);
+    final metrics = LinkMetrics(now: () => now);
+
+    expect(metrics.lastRawRxAt, isNull);
+    metrics.connectionSucceeded();
+    expect(metrics.lastRawRxAt, isNull, reason: 'no packet yet');
+
+    now = now.add(const Duration(seconds: 30));
+    metrics.rawRx(5.5, -80, 64);
+    expect(metrics.lastRawRxAt, DateTime.utc(2026, 1, 1, 12, 0, 30));
+    expect(metrics.rxObservedThisSession, isTrue);
+  });
+
+  test('a reconnect starts a new boundary for current-link signal', () {
+    var now = DateTime.utc(2026, 1, 1, 12, 0, 0);
+    final metrics = LinkMetrics(now: () => now);
+
+    metrics.connectionSucceeded();
+    metrics.rawRx(5.5, -80, 64);
+    expect(metrics.rxObservedThisSession, isTrue);
+
+    // Brief drop; the app run retains the counters and the old signal.
+    metrics.disconnected(unexpected: true);
+    expect(metrics.rxObservedThisSession, isFalse);
+    expect(metrics.lastRawRxAt, isNotNull);
+
+    now = now.add(const Duration(seconds: 45));
+    metrics.connectionSucceeded();
+    expect(metrics.rxObservedThisSession, isFalse,
+        reason: 'signal from the previous link is not current');
+
+    now = now.add(const Duration(seconds: 2));
+    metrics.rawRx(6.0, -75, 64);
+    expect(metrics.rxObservedThisSession, isTrue);
+  });
 }
 
 class _ThrowingLink extends FakeDeviceLink {
