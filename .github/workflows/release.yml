@@ -43,6 +43,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  actions: write
 
 concurrency:
   group: release
@@ -387,11 +389,11 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           PUSH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
-          GH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -z "${PUSH_TOKEN:-}" ]]; then
-            echo "::error::REPO_AUTOMATION_TOKEN is required to push the release branch"
+            echo "::error::REPO_AUTOMATION_TOKEN is required to push the release branch and tag"
             exit 1
           fi
           git fetch origin main
@@ -414,21 +416,35 @@ jobs:
           export GIT_TERMINAL_PROMPT=0
 
           # A direct push of the version bump has no `check` status yet and is
-          # rejected by the ruleset. Land it through a PR so CI supplies the
-          # status, then tag the merged commit.
+          # rejected by the ruleset. Run CI on the branch to supply that status,
+          # then land the bump through a PR and tag the merged commit.
+          # REPO_AUTOMATION_TOKEN pushes the branch/tag; GITHUB_TOKEN opens and
+          # merges the PR and dispatches CI, so the automation token needs no
+          # pull-request permission or ruleset bypass.
           branch="release/v$VERSION"
           git push --force origin "HEAD:refs/heads/$branch"
+          release_sha="$(git rev-parse HEAD)"
           pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
             -f head="$branch" -f base=main \
             -f title="release: v$VERSION" \
             -f body="Automated version bump for v$VERSION." \
             --jq .html_url)"
           echo "Release PR: $pr_url"
-          timeout 1200 gh pr checks "$pr_url" --watch --fail-fast --interval 30
-          pr_number="${pr_url##*/}"
-          gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/$pr_number/merge" \
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
+            -f ref="$branch"
+          run_id=""
+          for _ in $(seq 1 30); do
+            run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
+              -f branch="$branch" -f per_page=1 \
+              --jq '.workflow_runs[0].id // ""' 2>/dev/null || true)"
+            [[ -n "$run_id" ]] && break
+            sleep 5
+          done
+          [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $branch"; exit 1; }
+          timeout 1200 gh run watch "$run_id" --exit-status --interval 30
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/${pr_url##*/}/merge" \
             -f merge_method=merge >/dev/null
-          git tag -a "v$VERSION" -m "MeshChameleon $VERSION"
+          git tag -a "v$VERSION" -m "MeshChameleon $VERSION" "$release_sha"
           git push origin "v$VERSION"
 
       - name: Create GitHub Release
