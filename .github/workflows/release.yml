@@ -14,9 +14,10 @@ name: Release
 # BUILD_NUMBER repository variable before the release starts.
 #
 # `main` is protected by the `main-protection` ruleset, which requires the CI
-# `check` status and bypasses the repository-admin role. The push step uses
-# `REPO_AUTOMATION_TOKEN`, so that token must belong to an admin and have
-# Contents: write access.
+# `check` status. The release commit lands through a pull request so CI can
+# supply that status; `REPO_AUTOMATION_TOKEN` only pushes the release branch
+# and tag and reserves the build number, so it needs Contents and Actions
+# variables write access but no ruleset bypass.
 
 on:
   workflow_dispatch:
@@ -381,15 +382,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Push main and tag
+      - name: Push release branch, merge, and tag
         if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ inputs.version }}
           PUSH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${PUSH_TOKEN:-}" ]]; then
-            echo "::error::REPO_AUTOMATION_TOKEN is required to bypass the main-protection ruleset"
+            echo "::error::REPO_AUTOMATION_TOKEN is required to push the release branch"
             exit 1
           fi
           git fetch origin main
@@ -410,7 +412,22 @@ jobs:
           chmod +x "$askpass"
           export GIT_ASKPASS="$askpass"
           export GIT_TERMINAL_PROMPT=0
-          git push origin HEAD:main
+
+          # A direct push of the version bump has no `check` status yet and is
+          # rejected by the ruleset. Land it through a PR so CI supplies the
+          # status, then tag the merged commit.
+          branch="release/v$VERSION"
+          git push --force origin "HEAD:refs/heads/$branch"
+          pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
+            -f head="$branch" -f base=main \
+            -f title="release: v$VERSION" \
+            -f body="Automated version bump for v$VERSION." \
+            --jq .html_url)"
+          echo "Release PR: $pr_url"
+          timeout 1200 gh pr checks "$pr_url" --watch --fail-fast --interval 30
+          pr_number="${pr_url##*/}"
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/$pr_number/merge" \
+            -f merge_method=merge >/dev/null
           git tag -a "v$VERSION" -m "MeshChameleon $VERSION"
           git push origin "v$VERSION"
 
