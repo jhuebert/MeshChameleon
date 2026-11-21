@@ -17,7 +17,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
-import 'package:meshchameleon/main.dart';
+import 'package:meshchameleon/screens/home_screen.dart';
 import 'package:meshchameleon/screens/connect_screen.dart';
 import 'package:meshchameleon/screens/diagnostics_screen.dart';
 import 'package:meshchameleon/screens/identities_screen.dart';
@@ -141,11 +141,17 @@ void main() {
     expect(find.text('MeshChameleon'), findsWidgets);
     expect(app.identities, hasLength(1));
 
-    // Set a non-default proxy port through the real field.
+    // Set a non-default proxy port through Settings.
+    await tester.tap(find.byTooltip('Settings'));
+    await settle(tester);
+    await tester.tap(find.text('Proxy server port'));
+    await settle(tester);
     await tester.enterText(find.byType(TextField), '15321');
-    await tester.tap(find.byTooltip('Save port'));
+    await tester.tap(find.text('Save port'));
     await settle(tester);
     expect(app.port, 15321);
+    await tester.pageBack();
+    await settle(tester);
 
     // Open the real ConnectScreen and attach the live companion.
     await tester.tap(find.text('Device link'));
@@ -161,7 +167,8 @@ void main() {
         reason: 'live TCP attach failed:\n${app.logs.join('\n')}');
     await settle(tester);
     expect(find.byType(ConnectScreen), findsNothing);
-    expect(find.text('TCP $_deviceHost:$_devicePort'), findsOneWidget);
+    expect(
+        find.textContaining('TCP $_deviceHost:$_devicePort'), findsOneWidget);
     expect(app.activeIdentity!.live, isTrue);
 
     // Start the proxy from the switch and handshake as a MeshCore client.
@@ -200,8 +207,15 @@ void main() {
     await tester.pageBack();
     await settle(tester);
 
+    Future<void> openIdentityManagement() async {
+      await tester.tap(find.text('Switch'));
+      await settle(tester);
+      await tester.tap(find.text('Manage identities'));
+      await settle(tester);
+    }
+
     // Create an inactive identity through the real dialog.
-    await tester.tap(identityTile(app.activeIdentity!.name));
+    await openIdentityManagement();
     await settle(tester);
     expect(find.byType(IdentitiesScreen), findsOneWidget);
     await tester.tap(find.text('Create identity'));
@@ -271,7 +285,10 @@ void main() {
     expect(secondSelf.nodeName, 'UI Second');
 
     // Diagnostics shows the live session and both identities.
-    await tester.tap(find.byTooltip('About & diagnostics'));
+    await tester.tap(find.byTooltip('Settings'));
+    await settle(tester);
+    await tester.ensureVisible(find.text('Information'));
+    await tester.tap(find.text('Information'));
     await settle(tester);
     expect(find.byType(DiagnosticsScreen), findsOneWidget);
     expect(find.text('Connected'), findsWidgets);
@@ -279,10 +296,11 @@ void main() {
     expect(find.text(app.activeIdentity!.name), findsWidgets);
     await tester.pageBack();
     await settle(tester);
+    await tester.pageBack();
+    await settle(tester);
 
     // Clear local data on the active identity and keep key/name.
-    await tester.tap(identityTile('UI Second'));
-    await settle(tester);
+    await openIdentityManagement();
     await tester.tap(menuFor('UI Second'));
     await settle(tester);
     await tester.tap(find.text('Clear local data'));
@@ -308,8 +326,7 @@ void main() {
     await pumpUntil(tester, () => app.activeIdentity!.name == firstName,
         reason: 'could not activate the first identity');
     await settle(tester);
-    await tester.tap(identityTile(firstName));
-    await settle(tester);
+    await openIdentityManagement();
     await tester.tap(menuFor('UI Second'));
     await settle(tester);
     await tester.tap(find.text('Delete identity'));

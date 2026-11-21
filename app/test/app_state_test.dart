@@ -187,6 +187,41 @@ void main() {
     expect(app.phoneGpsIntervalSeconds, 30);
   });
 
+  test('GPS editing is identity-scoped and radio health is shared', () async {
+    final location = PhoneLocationService(
+      checkPermission: () async => LocationPermission.denied,
+    );
+    app = buildApp(phoneLocation: location);
+    await app.loadIdentities();
+    final firstId = app.activeIdentity!.id;
+    final second = await app.createIdentity(name: 'Second');
+    expect(second, isNotNull);
+    final link = FakeDeviceLink();
+    expect(await app.connectSimulated(simulatedLink: link), isTrue);
+    await app.node!.battery.refresh();
+    final health = app.radioHealth;
+    expect(health, isNotNull);
+    final reads = link.batteryReads;
+
+    expect(await app.activateIdentity(second!.id), isTrue);
+    expect(await app.setPhoneGpsEnabled(true), isTrue);
+    expect(await app.setPhoneGpsInterval(60), isTrue);
+    expect(await app.activateIdentity(firstId), isTrue);
+    expect(app.activeGpsScope!.requested, isFalse);
+    expect(app.activeGpsScope!.configuredIntervalSeconds, 900);
+    expect(app.phoneGpsRequested, isTrue);
+    expect(app.phoneGpsIntervalSeconds, 60);
+    expect(app.radioHealth!.sampledAt, health!.sampledAt);
+    for (var i = 0; i < 3; i++) {
+      app.diagnosticsSnapshot();
+      app.radioHealth;
+    }
+    expect(link.batteryReads, reads);
+    await app.disconnectDevice();
+    expect(app.radioHealth, isNull);
+    expect(app.activeGpsScope, isNull);
+  });
+
   test('cancelling an idle app is a no-op', () async {
     await app.cancelDeviceAttempt();
     expect(app.devicePhase, DeviceLinkPhase.idle);

@@ -9,6 +9,7 @@ import 'services/diagnostics_snapshot.dart';
 import 'services/identity_index.dart';
 import 'services/identity_runtime.dart';
 import 'services/network_connection_store.dart';
+import 'services/observation_models.dart';
 import 'services/proxy_status.dart';
 import 'services/session_store.dart';
 
@@ -17,6 +18,7 @@ export 'services/identity_index.dart' show IdentityRecord;
 export 'services/identity_runtime.dart' show IdentitySummary;
 export 'services/network_connection_store.dart' show SavedNetworkConnection;
 export 'services/device_link_phase.dart';
+export 'services/observation_models.dart' show RadioHealth, GpsScope;
 export 'services/proxy_status.dart';
 export 'services/session_store.dart' show DeviceTargetKind, SessionConfig;
 
@@ -69,6 +71,15 @@ abstract class AppViewState extends ChangeNotifier {
   int get port;
   bool get autoResume;
   SessionConfig? get lastSession;
+
+  /// Read-only physical-radio health (voltage, storage, sample time), or
+  /// null before the first successful sample or after a detach/restore.
+  /// Never triggers a device request.
+  RadioHealth? get radioHealth;
+
+  /// The phone-GPS preference scoped to the active identity, or null while no
+  /// live node is attached. Editable by the Settings editor.
+  GpsScope? get activeGpsScope;
 
   Future<bool> connectTcp({required String host, int? tcpPort});
   Future<bool> connectBle(BluetoothDevice device, {String? displayName});

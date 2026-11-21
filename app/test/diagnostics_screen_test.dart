@@ -77,6 +77,9 @@ void main() {
     expect(find.text('gps timeout'), findsOneWidget);
     expect(find.text('client closed'), findsOneWidget);
     expect(find.text('Firmware'), findsOneWidget);
+    expect(find.text('Physical radio'), findsOneWidget);
+    expect(find.textContaining('3.91 V'), findsOneWidget);
+    expect(find.text('Last raw RX'), findsOneWidget);
     expect(find.text('Last error'), findsNWidgets(2));
     expect(find.textContaining('link error'), findsOneWidget);
     expect(find.text('Signal'), findsNWidgets(2));
@@ -229,6 +232,12 @@ DiagnosticsSnapshot _richSnapshot(
     identityDatabaseError: 'catalog damaged',
     companion: companion,
     link: link,
+    radioHealth: RadioHealth(
+      millivolts: 3910,
+      storageUsedKb: 100,
+      storageTotalKb: 1000,
+      sampledAt: now,
+    ),
     phoneBatteryPercent: 42,
     phoneGpsRequested: true,
     phoneLocationPermission: 'Allow all the time',

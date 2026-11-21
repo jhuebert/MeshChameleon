@@ -7,7 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mesh_node/mesh_node.dart';
 import 'package:mesh_protocol/mesh_protocol.dart';
 import 'package:meshchameleon/app_state.dart';
-import 'package:meshchameleon/main.dart';
+import 'package:meshchameleon/screens/home_screen.dart';
 import 'package:meshchameleon/screens/identities_screen.dart';
 import 'package:meshchameleon/services/device_capabilities.dart';
 import 'package:meshchameleon/services/identity_repository.dart';
@@ -69,7 +69,8 @@ void main() {
     await pumpUntil(tester, until);
   }
 
-  testWidgets('home card shows the active name and prefix and opens the list',
+  testWidgets(
+      'home card shows the active name and prefix and opens the switcher',
       (tester) async {
     await tester.pumpWidget(wrap(const HomeScreen()));
     final summary = app.identities.single;
@@ -78,6 +79,10 @@ void main() {
     expect(find.textContaining('Ed25519'), findsNothing);
 
     await tester.tap(find.widgetWithText(Card, summary.name));
+    await tester.pumpAndSettle();
+    expect(find.text('Switch identity'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Manage identities'));
     await tester.pumpAndSettle();
     expect(find.byType(IdentitiesScreen), findsOneWidget);
     expect(find.text('Identities'), findsOneWidget);
@@ -141,7 +146,7 @@ void main() {
     expect(find.text('Active'), findsOneWidget);
     expect(find.text('1 channels · 1 contacts'), findsOneWidget);
     expect(
-        find.text('1 DMs queued · 1 channel messages queued'), findsOneWidget);
+        find.text('2 waiting to sync (1 direct, 1 channel)'), findsOneWidget);
     expect(find.textContaining(first), findsNothing);
   });
 
@@ -264,6 +269,8 @@ void main() {
     await tester.pumpWidget(wrap(const HomeScreen()));
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(Card, 'MeshChameleon'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Manage identities'));
     await tester.pumpAndSettle();
 
     await tapAsync(

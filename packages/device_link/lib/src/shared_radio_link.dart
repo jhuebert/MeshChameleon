@@ -104,6 +104,14 @@ class SharedRadioHub {
     return completer.future;
   }
 
+  /// Read-only access to the cache behind [battery].
+  ///
+  /// Exposes the last successful physical sample without triggering a device
+  /// request, so the UI can show radio health without adding radio traffic.
+  /// [detach] clears both before a new target is served.
+  BatteryReading? get lastBatterySample => _batteryCache;
+  DateTime? get lastBatterySampleAt => _batteryCachedAt;
+
   Future<BatteryReading?> _battery() {
     final cachedAt = _batteryCachedAt;
     final cache = _batteryCache;

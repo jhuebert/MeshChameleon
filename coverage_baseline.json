@@ -6,8 +6,8 @@
       "total": 269
     },
     "app/lib/main.dart": {
-      "covered": 139,
-      "total": 158
+      "covered": 15,
+      "total": 15
     },
     "app/lib/screens/backup_screen.dart": {
       "covered": 161,

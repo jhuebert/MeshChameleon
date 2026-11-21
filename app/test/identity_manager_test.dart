@@ -60,6 +60,21 @@ void main() {
         radioParams: link.initialRadioParams,
       );
 
+  test('exposes the last physical sample from the shared hub without I/O',
+      () async {
+    await manager.load();
+    expect(manager.lastRadioBatterySample, isNull);
+    expect(manager.lastRadioBatterySampleAt, isNull);
+    await start();
+
+    final node = manager.activeNode!;
+    await node.battery.refresh();
+
+    expect(manager.lastRadioBatterySample, isNotNull);
+    expect(manager.lastRadioBatterySample!.millivolts, greaterThan(0));
+    expect(manager.lastRadioBatterySampleAt, isNotNull);
+  });
+
   test('binds live identities to the phone location service and unbinds',
       () async {
     final location = PhoneLocationService(

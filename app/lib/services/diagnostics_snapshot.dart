@@ -4,6 +4,7 @@ import 'package:mesh_protocol/mesh_protocol.dart';
 
 import 'build_info.dart';
 import 'device_link_phase.dart';
+import 'observation_models.dart';
 
 /// Cached per-identity packet counters from the live node session stats.
 class MeshPacketStats {
@@ -90,7 +91,7 @@ class IdentityDiagnostics {
   final MeshPacketStats? packets;
 }
 
-/// Everything the About & diagnostics page and copied report need.
+/// Everything the Information page and copied report need.
 ///
 /// The snapshot is immutable, but [CompanionMetrics] and [LinkMetrics] are
 /// intentionally live session objects; callers take a fresh snapshot whenever
@@ -128,6 +129,7 @@ class DiagnosticsSnapshot {
     this.phoneGpsLastFixAge,
     this.phoneGpsLastError,
     this.foregroundIncludesLocation = false,
+    this.radioHealth,
   });
 
   final BuildInfo buildInfo;
@@ -175,6 +177,10 @@ class DiagnosticsSnapshot {
 
   /// Whether the foreground service declares the `location` type.
   final bool foregroundIncludesLocation;
+
+  /// Read-only physical-radio health from the shared hub cache, or null when
+  /// no radio is attached / no sample has been read yet.
+  final RadioHealth? radioHealth;
 
   int get liveIdentityCount =>
       identities.where((identity) => identity.live).length;
@@ -241,6 +247,14 @@ class DiagnosticsSnapshot {
         'permission: $phoneLocationPermission');
     line('Phone GPS service type: '
         '${foregroundIncludesLocation ? 'location' : 'not included'}');
+    if (radioHealth == null) {
+      line('Physical radio: unavailable');
+    } else {
+      line('Physical radio: ${radioHealth!.volts.toStringAsFixed(2)} V; '
+          'storage ${radioHealth!.storageUsedKb}/'
+          '${radioHealth!.storageTotalKb} KiB; '
+          'sampled ${formatUtc(radioHealth!.sampledAt, includeSeconds: true)}');
+    }
     if (phoneGpsIntervalSeconds != null) {
       line('Phone GPS interval: ${phoneGpsIntervalSeconds}s');
     }
@@ -296,6 +310,10 @@ class DiagnosticsSnapshot {
         '${formatCount(passiveSuccesses)} succeeded');
     if (nextPassiveDelay != null) {
       line('Next passive attempt in ${formatDuration(nextPassiveDelay!)}');
+    }
+    if (link.lastRawRxAt != null) {
+      line(
+          'Last raw RX: ${formatUtc(link.lastRawRxAt!, includeSeconds: true)}');
     }
     line('Raw TX/RX packets: ${formatCount(link.rawTxPackets)} / '
         '${formatCount(link.rawRxPackets)}');
