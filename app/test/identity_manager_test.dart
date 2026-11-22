@@ -389,9 +389,9 @@ void main() {
     final candidate = await LocalIdentity.generate();
 
     await node.importPrivateKey(candidate.meshcore64);
-    await waitFor(() => manager.summaries
-        .firstWhere((summary) => summary.id == id)
-        .publicKey == candidate.publicKey);
+    await waitFor(() =>
+        manager.summaries.firstWhere((summary) => summary.id == id).publicKey ==
+        candidate.publicKey);
 
     expect(node.identity.publicKey, candidate.publicKey);
     final summary = manager.summaries.firstWhere((summary) => summary.id == id);
