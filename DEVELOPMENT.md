@@ -679,8 +679,11 @@ and enforces per-file line coverage for package and app code. The app lockfile
 is tracked and Renovate updates it alongside
 `app/pubspec.yaml`, so PRs are tested against the exact resolved set; the
 lockfile check fails if dependency resolution rewrites it. CI pins Flutter
-3.47.7 and Temurin Java 17; keep the release workflow on the same versions.
-Both workflows use the `ubuntu-latest` runner.
+3.50.1 and Temurin Java 17; keep the release workflow on the same versions.
+Flutter 3.50 deprecated `package:flutter/material.dart`, so app code imports
+`package:material_ui/material_ui.dart` instead; keep new files consistent and
+do not mix the two libraries in one file (their widget types collide). Both
+workflows use the `ubuntu-latest` runner.
 `.github/workflows/release.yml` is the manual signed release; see the workflow
 header for the keystore and secret prerequisites. `main` is protected by the
 `main-protection` ruleset, which requires the `check` status. The release
