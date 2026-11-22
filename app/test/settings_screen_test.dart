@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshchameleon/app_view_state.dart';
 import 'package:meshchameleon/screens/settings_screen.dart';

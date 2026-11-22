@@ -30,6 +30,7 @@ dependencies:
   flutter_file_dialog: ^3.3.3
   battery_plus: ^7.1.2
   geolocator: ^14.1.2
+  material_ui: ^1.11.1
 
 dev_dependencies:
   flutter_test:
