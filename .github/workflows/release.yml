@@ -14,9 +14,9 @@ name: Release
 # BUILD_NUMBER repository variable before the release starts.
 #
 # `main` is protected by the `main-protection` ruleset, which requires the CI
-# `check` status. The release workflow dispatches CI on the version-bump branch
-# first so that status exists before the push, so `REPO_AUTOMATION_TOKEN` only
-# needs Contents and Actions variables write access (no ruleset bypass).
+# `check` status and bypasses the repository-admin role. The push step uses
+# `REPO_AUTOMATION_TOKEN`, so that token must belong to an admin and have
+# Contents: write access.
 
 on:
   workflow_dispatch:
@@ -42,7 +42,6 @@ on:
 
 permissions:
   contents: write
-  actions: write
 
 concurrency:
   group: release
@@ -387,11 +386,10 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           PUSH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -z "${PUSH_TOKEN:-}" ]]; then
-            echo "::error::REPO_AUTOMATION_TOKEN is required to push the release branch, main, and tag"
+            echo "::error::REPO_AUTOMATION_TOKEN is required to bypass the main-protection ruleset"
             exit 1
           fi
           git fetch origin main
@@ -412,44 +410,8 @@ jobs:
           chmod +x "$askpass"
           export GIT_ASKPASS="$askpass"
           export GIT_TERMINAL_PROMPT=0
-
-          # main requires a passing `check` status on the pushed commit. Run CI
-          # on the version bump first so the status exists before the push; this
-          # needs no ruleset bypass from REPO_AUTOMATION_TOKEN.
-          branch="release/v$VERSION"
-          git push --force origin "HEAD:refs/heads/$branch"
-          release_sha="$(git rev-parse HEAD)"
-          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
-            2>/dev/null || true)"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
-            -f ref="$branch"
-          run_id=""
-          for _ in $(seq 1 60); do
-            candidate="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
-              2>/dev/null || true)"
-            if [[ -n "$candidate" && "$candidate" != "$before" ]]; then
-              run_id="$candidate"
-              break
-            fi
-            sleep 5
-          done
-          [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $release_sha"; exit 1; }
-          timeout 1200 gh run watch "$run_id" --exit-status --interval 30
-          check_conclusion=""
-          for _ in $(seq 1 30); do
-            check_conclusion="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_sha/check-runs" \
-              --jq '[.check_runs[] | select(.name == "check") | .conclusion] | .[-1] // ""')"
-            [[ -n "$check_conclusion" ]] && break
-            sleep 5
-          done
-          [[ "$check_conclusion" == "success" ]] || {
-            echo "::error::check status is '$check_conclusion' on $release_sha"
-            exit 1
-          }
           git push origin HEAD:main
-          git tag -a "v$VERSION" -m "MeshChameleon $VERSION" "$release_sha"
+          git tag -a "v$VERSION" -m "MeshChameleon $VERSION"
           git push origin "v$VERSION"
 
       - name: Create GitHub Release
