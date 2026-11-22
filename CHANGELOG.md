@@ -8,7 +8,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.0.0] - 2026-11-22
 
-Later
+MeshChameleon 1.0.0 is the first stable release. It brings a redesigned
+companion control panel, phone battery and optional GPS telemetry, resilient
+BLE/TCP connection recovery that survives process death, closer stock-firmware
+parity, and fixes for BLE connect/notify, raw-transmit timeouts, legacy identity
+migration, concurrent catalog changes, backup recovery, and atomic session
+writes. The simulated companion is now available in release builds, and
+backup/restore has moved to the Home screen. Android visual, TalkBack, BLE, and
+background-survival validation remains pending.
 
 ### Added
 
