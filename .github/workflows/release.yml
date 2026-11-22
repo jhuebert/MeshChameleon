@@ -423,9 +423,9 @@ jobs:
             -f ref="$branch"
           run_id=""
           for _ in $(seq 1 30); do
-            run_id="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" \
-              -f branch="$branch" -f per_page=1 \
-              --jq '.workflow_runs[0].id // ""' 2>/dev/null || true)"
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --branch "$branch" --limit 1 --json databaseId \
+              --jq '.[0].databaseId // empty' 2>/dev/null || true)"
             [[ -n "$run_id" ]] && break
             sleep 5
           done
