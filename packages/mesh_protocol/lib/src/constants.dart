@@ -332,7 +332,7 @@ const int defaultFirmwareVerCode = 11;
 const int targetFirmwareVerCode = 14;
 
 /// Virtual product version. Must match the app `pubspec.yaml` version.
-const String productVersion = '0.2.0';
+const String productVersion = '1.0.0';
 
 /// Virtual board/manufacturer string for the 40-byte DEVICE_INFO slot.
 const String virtualBoardName = 'MeshChameleon Virtual Companion';
