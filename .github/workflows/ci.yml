@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets the release workflow post the required `check` status on the
+  # version-bump commit before that commit is pushed to main.
+  workflow_dispatch:
 
 permissions:
   contents: read

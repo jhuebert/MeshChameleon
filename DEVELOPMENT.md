@@ -684,8 +684,10 @@ Both workflows use the `ubuntu-latest` runner.
 `.github/workflows/release.yml` is the manual signed release; see the workflow
 header for the keystore and secret prerequisites. `main` is protected by the
 `main-protection` ruleset, which requires the `check` status. The release
-workflow bypasses it with `REPO_AUTOMATION_TOKEN`; that token must belong to an
-admin and have Contents: write access.
+workflow dispatches CI on the version-bump branch and lands the bump through a
+PR, which supplies that status; `REPO_AUTOMATION_TOKEN` needs Contents and
+Actions variables write access only to push the branch and tag. GitHub Actions
+must be allowed to create and approve pull requests for this path.
 
 Dependency updates are configured in `renovate.json` and require the Renovate
 GitHub App to be installed on the repository; Renovate reads the config from

@@ -14,9 +14,9 @@ name: Release
 # BUILD_NUMBER repository variable before the release starts.
 #
 # `main` is protected by the `main-protection` ruleset, which requires the CI
-# `check` status and bypasses the repository-admin role. The push step uses
-# `REPO_AUTOMATION_TOKEN`, so that token must belong to an admin and have
-# Contents: write access.
+# `check` status. The release workflow dispatches CI on the version-bump branch
+# and merges the result through a PR so that status is satisfied. The token
+# only pushes the branch and tag; the PR is created and merged with GITHUB_TOKEN.
 
 on:
   workflow_dispatch:
@@ -42,6 +42,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  actions: write
 
 concurrency:
   group: release
@@ -381,15 +383,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Push main and tag
+      - name: Push release branch, merge PR, and tag
         if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ inputs.version }}
           PUSH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [[ -z "${PUSH_TOKEN:-}" ]]; then
-            echo "::error::REPO_AUTOMATION_TOKEN is required to bypass the main-protection ruleset"
+            echo "::error::REPO_AUTOMATION_TOKEN is required to push the release branch and tag"
             exit 1
           fi
           git fetch origin main
@@ -410,8 +413,53 @@ jobs:
           chmod +x "$askpass"
           export GIT_ASKPASS="$askpass"
           export GIT_TERMINAL_PROMPT=0
-          git push origin HEAD:main
-          git tag -a "v$VERSION" -m "MeshChameleon $VERSION"
+
+          # main requires a passing `check` status. Run CI on the version-bump
+          # branch first, then land the commit through a PR so CI's status is
+          # attached to the merge; no ruleset bypass is needed. GITHUB_TOKEN
+          # creates and merges the PR; REPO_AUTOMATION_TOKEN only pushes the
+          # branch and tag.
+          branch="release/v$VERSION"
+          git push --force origin "HEAD:refs/heads/$branch"
+          release_sha="$(git rev-parse HEAD)"
+          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
+            2>/dev/null || true)"
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
+            -f ref="$branch"
+          run_id=""
+          for _ in $(seq 1 60); do
+            candidate="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
+              2>/dev/null || true)"
+            if [[ -n "$candidate" && "$candidate" != "$before" ]]; then
+              run_id="$candidate"
+              break
+            fi
+            sleep 5
+          done
+          [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $release_sha"; exit 1; }
+          timeout 1200 gh run watch "$run_id" --exit-status --interval 30
+          check_conclusion=""
+          for _ in $(seq 1 30); do
+            check_conclusion="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_sha/check-runs" \
+              --jq '[.check_runs[] | select(.name == "check") | .conclusion] | .[-1] // ""')"
+            [[ -n "$check_conclusion" ]] && break
+            sleep 5
+          done
+          [[ "$check_conclusion" == "success" ]] || {
+            echo "::error::check status is '$check_conclusion' on $release_sha"
+            exit 1
+          }
+          pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
+            -f head="$branch" -f base=main \
+            -f title="release: v$VERSION" \
+            -f body="Automated version bump for v$VERSION." \
+            --jq .html_url)"
+          echo "Release PR: $pr_url"
+          gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/${pr_url##*/}/merge" \
+            -f merge_method=merge >/dev/null
+          git tag -a "v$VERSION" -m "MeshChameleon $VERSION" "$release_sha"
           git push origin "v$VERSION"
 
       - name: Create GitHub Release
