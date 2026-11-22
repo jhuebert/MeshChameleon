@@ -6,6 +6,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-22
+
+Later
+
 ### Added
 
 - Reorganized Home around the active identity, device link, proxy and client;
