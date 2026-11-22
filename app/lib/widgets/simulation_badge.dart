@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Marks in-memory sessions so they cannot be mistaken for radio traffic.
 class SimulationBadge extends StatelessWidget {

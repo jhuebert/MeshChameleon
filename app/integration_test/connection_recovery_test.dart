@@ -23,7 +23,7 @@ import 'dart:math' show max;
 import 'dart:typed_data';
 
 import 'package:device_link/device_link.dart';
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';

@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// Shared route observer so Home can pause its visibility-aware sampler when
 /// any route (screen or modal) covers it, and resume on return.
