@@ -417,7 +417,7 @@ jobs:
           # on the version bump first so the status exists before the push; this
           # needs no ruleset bypass from REPO_AUTOMATION_TOKEN.
           branch="release/v$VERSION"
-          git push origin "HEAD:refs/heads/$branch"
+          git push --force origin "HEAD:refs/heads/$branch"
           release_sha="$(git rev-parse HEAD)"
           gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
             -f ref="$branch"
