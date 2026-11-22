@@ -422,17 +422,24 @@ jobs:
           gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
             -f ref="$branch"
           run_id=""
-          for _ in $(seq 1 30); do
+          for _ in $(seq 1 60); do
             run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --branch "$branch" --limit 1 --json databaseId \
-              --jq '.[0].databaseId // empty' 2>/dev/null || true)"
+              --branch "$branch" --limit 10 --json databaseId,headSha \
+              --jq --arg sha "$release_sha" \
+                '[.[] | select(.headSha == $sha)][0].databaseId // empty' \
+              2>/dev/null || true)"
             [[ -n "$run_id" ]] && break
             sleep 5
           done
-          [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $branch"; exit 1; }
+          [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $release_sha"; exit 1; }
           timeout 1200 gh run watch "$run_id" --exit-status --interval 30
-          check_conclusion="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_sha/check-runs" \
-            --jq '[.check_runs[] | select(.name == "check") | .conclusion] | .[-1] // ""')"
+          check_conclusion=""
+          for _ in $(seq 1 30); do
+            check_conclusion="$(gh api "repos/$GITHUB_REPOSITORY/commits/$release_sha/check-runs" \
+              --jq '[.check_runs[] | select(.name == "check") | .conclusion] | .[-1] // ""')"
+            [[ -n "$check_conclusion" ]] && break
+            sleep 5
+          done
           [[ "$check_conclusion" == "success" ]] || {
             echo "::error::check status is '$check_conclusion' on $release_sha"
             exit 1
