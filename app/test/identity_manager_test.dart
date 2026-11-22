@@ -60,6 +60,13 @@ void main() {
         radioParams: link.initialRadioParams,
       );
 
+  Future<void> waitFor(bool Function() condition) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (!condition() && DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+  }
+
   test('exposes the last physical sample from the shared hub without I/O',
       () async {
     await manager.load();
@@ -262,7 +269,7 @@ void main() {
     final node = manager.activeNode!;
 
     await node.setAdvertName('Renamed Virtually');
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await waitFor(() => manager.activeSummary!.name == 'Renamed Virtually');
 
     expect(manager.activeSummary!.name, 'Renamed Virtually');
     final record = (await repository.records()).single;
@@ -340,7 +347,7 @@ void main() {
     ));
 
     final sent = await a.sendTextMessage(b.identity.publicKey, 'local');
-    await Future<void>.delayed(const Duration(milliseconds: 260));
+    await waitFor(() => b.queuedDirectCount == 1);
 
     expect(sent.success, isTrue);
     expect(b.queuedDirectCount, 1);
@@ -353,7 +360,7 @@ void main() {
     final node = manager.activeNode!;
 
     expect(await node.runCliCommand('set name CLI Renamed'), 'OK');
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await waitFor(() => manager.activeSummary!.name == 'CLI Renamed');
 
     expect(manager.activeSummary!.name, 'CLI Renamed');
     expect((await repository.records()).single.name, 'CLI Renamed');
@@ -374,7 +381,7 @@ void main() {
     await start();
     final node = manager.activeNode!;
     await node.setAdvertName('Imported Name');
-    await Future<void>.delayed(const Duration(milliseconds: 40));
+    await waitFor(() => manager.activeSummary!.name == 'Imported Name');
     await node.addUpdateContact(Contact(
       publicKey: (await LocalIdentity.generate()).publicKey,
       name: 'Existing Peer',
@@ -382,7 +389,9 @@ void main() {
     final candidate = await LocalIdentity.generate();
 
     await node.importPrivateKey(candidate.meshcore64);
-    await Future<void>.delayed(const Duration(milliseconds: 80));
+    await waitFor(() => manager.summaries
+        .firstWhere((summary) => summary.id == id)
+        .publicKey == candidate.publicKey);
 
     expect(node.identity.publicKey, candidate.publicKey);
     final summary = manager.summaries.firstWhere((summary) => summary.id == id);
