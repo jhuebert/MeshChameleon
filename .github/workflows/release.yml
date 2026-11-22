@@ -419,16 +419,20 @@ jobs:
           branch="release/v$VERSION"
           git push --force origin "HEAD:refs/heads/$branch"
           release_sha="$(git rev-parse HEAD)"
+          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+            --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
+            2>/dev/null || true)"
           gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
             -f ref="$branch"
           run_id=""
           for _ in $(seq 1 60); do
-            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --branch "$branch" --limit 10 --json databaseId,headSha \
-              --jq --arg sha "$release_sha" \
-                '[.[] | select(.headSha == $sha)][0].databaseId // empty' \
+            candidate="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
               2>/dev/null || true)"
-            [[ -n "$run_id" ]] && break
+            if [[ -n "$candidate" && "$candidate" != "$before" ]]; then
+              run_id="$candidate"
+              break
+            fi
             sleep 5
           done
           [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $release_sha"; exit 1; }
