@@ -388,7 +388,7 @@ jobs:
         env:
           VERSION: ${{ inputs.version }}
           PUSH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.REPO_AUTOMATION_TOKEN }}
         run: |
           set -euo pipefail
           if [[ -z "${PUSH_TOKEN:-}" ]]; then
@@ -414,11 +414,10 @@ jobs:
           export GIT_ASKPASS="$askpass"
           export GIT_TERMINAL_PROMPT=0
 
-          # main requires a passing `check` status. Run CI on the version-bump
-          # branch first, then land the commit through a PR so CI's status is
-          # attached to the merge; no ruleset bypass is needed. GITHUB_TOKEN
-          # creates and merges the PR; REPO_AUTOMATION_TOKEN only pushes the
-          # branch and tag.
+          # main requires a passing `check` status from the pull_request event.
+          # A PR authored by github-actions[bot] needs manual approval before
+          # its CI can run, so create and merge the PR as Jason with the
+          # automation token; the same token pushes the branch and tag.
           branch="release/v$VERSION"
           git push --force origin "HEAD:refs/heads/$branch"
           release_sha="$(git rev-parse HEAD)"
@@ -429,6 +428,17 @@ jobs:
           pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
             -X GET -f head="${GITHUB_REPOSITORY%%/*}:$branch" -f base=main \
             -f state=open --jq '.[0].html_url // ""')"
+          if [[ -n "$pr_url" ]]; then
+            author="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
+              -X GET -f head="${GITHUB_REPOSITORY%%/*}:$branch" -f base=main \
+              -f state=open --jq '.[0].user.login // ""')"
+            if [[ "$author" == "github-actions[bot]" ]]; then
+              # Bot-authored PRs need manual approval before CI can run.
+              gh api -X PATCH "repos/$GITHUB_REPOSITORY/pulls/${pr_url##*/}" \
+                -f state=closed >/dev/null
+              pr_url=""
+            fi
+          fi
           if [[ -z "$pr_url" ]]; then
             pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
               -f head="$branch" -f base=main \
