@@ -8,7 +8,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [1.1.0] - 2026-11-26
 
-Desktop builds for Linux, macOS and Windows with release assets; BLE on macOS and Linux; UI cleanup; macOS keychain, location and BLE scan fixes.
+MeshChameleon 1.1.0 brings desktop builds to Linux, macOS and Windows alongside Android, adds BLE on macOS and Linux, and simplifies the control panel.
+
+## Highlights
+
+- **Desktop builds for every major platform.** Linux, macOS and Windows bundles are attached to every release. BLE device links work on Linux and macOS; Windows supports network (TCP) links and the simulated companion because `flutter_blue_plus` has no Windows backend. Desktop builds are unsigned, so confirm the first launch with your OS.
+- **A first scan that actually works on macOS.** The app now waits for the Bluetooth adapter to be ready before calling `startScan`, so one click is enough. Denied permission, Bluetooth off, and a slow start each get a specific message, and the Android-only MTU request is skipped on desktop instead of logging a misleading warning.
+- **Simpler identity, home and settings screens.** The identity menu lists **Clear local data** first, then disable/enable, then **Delete identity** last; reconnect guidance is gone. Home no longer shows a copy button or the "On this phone" section — the **MeshCore app** section shows the port the proxy is using. Settings no longer has a **Use phone GPS** toggle; the GPS interval and permission controls remain, and whether coordinates are shared is controlled by your client's telemetry permissions and advert policy.
+- **macOS storage and permission fixes.** Identity keys use the legacy login keychain, so unsigned builds no longer fail with `errSecMissingEntitlement` and report the identity database as unavailable. Location permission now has the required plist description and sandbox entitlement, and an occupied port 5000 (usually macOS AirPlay Receiver) gets an actionable message instead of a raw socket error.
+- **Consistent asset names.** Every platform now uses `MeshChameleon-<version>-<platform>.<ext>`: Android APKs and the AAB carry `-android`, and desktop bundles use `-linux`, `-windows` and `-macos`.
+
+## Downloads
+
+- **Android**: `MeshChameleon-1.1.0-android-universal.apk` (or an ABI-specific split), plus `MeshChameleon-1.1.0-android.aab` for Play.
+- **Linux / Windows / macOS**: `MeshChameleon-1.1.0-linux.tar.gz`, `-windows.zip`, `-macos.zip`.
+- `SHA256SUMS.txt` and `build-metadata.txt` are included for verification.
+
+## Known limits
+
+iOS remains deferred. BLE, multi-identity radio behavior and Android background survival are not hardware-validated. Telemetry is client-requested: a new phone GPS fix appears on the client's next telemetry request or in a freshly requested `SELF_INFO`, not as an unsolicited push.
 
 ### Added
 
