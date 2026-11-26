@@ -63,9 +63,9 @@ needed when the client runs on another device.
 
 MeshChameleon is not in an app store yet. Signed test builds are published on
 [GitHub Releases](https://github.com/jhuebert/MeshChameleon/releases). Download
-the `MeshChameleon-<version>-universal.apk`, allow installs from that source,
-and open it. Install newer builds over the existing app; Android keeps your data
-when the signing key matches. Do not use a debug build if you plan to move to
+the `MeshChameleon-<version>-android-universal.apk`, allow installs from that
+source, and open it. Install newer builds over the existing app; Android keeps
+your data when the signing key matches. Do not use a debug build if you plan to
 the Play build later: debug builds have a different signing key.
 
 To build from source instead:

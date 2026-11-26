@@ -132,8 +132,8 @@ The important part: **your phone owns the identity, not the radio.**
 MeshChameleon is an early prerelease and is not in an app store yet. Signed
 test builds are published on
 [GitHub Releases](https://github.com/jhuebert/MeshChameleon/releases): download
-the `MeshChameleon-<version>-universal.apk` and install it. Release APKs are
-signed with the app signing key; the fingerprints are listed in
+the `MeshChameleon-<version>-android-universal.apk` and install it. Release
+APKs are signed with the app signing key; the fingerprints are listed in
 [DEVELOPMENT.md](DEVELOPMENT.md#release-signing). To build it
 yourself, see [Building the app](DEVELOPMENT.md#building-the-app). For
 step-by-step help with screenshots, use the

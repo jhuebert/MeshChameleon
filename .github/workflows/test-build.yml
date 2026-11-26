@@ -394,10 +394,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux
-            asset: linux-x64.tar.gz
+            asset: linux.tar.gz
           - os: windows-latest
             target: windows
-            asset: windows-x64.zip
+            asset: windows.zip
           - os: macos-latest
             target: macos
             asset: macos.zip
@@ -439,7 +439,7 @@ jobs:
         run: |
           set -euo pipefail
           cd app/build/linux/x64/release/bundle
-          tar -czf "$GITHUB_WORKSPACE/MeshChameleon-$VERSION-linux-x64.tar.gz" .
+          tar -czf "$GITHUB_WORKSPACE/MeshChameleon-$VERSION-linux.tar.gz" .
 
       - name: Package Windows
         if: runner.os == 'Windows'
@@ -448,7 +448,7 @@ jobs:
           VERSION: ${{ needs.build.outputs.version_name }}
         run: |
           Compress-Archive -Path "app/build/windows/x64/runner/Release/*" `
-            -DestinationPath "MeshChameleon-$env:VERSION-windows-x64.zip" -Force
+            -DestinationPath "MeshChameleon-$env:VERSION-windows.zip" -Force
 
       - name: Package macOS
         if: runner.os == 'macOS'

@@ -781,7 +781,7 @@ APKs, never debug APKs: debug builds use a machine-local certificate and cannot
 update to release or Play builds. Testers can verify a download with:
 
 ```sh
-apksigner verify --print-certs MeshChameleon-<version>-universal.apk
+apksigner verify --print-certs MeshChameleon-<version>-android-universal.apk
 ```
 
 Expected certificates:

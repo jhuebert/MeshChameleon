@@ -40,6 +40,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Settings no longer offers a "Use phone GPS" toggle. The GPS interval and
   permission controls remain; whether coordinates are shared is controlled by
   the client's telemetry permissions and advert policy.
+- Release and test-build assets use one naming scheme:
+  `MeshChameleon-<version>-<platform>.<ext>`. Android files carry `-android`
+  (`-android-universal.apk`, `-android.aab`, and the split APKs), and desktop
+  bundles drop `-x64` from their names.
 
 ## [1.0.0] - 2026-11-22
 
