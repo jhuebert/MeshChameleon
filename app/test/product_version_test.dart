@@ -21,6 +21,6 @@ void main() {
 
   test('user guide version line follows the product version', () {
     final guide = File('../docs/USER_GUIDE.md').readAsStringSync();
-    expect(guide, contains('Version $productVersion · Android'));
+    expect(guide, contains('Version $productVersion ·'));
   });
 }

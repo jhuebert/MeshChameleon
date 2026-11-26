@@ -5,8 +5,9 @@
 #
 # Updates:
 #   app/pubspec.yaml                              version: X.Y.Z+N
-#   packages/mesh_protocol/lib/src/constants.dart  productVersion
-#   packages/mesh_protocol/lib/src/models.dart     DeviceInfo.version default
+#   packages/mesh_protocol/lib/src/constants.dart  productVersion (also drives
+#                                                  DeviceInfo.version via
+#                                                  activeDeviceVersion)
 #   docs/USER_GUIDE.md                            version line
 #   CHANGELOG.md                                  Unreleased -> X.Y.Z heading
 #
@@ -45,23 +46,28 @@ fi
 
 pubspec="app/pubspec.yaml"
 constants="packages/mesh_protocol/lib/src/constants.dart"
-models="packages/mesh_protocol/lib/src/models.dart"
 user_guide="docs/USER_GUIDE.md"
 changelog="CHANGELOG.md"
 
-for file in "$pubspec" "$constants" "$models" "$user_guide" "$changelog"; do
+# BSD sed needs an explicit (empty) backup suffix after -i; GNU sed does not.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  sed_inplace() { sed -i '' "$@"; }
+else
+  sed_inplace() { sed -i "$@"; }
+fi
+
+for file in "$pubspec" "$constants" "$user_guide" "$changelog"; do
   [[ -f "$file" ]] || die "missing $file"
 done
 
-sed -i -E "s/^version: .*/version: ${version}+${build_number}/" "$pubspec"
-sed -i -E \
+sed_inplace -E "s/^version: .*/version: ${version}+${build_number}/" "$pubspec"
+sed_inplace -E \
   "s/^const String productVersion = '[^']*';/const String productVersion = '${version}';/" \
   "$constants"
-sed -i -E \
-  "s/(this\\.version = 'meshchameleon )[^']*(')/\\1${version}\\2/" \
-  "$models"
-sed -i -E \
-  "1,5s/^Version [0-9]+\\.[0-9]+\\.[0-9]+ · Android$/Version ${version} · Android/" \
+# Preserve whatever platform suffix the guide uses (for example
+# "· Android and desktop (Linux, macOS, Windows)").
+sed_inplace -E \
+  "1,5s/^Version [0-9]+\\.[0-9]+\\.[0-9]+( · .*)?$/Version ${version}\\1/" \
   "$user_guide"
 
 today="$(date -u +%Y-%m-%d)"
