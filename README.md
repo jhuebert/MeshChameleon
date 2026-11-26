@@ -203,7 +203,8 @@ tests, but this is still an early project:
 
 ## Privacy and security
 
-- MeshCore identity keys are stored in Android's secure storage.
+- MeshCore identity keys are stored in the host's secure storage (Android
+  Keystore, or the OS keychain on desktop).
 - There is no analytics, cloud service, or telemetry upload. Connection
   statistics are session-only and stay in memory; copying diagnostics is an
   explicit local action.

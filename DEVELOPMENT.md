@@ -380,6 +380,14 @@ to defend against, so the link simply stays up while the app runs. Linux needs
 `bluez` at runtime for BLE; macOS needs the Bluetooth permission. None of this
 is hardware-validated.
 
+On macOS, identity keys use the legacy login keychain
+(`MacOsOptions(usesDataProtectionKeychain: false)`). The data-protection
+keychain requires a `keychain-access-groups` entitlement and a provisioning
+profile, which unsigned/ad-hoc desktop builds do not have; without this option
+the keys fail with `errSecMissingEntitlement` (-34018) and the identity database
+looks unavailable. `app/integration_test/secure_storage_smoke_test.dart` runs on
+both Linux and macOS to guard this.
+
 ## Connecting a real client
 
 Start the proxy (port defaults to 5000), then point a client at the phone's IP:
