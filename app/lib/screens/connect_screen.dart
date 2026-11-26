@@ -154,6 +154,12 @@ class _ConnectScreenState extends State<ConnectScreen>
     });
     try {
       await _scanSession.start();
+    } on ScanStartException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _scanning = false;
+        _scanError = e.message;
+      });
     } catch (_) {
       if (!mounted) return;
       setState(() {

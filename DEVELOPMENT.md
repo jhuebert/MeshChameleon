@@ -380,6 +380,11 @@ to defend against, so the link simply stays up while the app runs. Linux needs
 `bluez` at runtime for BLE; macOS needs the Bluetooth permission. None of this
 is hardware-validated.
 
+`BleScanSession` waits for `FlutterBluePlus.adapterState` to settle before
+calling `startScan`. CoreBluetooth reaches `on` asynchronously on macOS, so a
+first scan issued during startup was rejected and needed a retry. The manual
+`app/integration_test/ble_scan_smoke_test.dart` checks this on a real adapter.
+
 macOS ControlCenter (AirPlay Receiver) listens on `*:5000` by default, so the
 proxy cannot bind there until AirPlay Receiver is turned off in System Settings
 → General → AirDrop & Handoff, or the proxy port is changed in Settings. The

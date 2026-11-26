@@ -23,6 +23,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   points to the port setting instead of showing a raw socket error.
 - BLE handshakes no longer call `requestMtu` off Android, where the plugin
   rejects it and logged a misleading `android-only` warning on macOS/Linux.
+- The first BLE scan now waits for the Bluetooth adapter to settle, so macOS
+  does not need a second click while CoreBluetooth is still starting. Denied
+  permission, a disabled adapter, and a slow start now get specific messages.
 
 ## [1.0.0] - 2026-11-22
 
