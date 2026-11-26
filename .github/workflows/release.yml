@@ -422,23 +422,37 @@ jobs:
           branch="release/v$VERSION"
           git push --force origin "HEAD:refs/heads/$branch"
           release_sha="$(git rev-parse HEAD)"
-          before="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-            --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
-            2>/dev/null || true)"
-          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
-            -f ref="$branch"
+
+          # Reuse the PR if a previous attempt created one but stopped before
+          # merging; recreating it would fail with 422. Creating or updating
+          # the PR triggers CI with the pull_request event.
+          pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
+            -X GET -f head="${GITHUB_REPOSITORY%%/*}:$branch" -f base=main \
+            -f state=open --jq '.[0].html_url // ""')"
+          if [[ -z "$pr_url" ]]; then
+            pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
+              -f head="$branch" -f base=main \
+              -f title="release: v$VERSION" \
+              -f body="Automated version bump for v$VERSION." \
+              --jq .html_url)"
+          fi
+          echo "Release PR: $pr_url"
+
+          # The ruleset only counts checks from the pull_request event, so a
+          # manually dispatched CI run on the branch is not enough.
           run_id=""
           for _ in $(seq 1 60); do
-            candidate="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
-              --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' \
+            run_id="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml \
+              --limit 100 --json databaseId,event,headSha --jq \
+              "[.[] | select(.event == \"pull_request\" and .headSha == \"$release_sha\")][0].databaseId // empty" \
               2>/dev/null || true)"
-            if [[ -n "$candidate" && "$candidate" != "$before" ]]; then
-              run_id="$candidate"
-              break
-            fi
+            [[ -n "$run_id" ]] && break
             sleep 5
           done
-          [[ -n "$run_id" ]] || { echo "::error::no CI run was started for $release_sha"; exit 1; }
+          [[ -n "$run_id" ]] || {
+            echo "::error::no pull_request CI run was started for $release_sha"
+            exit 1
+          }
           timeout 1200 gh run watch "$run_id" --exit-status --interval 30
           check_conclusion=""
           for _ in $(seq 1 30); do
@@ -451,19 +465,6 @@ jobs:
             echo "::error::check status is '$check_conclusion' on $release_sha"
             exit 1
           }
-          # Reuse the PR if a previous attempt created one but stopped before
-          # merging; recreating it would fail with 422.
-          pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
-            -X GET -f head="${GITHUB_REPOSITORY%%/*}:$branch" -f base=main \
-            -f state=open --jq '.[0].html_url // ""')"
-          if [[ -z "$pr_url" ]]; then
-            pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
-              -f head="$branch" -f base=main \
-              -f title="release: v$VERSION" \
-              -f body="Automated version bump for v$VERSION." \
-              --jq .html_url)"
-          fi
-          echo "Release PR: $pr_url"
           # Only squash merges are enabled on this repository.
           gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/${pr_url##*/}/merge" \
             -f merge_method=squash >/dev/null

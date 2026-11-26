@@ -30,7 +30,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requesting location permission no longer fails with "permission definitions
   not found in plist".
 - The release workflow squash-merges its version-bump PR (merge commits are
-  disabled) and reuses an existing PR when retried.
+  disabled), reuses an existing PR when retried, and waits for the PR's own CI
+  run so the required `check` status is attached to the merge.
 
 ### Changed
 
