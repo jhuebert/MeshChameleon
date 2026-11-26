@@ -380,6 +380,11 @@ to defend against, so the link simply stays up while the app runs. Linux needs
 `bluez` at runtime for BLE; macOS needs the Bluetooth permission. None of this
 is hardware-validated.
 
+macOS ControlCenter (AirPlay Receiver) listens on `*:5000` by default, so the
+proxy cannot bind there until AirPlay Receiver is turned off in System Settings
+→ General → AirDrop & Handoff, or the proxy port is changed in Settings. The
+failure message now explains this.
+
 On macOS, identity keys use the legacy login keychain
 (`MacOsOptions(usesDataProtectionKeychain: false)`). The data-protection
 keychain requires a `keychain-access-groups` entitlement and a provisioning

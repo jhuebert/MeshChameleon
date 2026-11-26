@@ -19,6 +19,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - macOS identity keys now use the legacy login keychain, so unsigned builds do
   not fail with `errSecMissingEntitlement` (-34018) and report the identity
   database as unavailable.
+- An occupied proxy port now explains the macOS AirPlay Receiver conflict and
+  points to the port setting instead of showing a raw socket error.
+- BLE handshakes no longer call `requestMtu` off Android, where the plugin
+  rejects it and logged a misleading `android-only` warning on macOS/Linux.
 
 ## [1.0.0] - 2026-11-22
 

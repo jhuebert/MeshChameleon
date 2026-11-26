@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:device_link/device_link.dart';
@@ -70,6 +71,28 @@ void main() {
     expect(platform.writes, isEmpty);
     await link.disconnect();
     expect(link.currentState, LinkState.disconnected);
+  });
+
+  test('MTU negotiation is injectable and runs once per handshake', () async {
+    final original = BleDeviceLink.negotiateMtu;
+    addTearDown(() => BleDeviceLink.negotiateMtu = original);
+    var calls = 0;
+    BleDeviceLink.negotiateMtu = (device) async {
+      calls++;
+    };
+    final link = newLink();
+    await link.connect();
+    expect(calls, 1);
+    await link.disconnect();
+  });
+
+  test('the default MTU negotiation is a no-op off Android', () async {
+    if (Platform.isAndroid) return;
+    final logs = <String>[];
+    final link = newLink(logs: logs);
+    await link.connect();
+    expect(logs.where((log) => log.contains('requestMtu')), isEmpty);
+    await link.disconnect();
   });
 
   test('connect fails cleanly when the NUS service is missing', () async {
