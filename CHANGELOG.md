@@ -6,6 +6,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- macOS and Windows desktop runners, with MeshChameleon branding and desktop
+  launcher icons. CI builds all three desktop targets, and releases attach
+  Linux, Windows, and macOS bundles as assets.
+- BLE device links on macOS and Linux. Windows remains network-only because
+  `flutter_blue_plus` has no Windows implementation.
+
 ## [1.0.0] - 2026-11-22
 
 MeshChameleon 1.0.0 is the first stable release. It brings a redesigned

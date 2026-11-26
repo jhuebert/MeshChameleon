@@ -5,6 +5,8 @@ analyzer:
     - build/**
     - android/**
     - linux/**
+    - windows/**
+    - macos/**
   language:
     strict-casts: true
     strict-raw-types: true

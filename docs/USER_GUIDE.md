@@ -1,6 +1,6 @@
 # MeshChameleon User Guide
 
-Version 1.0.0 · Android
+Version 1.0.0 · Android and desktop (Linux, macOS, Windows)
 
 MeshChameleon makes an Android phone act as a MeshCore companion while using an
 ordinary MeshCore radio for the actual sending and receiving. You keep using
@@ -36,10 +36,11 @@ identities, background operation, backups, and troubleshooting.
 
 ## What you need
 
-- An Android phone running Android 7.0 or newer. iOS is not supported yet.
-- A normal MeshCore companion radio, reachable over Bluetooth or Wi-Fi/Ethernet.
-  For a network-connected radio, the phone and radio must be on the same network.
-  You can switch between radios at any time.
+- An Android phone running Android 7.0 or newer, or a desktop build on Linux,
+  macOS, or Windows. iOS is not supported yet.
+- A normal MeshCore companion radio, reachable over Bluetooth (Android, macOS,
+  Linux) or Wi-Fi/Ethernet (all platforms). For a network-connected radio, the
+  host and radio must be on the same network. You can switch radios at any time.
 - A MeshCore client app that can connect to a **TCP/network** companion — for
   example the official MeshCore app, MeshCore Open, or another TCP-capable
   client. MeshChameleon does not expose a Bluetooth companion to the client app;
@@ -620,9 +621,10 @@ only the key, not contacts, channels, messages, or settings.
 
 ## Limits and compatibility
 
-- Android only; iOS is not supported yet.
-- No Play Store release yet; signed test builds are on GitHub Releases. Debug
-  builds cannot update to release or Play builds.
+- Android and Linux/macOS/Windows desktop builds; iOS is not supported yet.
+  Desktop builds are unsigned; confirm the first launch with your OS.
+- No Play Store release yet; signed APKs and desktop bundles are on GitHub
+  Releases. Debug builds cannot update to release or Play builds.
 - One radio link and one MeshCore client at a time.
 - The MeshCore client must support a network/TCP companion and normally runs on
   the same phone.

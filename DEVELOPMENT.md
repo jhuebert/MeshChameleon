@@ -332,14 +332,15 @@ before publish. Quota failures are reported as storage/table-full errors; the ap
 does not delete broad directories or physical radio state to recover. See
 `SECURITY.md` for at-rest storage.
 
-## Linux desktop and headless proxy
+## Desktop targets and headless proxy
 
-Two hardware-free targets share the pure-Dart core:
+The desktop runners share the pure-Dart core with the phone app:
 
-- **Linux desktop** (`app/linux/`) — the real UI. BLE is hidden off mobile
-  because there is no desktop `flutter_blue_plus` implementation; the
-  **Simulated** tab drives the real `MeshNode` and `CompanionServer` from an
-  in-memory `FakeDeviceLink`.
+- **Linux, macOS and Windows desktop** (`app/linux/`, `app/macos/`,
+  `app/windows/`) — the real UI. BLE works on Linux and macOS through
+  `flutter_blue_plus`; Windows has no BLE backend and offers network and
+  simulated links only. The **Simulated** tab drives the real `MeshNode` and
+  `CompanionServer` from an in-memory `FakeDeviceLink` on every desktop.
 - **Headless CLI** (`packages/mesh_node/tool/proxy_cli.dart`) — no Flutter, no
   GUI, TCP device link only.
 
@@ -374,9 +375,10 @@ a new `SELF_INFO` public key.
 0600**. Use it only for development; the phone app's Keystore-backed storage is
 the real model (see `SECURITY.md`).
 
-Desktop builds have no BLE device link and no background service — desktop has
-no process suspension to defend against, so the link simply stays up while the
-app runs. None of this is hardware-validated.
+Desktop builds have no foreground service — desktop has no process suspension
+to defend against, so the link simply stays up while the app runs. Linux needs
+`bluez` at runtime for BLE; macOS needs the Bluetooth permission. None of this
+is hardware-validated.
 
 ## Connecting a real client
 
@@ -783,10 +785,12 @@ scripts/build.sh apk --debug
 adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
 ```
 
-Desktop:
+Desktop (build each target on that operating system):
 
 ```sh
 scripts/build.sh linux --debug
+scripts/build.sh macos --release
+scripts/build.sh windows --release
 ```
 
 `scripts/run.sh -d <device>` is the equivalent for `flutter run`. The wrappers

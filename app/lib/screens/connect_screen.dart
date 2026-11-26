@@ -77,7 +77,7 @@ class _ConnectScreenState extends State<ConnectScreen>
     );
     _lastTabIndex = _tabController.index;
     _tabController.addListener(_handleTabChanged);
-    // Reading scan results reaches the plugin, which is absent off mobile.
+    // Reading scan results reaches the plugin; Windows has no implementation.
     if (_capabilities.supportsBle) {
       _scanResults = _scanSession.results;
       // The plugin owns the 15 s scan timeout; mirror it instead of
