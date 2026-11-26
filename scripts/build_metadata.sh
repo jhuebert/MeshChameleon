@@ -28,7 +28,11 @@ fi
 build_time="${MESHCHAMELEON_BUILD_TIME:-}"
 if [[ -z "$build_time" ]]; then
   if [[ -n "${SOURCE_DATE_EPOCH:-}" ]]; then
-    build_time="$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
+    # GNU date (Linux CI) takes -d @epoch; BSD date (macOS) takes -r epoch.
+    if ! build_time="$(date -u -d "@${SOURCE_DATE_EPOCH}" \
+      +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"; then
+      build_time="$(date -u -r "${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)"
+    fi
   else
     build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
