@@ -451,15 +451,31 @@ jobs:
             echo "::error::check status is '$check_conclusion' on $release_sha"
             exit 1
           }
+          # Reuse the PR if a previous attempt created one but stopped before
+          # merging; recreating it would fail with 422.
           pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
-            -f head="$branch" -f base=main \
-            -f title="release: v$VERSION" \
-            -f body="Automated version bump for v$VERSION." \
-            --jq .html_url)"
+            -X GET -f head="${GITHUB_REPOSITORY%%/*}:$branch" -f base=main \
+            -f state=open --jq '.[0].html_url // ""')"
+          if [[ -z "$pr_url" ]]; then
+            pr_url="$(gh api "repos/$GITHUB_REPOSITORY/pulls" \
+              -f head="$branch" -f base=main \
+              -f title="release: v$VERSION" \
+              -f body="Automated version bump for v$VERSION." \
+              --jq .html_url)"
+          fi
           echo "Release PR: $pr_url"
+          # Only squash merges are enabled on this repository.
           gh api -X PUT "repos/$GITHUB_REPOSITORY/pulls/${pr_url##*/}/merge" \
-            -f merge_method=merge >/dev/null
-          git tag -a "v$VERSION" -m "MeshChameleon $VERSION" "$release_sha"
+            -f merge_method=squash >/dev/null
+          # A squash creates a new commit on main, so tag the landed commit
+          # rather than the release branch's original bump commit.
+          git fetch origin main
+          merged_sha="$(git rev-parse origin/main)"
+          [[ "$merged_sha" != "$BASE_SHA" ]] || {
+            echo "::error::main did not advance after the release merge"
+            exit 1
+          }
+          git tag -a "v$VERSION" -m "MeshChameleon $VERSION" "$merged_sha"
           git push origin "v$VERSION"
 
       - name: Create GitHub Release

@@ -29,6 +29,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - macOS declares `NSLocationUsageDescription` and the location entitlement, so
   requesting location permission no longer fails with "permission definitions
   not found in plist".
+- The release workflow squash-merges its version-bump PR (merge commits are
+  disabled) and reuses an existing PR when retried.
 
 ### Changed
 
