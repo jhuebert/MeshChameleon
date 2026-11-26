@@ -388,6 +388,11 @@ telemetry push, matching stock firmware. Settings exposes only the sampling
 interval and permission controls, not a "Use phone GPS" toggle. The macOS runner
 declares `NSLocationUsageDescription` and
 `com.apple.security.personal-information.location` so permission can be granted.
+The macOS build prints a deprecation warning from `geolocator_apple` 2.4.3
+(`+[CLLocationManager authorizationStatus]`, deprecated in macOS 11). It is
+upstream plugin code, the published package is the latest version, and Xcode
+build settings do not reach SwiftPM package targets, so the warning is left as-is
+rather than vendoring a patched plugin.
 
 `BleScanSession` waits for `FlutterBluePlus.adapterState` to settle before
 calling `startScan`. CoreBluetooth reaches `on` asynchronously on macOS, so a
