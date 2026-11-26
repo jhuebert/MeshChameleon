@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../app_route_observer.dart';
@@ -10,7 +9,6 @@ import '../app_view_state.dart';
 import '../services/diagnostics_snapshot.dart';
 import '../services/identity_presentation.dart';
 import '../theme/app_theme.dart';
-import '../widgets/app_snack_bar.dart';
 import '../widgets/app_surfaces.dart';
 import '../widgets/content_width.dart';
 import '../widgets/device_target_icon.dart';
@@ -151,14 +149,6 @@ class _HomeScreenState extends State<HomeScreen>
     });
   }
 
-  Future<void> _copyEndpoint() async {
-    final app = context.read<AppViewState>();
-    await Clipboard.setData(ClipboardData(text: '127.0.0.1:${app.port}'));
-    if (mounted) {
-      showAppSnackBar(context, 'Endpoint copied', replace: false);
-    }
-  }
-
   Future<void> _switchIdentity() async {
     final outcome = await showSwitchIdentitySheet(context);
     if (!mounted) return;
@@ -232,7 +222,6 @@ class _HomeScreenState extends State<HomeScreen>
                 proxyFailure: _proxyFailure,
                 onToggleProxy: _toggleProxy,
                 onRetryProxy: () => _toggleProxy(true),
-                onCopyEndpoint: _copyEndpoint,
                 onViewLog: () => Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const LogScreen()),
                 ),
@@ -675,7 +664,6 @@ class _ConnectionsSection extends StatelessWidget {
     required this.proxyFailure,
     required this.onToggleProxy,
     required this.onRetryProxy,
-    required this.onCopyEndpoint,
     required this.onViewLog,
   });
 
@@ -685,7 +673,6 @@ class _ConnectionsSection extends StatelessWidget {
   final String? proxyFailure;
   final ValueChanged<bool> onToggleProxy;
   final VoidCallback onRetryProxy;
-  final VoidCallback onCopyEndpoint;
   final VoidCallback onViewLog;
 
   @override
@@ -750,7 +737,6 @@ class _ConnectionsSection extends StatelessWidget {
               app: app,
               proxyRunning: proxyRunning,
               snapshot: snapshot,
-              onCopyEndpoint: onCopyEndpoint,
             ),
           ),
         ],
@@ -861,13 +847,11 @@ class _ClientRow extends StatelessWidget {
     required this.app,
     required this.proxyRunning,
     required this.snapshot,
-    required this.onCopyEndpoint,
   });
 
   final AppViewState app;
   final bool proxyRunning;
   final _HomeSnapshot snapshot;
-  final VoidCallback onCopyEndpoint;
 
   @override
   Widget build(BuildContext context) {
@@ -917,6 +901,17 @@ class _ClientRow extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 36),
+            child: Text(
+              'Port: ${app.port}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
           if (clientAddress != null) ...[
             const SizedBox(height: 4),
             Padding(
@@ -930,30 +925,6 @@ class _ClientRow extends StatelessWidget {
               ),
             ),
           ],
-          Row(
-            children: [
-              const SizedBox(width: 36),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('On this phone', style: theme.textTheme.bodySmall),
-                    SelectableText(
-                      '127.0.0.1:${app.port}',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontFamily: 'monospace',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                tooltip: 'Copy endpoint',
-                onPressed: onCopyEndpoint,
-                icon: const Icon(Icons.copy_outlined),
-              ),
-            ],
-          ),
         ],
       ),
     );

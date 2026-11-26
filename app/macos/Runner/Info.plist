@@ -28,6 +28,8 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>MeshChameleon uses Bluetooth to find and talk to a MeshCore companion radio.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>MeshChameleon uses your location to report phone GPS telemetry to the MeshCore network.</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>

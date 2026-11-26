@@ -73,7 +73,7 @@ Each identity has its own name, key, contacts, channels, and message queue. Whil
 a device is connected, **all enabled identities keep receiving**, so messages
 still arrive for the ones you are not currently using. The **active** identity is
 the one your MeshCore app sees; tap another identity to switch. The client is
-disconnected and may need to reconnect to the new identity.
+disconnected when you switch identities.
 
 You can create extra identities from **Switch → Manage identities**. Disable an identity to
 stop it from running and receiving while keeping its key, contacts, channels, and

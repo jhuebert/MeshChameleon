@@ -92,8 +92,7 @@ class _SwitchIdentitySheetState extends State<_SwitchIdentitySheet> {
                   '${identities.length} '
                   '${identities.length == 1 ? 'identity' : 'identities'} · '
                   '$enabledCount enabled · $liveCount live. Switching disconnects the current '
-                  'MeshCore app. Reconnect it if it does not reconnect '
-                  'automatically.',
+                  'MeshCore app.',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),

@@ -88,9 +88,10 @@ held on your phone, not on the radio. Tap **Switch** to choose another identity;
 
 **Device link** connects MeshChameleon to the radio. **Proxy server** serves a
 separate connection to your MeshCore app. The MeshCore app section shows whether
-that client is connected, waiting, or the server is stopped. The copy icon copies
-`127.0.0.1:<port>` for a client on this phone. A client on another device must use
-the phone's local network address instead.
+that client is connected, waiting, or the server is stopped. It also shows the
+port the proxy is listening on. A client on this host connects to
+`127.0.0.1:<port>`; a client on another device must use the host's local network
+address instead.
 
 The identity's waiting count is received direct and channel messages awaiting
 client sync, not unread messages or unsent messages. **Radio activity** shows
@@ -280,8 +281,7 @@ there updates the identity's stored name.
 ### Switch the active identity
 
 Tap **Switch** on Home and select an available identity. MeshChameleon closes
-the current client connection and serves the new identity. Reconnect your
-MeshCore app if it does not reconnect automatically.
+the current client connection and serves the new identity.
 
 The currently active identity is marked in the switch sheet. Tapping it again does
 nothing.
@@ -310,13 +310,14 @@ synced or the identity is enabled again.
 
 ### Phone GPS
 
-In **Settings → Phone telemetry**, **Use phone GPS** and the GPS interval
-apply to the active live identity. Shared phone status reports whether any
-identity requests GPS and the effective shared cadence. The default interval is
-900 seconds; a stored value of 0 requests a 1-second cadence and can consume
-more battery. Permission requests are explicit. Location exposure also depends
-on telemetry permissions and advert policy. Turning GPS off does not erase saved
-coordinates or stop another identity from requesting GPS.
+In **Settings → Phone telemetry**, the GPS interval sets how often
+MeshChameleon samples the host's location for the active live identity. The
+default interval is 900 seconds; a value of 0 requests a 1-second cadence and
+can consume more battery. Location permission requests are explicit. Whether
+coordinates are exposed depends on the client's telemetry permission and advert
+policy: telemetry is client-driven, so a new fix appears on the client's next
+telemetry request (or in a freshly requested `SELF_INFO`), not as an unsolicited
+push.
 
 ### Queued messages
 
@@ -335,8 +336,7 @@ If messages show as queued but do not appear in the client:
 Open the three-dot menu on an identity and choose **Clear local data**.
 
 This keeps the identity key and its current name, but removes its contacts,
-channels, queued messages, advert paths, and preferences. If the identity is
-active, reconnect the MeshCore app if it does not reconnect automatically.
+channels, queued messages, advert paths, and preferences.
 
 ### Delete an identity
 

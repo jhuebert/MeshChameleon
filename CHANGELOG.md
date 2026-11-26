@@ -26,6 +26,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The first BLE scan now waits for the Bluetooth adapter to settle, so macOS
   does not need a second click while CoreBluetooth is still starting. Denied
   permission, a disabled adapter, and a slow start now get specific messages.
+- macOS declares `NSLocationUsageDescription` and the location entitlement, so
+  requesting location permission no longer fails with "permission definitions
+  not found in plist".
+
+### Changed
+
+- Identity menus list **Clear local data** first, then disable/enable, then
+  **Delete identity** last. Reconnect guidance was removed from the identity UI;
+  the client controls its own reconnection.
+- Home no longer offers a copy-endpoint button or an "On this phone" section;
+  the **MeshCore app** section now shows the port in use.
+- Settings no longer offers a "Use phone GPS" toggle. The GPS interval and
+  permission controls remain; whether coordinates are shared is controlled by
+  the client's telemetry permissions and advert policy.
 
 ## [1.0.0] - 2026-11-22
 

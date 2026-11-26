@@ -380,6 +380,15 @@ to defend against, so the link simply stays up while the app runs. Linux needs
 `bluez` at runtime for BLE; macOS needs the Bluetooth permission. None of this
 is hardware-validated.
 
+Phone GPS is demand-driven from MeshChameleon's own `gps`/`gps_interval` custom
+vars, but whether coordinates are sent is the client's choice: telemetry is a
+client request (`CMD_SEND_TELEMETRY_REQ`), and a fresh fix is only visible on the
+next request or a freshly requested `SELF_INFO`. There is no unsolicited
+telemetry push, matching stock firmware. Settings exposes only the sampling
+interval and permission controls, not a "Use phone GPS" toggle. The macOS runner
+declares `NSLocationUsageDescription` and
+`com.apple.security.personal-information.location` so permission can be granted.
+
 `BleScanSession` waits for `FlutterBluePlus.adapterState` to settle before
 calling `startScan`. CoreBluetooth reaches `on` asynchronously on macOS, so a
 first scan issued during startup was rejected and needed a retry. The manual

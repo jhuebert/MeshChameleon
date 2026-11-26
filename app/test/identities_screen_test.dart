@@ -295,6 +295,15 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Clear local data'), findsOneWidget);
+    final labels = tester
+        .widgetList<PopupMenuItem<String>>(find.byType(PopupMenuItem<String>))
+        .map((item) => (item.child as Text).data)
+        .toList();
+    expect(labels, [
+      'Clear local data',
+      'Disable identity',
+      'Delete identity',
+    ]);
     final disableItem = tester.widget<PopupMenuItem<String>>(
       find.widgetWithText(PopupMenuItem<String>, 'Disable identity'),
     );
@@ -574,8 +583,6 @@ void main() {
     await tester.tap(find.text('Clear local data'));
     await tester.pumpAndSettle();
     expect(find.text('Clear local data?'), findsOneWidget);
-    expect(
-        find.textContaining('The MeshCore app will reconnect'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
     expect(fake.clearCalls, isEmpty);
