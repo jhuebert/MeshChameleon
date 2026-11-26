@@ -6,6 +6,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-26
+
+Desktop builds for Linux, macOS and Windows with release assets; BLE on macOS and Linux; UI cleanup; macOS keychain, location and BLE scan fixes.
+
 ### Added
 
 - macOS and Windows desktop runners, with MeshChameleon branding and desktop

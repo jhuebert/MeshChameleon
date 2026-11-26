@@ -1,6 +1,6 @@
 # MeshChameleon User Guide
 
-Version 1.0.0 · Android and desktop (Linux, macOS, Windows)
+Version 1.1.0 · Android and desktop (Linux, macOS, Windows)
 
 MeshChameleon makes an Android phone act as a MeshCore companion while using an
 ordinary MeshCore radio for the actual sending and receiving. You keep using
