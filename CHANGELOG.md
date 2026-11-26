@@ -6,6 +6,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- macOS and Windows desktop runners, with MeshChameleon branding and desktop
+  launcher icons. CI builds all three desktop targets, and releases attach
+  Linux, Windows, and macOS bundles as assets.
+- BLE device links on macOS and Linux. Windows remains network-only because
+  `flutter_blue_plus` has no Windows implementation.
+
+### Fixed
+
+- macOS identity keys now use the legacy login keychain, so unsigned builds do
+  not fail with `errSecMissingEntitlement` (-34018) and report the identity
+  database as unavailable.
+- An occupied proxy port now explains the macOS AirPlay Receiver conflict and
+  points to the port setting instead of showing a raw socket error.
+- BLE handshakes no longer call `requestMtu` off Android, where the plugin
+  rejects it and logged a misleading `android-only` warning on macOS/Linux.
+- The first BLE scan now waits for the Bluetooth adapter to settle, so macOS
+  does not need a second click while CoreBluetooth is still starting. Denied
+  permission, a disabled adapter, and a slow start now get specific messages.
+- macOS declares `NSLocationUsageDescription` and the location entitlement, so
+  requesting location permission no longer fails with "permission definitions
+  not found in plist".
+
+### Changed
+
+- Identity menus list **Clear local data** first, then disable/enable, then
+  **Delete identity** last. Reconnect guidance was removed from the identity UI;
+  the client controls its own reconnection.
+- Home no longer offers a copy-endpoint button or an "On this phone" section;
+  the **MeshCore app** section now shows the port in use.
+- Settings no longer offers a "Use phone GPS" toggle. The GPS interval and
+  permission controls remain; whether coordinates are shared is controlled by
+  the client's telemetry permissions and advert policy.
+
 ## [1.0.0] - 2026-11-22
 
 MeshChameleon 1.0.0 is the first stable release. It brings a redesigned

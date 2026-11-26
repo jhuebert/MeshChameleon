@@ -490,3 +490,103 @@ jobs:
           rm -f "$RUNNER_TEMP/upload-keystore.p12" \
             "$RUNNER_TEMP/app-signing-keystore.p12" \
             app/android/key.properties
+
+  # Desktop bundles build from the release tag and attach themselves to the
+  # same GitHub Release. fail-fast is off so a failed platform can be retried
+  # without rebuilding the already-published APKs.
+  desktop:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            asset: linux-x64.tar.gz
+          - os: windows-latest
+            target: windows
+            asset: windows-x64.zip
+          - os: macos-latest
+            target: macos
+            asset: macos.zip
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    steps:
+      - name: Check out the release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A dry run has no tag yet; build the current main instead.
+          ref: ${{ inputs.dry_run && 'main' || format('v{0}', inputs.version) }}
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev bluez
+
+      - name: Build ${{ matrix.target }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          export SOURCE_DATE_EPOCH="$(git show -s --format=%ct HEAD)"
+          export MESHCHAMELEON_GIT_DIRTY=0
+          ./scripts/build.sh ${{ matrix.target }} --release
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          cd app/build/linux/x64/release/bundle
+          tar -czf "$GITHUB_WORKSPACE/MeshChameleon-$VERSION-linux-x64.tar.gz" .
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          Compress-Archive -Path "app/build/windows/x64/runner/Release/*" `
+            -DestinationPath "MeshChameleon-$env:VERSION-windows-x64.zip" -Force
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent \
+            app/build/macos/Build/Products/Release/meshchameleon.app \
+            "MeshChameleon-$VERSION-macos.zip"
+
+      - name: Upload dry-run bundle
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: desktop-${{ matrix.target }}
+          path: MeshChameleon-${{ inputs.version }}-${{ matrix.asset }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach the bundle to the release
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          gh release upload "v$VERSION" \
+            "MeshChameleon-$VERSION-${{ matrix.asset }}" --clobber

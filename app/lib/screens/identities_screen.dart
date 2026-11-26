@@ -79,8 +79,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
       title: 'Clear local data?',
       detail: '${summary.name} (#${summary.prefixHex})\n\n'
           'Contacts, channels, queued messages, advert paths, and preferences '
-          'will be cleared. The identity key and current name remain.'
-          '${summary.active ? ' The MeshCore app will reconnect.' : ''}',
+          'will be cleared. The identity key and current name remain.',
       action: 'Clear',
     );
     if (!confirmed || !mounted) return;
@@ -171,8 +170,7 @@ class _IdentitiesScreenState extends State<IdentitiesScreen> {
                 Expanded(
                   child: Text(
                     'The active identity is the one the MeshCore app uses. '
-                    'Switching disconnects the app; reconnect it if it does '
-                    'not reconnect automatically.',
+                    'Switching disconnects the app.',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -454,14 +452,14 @@ class _IdentityCard extends StatelessWidget {
                 if (value == 'delete') onDelete();
               },
               itemBuilder: (context) => [
+                const PopupMenuItem(
+                  value: 'clear',
+                  child: Text('Clear local data'),
+                ),
                 PopupMenuItem(
                   value: 'toggle',
                   enabled: !summary.enabled || canDisable,
                   child: Text(_toggleLabel),
-                ),
-                const PopupMenuItem(
-                  value: 'clear',
-                  child: Text('Clear local data'),
                 ),
                 PopupMenuItem(
                   value: 'delete',

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:device_link/device_link.dart';
@@ -66,6 +67,14 @@ class BleDeviceLink
   final Duration replyDrainTimeout;
 
   final void Function(String message)? onLog;
+
+  /// MTU negotiation is Android-only in `flutter_blue_plus`: other platforms
+  /// reject `requestMtu` outright. Overridable in tests.
+  static Future<void> Function(BluetoothDevice device) negotiateMtu =
+      (device) async {
+    if (!Platform.isAndroid) return;
+    await device.requestMtu(185);
+  };
 
   final _stateController = StreamController<LinkState>.broadcast();
   LinkState _state = LinkState.disconnected;
@@ -221,7 +230,7 @@ class BleDeviceLink
   /// connection paths so their handshakes cannot drift apart.
   Future<void> _handshake() async {
     try {
-      await device.requestMtu(185);
+      await negotiateMtu(device);
     } catch (e) {
       onLog?.call('[BleDeviceLink] requestMtu failed: $e');
     }

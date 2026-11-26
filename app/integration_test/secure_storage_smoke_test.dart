@@ -1,6 +1,9 @@
-// Linux secure-storage smoke test (no radio, no UI).
+// Desktop secure-storage smoke test (no radio, no UI). On macOS this also
+// guards the legacy-login-keychain path used by unsigned builds; the
+// data-protection keychain would fail with errSecMissingEntitlement (-34018).
 //
 //   flutter test integration_test/secure_storage_smoke_test.dart -d linux
+//   flutter test integration_test/secure_storage_smoke_test.dart -d macos
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';

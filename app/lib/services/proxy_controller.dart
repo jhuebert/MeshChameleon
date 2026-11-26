@@ -1,9 +1,25 @@
 import 'dart:async';
+import 'dart:io' show Platform, SocketException;
 
 import 'package:companion_server/companion_server.dart';
 import 'package:mesh_node/mesh_node.dart';
 
 import 'proxy_status.dart';
+
+/// Explains a failed proxy bind, including the common macOS conflict with
+/// AirPlay Receiver (ControlCenter listens on 5000 by default).
+String describeProxyStartFailure(Object error, int port, {bool? isMacOS}) {
+  final code = error is SocketException ? error.osError?.errorCode : null;
+  // EADDRINUSE: 48 on macOS/BSD, 98 on Linux, 10048 on Windows.
+  final addressInUse = code == 48 || code == 98 || code == 10048;
+  if (!addressInUse) return 'Failed to start proxy: $error';
+  final hint = (isMacOS ?? Platform.isMacOS)
+      ? ' On macOS, AirPlay Receiver often uses this port. Turn it off in '
+          'System Settings → General → AirDrop & Handoff, or choose another '
+          'port in Settings.'
+      : ' Choose another port in Settings.';
+  return 'Proxy port $port is already in use.$hint';
+}
 
 /// Owns the app-facing companion server and its start/stop transition queue.
 ///
@@ -67,20 +83,21 @@ class ProxyController {
               : 'Connect a device first');
       return;
     }
+    final requestedPort = serverPort ?? port();
     final current = server ??= CompanionServer(
       bridge: active,
-      config: CompanionServerConfig(port: serverPort ?? port()),
+      config: CompanionServerConfig(port: requestedPort),
       metrics: metrics,
       onLog: log,
     );
     try {
       await current.start();
-      setPort(current.port ?? port());
+      setPort(current.port ?? requestedPort);
       status = ProxyStatus.running;
       log('Proxy server listening on port ${port()}');
       await updateNotification();
     } catch (e) {
-      log('Failed to start proxy: $e');
+      log(describeProxyStartFailure(e, requestedPort));
       try {
         await current.stop();
       } catch (_) {}

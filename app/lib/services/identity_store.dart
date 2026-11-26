@@ -28,8 +28,19 @@ class IdentityStore {
     migrateWithBackup: false,
   );
 
-  static FlutterSecureStorage _defaultStorage() =>
-      const FlutterSecureStorage(aOptions: androidOptions);
+  /// macOS uses the legacy login keychain rather than the data-protection
+  /// keychain. The latter requires the `keychain-access-groups` entitlement
+  /// (and a provisioning profile), which our unsigned desktop builds do not
+  /// have; without it keychain calls fail with errSecMissingEntitlement
+  /// (-34018) and every identity looks unavailable.
+  static const MacOsOptions macOsOptions = MacOsOptions(
+    usesDataProtectionKeychain: false,
+  );
+
+  static FlutterSecureStorage _defaultStorage() => const FlutterSecureStorage(
+        aOptions: androidOptions,
+        mOptions: macOsOptions,
+      );
 
   static const _prefix = 'meshcore_identity_v2/';
   static const _restorePrefix = 'meshcore_identity_restore_v1/';

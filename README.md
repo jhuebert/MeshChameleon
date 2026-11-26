@@ -73,7 +73,7 @@ Each identity has its own name, key, contacts, channels, and message queue. Whil
 a device is connected, **all enabled identities keep receiving**, so messages
 still arrive for the ones you are not currently using. The **active** identity is
 the one your MeshCore app sees; tap another identity to switch. The client is
-disconnected and may need to reconnect to the new identity.
+disconnected when you switch identities.
 
 You can create extra identities from **Switch → Manage identities**. Disable an identity to
 stop it from running and receiving while keeping its key, contacts, channels, and
@@ -112,10 +112,11 @@ The important part: **your phone owns the identity, not the radio.**
 
 ## What you need
 
-- An Android phone running Android 7.0 (API 24) or newer. iOS is not supported
-  yet.
+- An Android phone running Android 7.0 (API 24) or newer, or a desktop build
+  (Linux, macOS, or Windows). iOS is not supported yet.
 - A MeshCore companion radio with its normal firmware, reachable over Bluetooth
-  or Wi-Fi/Ethernet. You can switch between radios at any time.
+  (Android, macOS, and Linux) or Wi-Fi/Ethernet (every platform; Windows is
+  network-only). You can switch between radios at any time.
 - A MeshCore client app that can use a **TCP/network companion** — for example
   the official MeshCore app,
   [`MeshCore Open`](https://github.com/zjs81/meshcore-open), or another
@@ -189,9 +190,10 @@ The storage baseline is **0.1.0**; the first signed public build is the
 **0.2.0** pre-release. The main features are implemented and pass automated
 tests, but this is still an early project:
 
-- Android only; iOS is deferred.
-- There is no Play Store release yet; signed pre-release APKs are on GitHub
-  Releases.
+- Android and Linux/macOS/Windows desktop builds; iOS is deferred. Desktop
+  builds are unsigned, so the OS will ask you to confirm the first launch.
+- There is no Play Store release yet; signed pre-release APKs and desktop
+  bundles are on GitHub Releases.
 - Testers should install the release APKs, not debug builds. Debug builds use a
   machine-local certificate and cannot update to release or Play builds.
 - Real-hardware testing is still in progress for Bluetooth, network links, radio
@@ -201,7 +203,8 @@ tests, but this is still an early project:
 
 ## Privacy and security
 
-- MeshCore identity keys are stored in Android's secure storage.
+- MeshCore identity keys are stored in the host's secure storage (Android
+  Keystore, or the OS keychain on desktop).
 - There is no analytics, cloud service, or telemetry upload. Connection
   statistics are session-only and stay in memory; copying diagnostics is an
   explicit local action.

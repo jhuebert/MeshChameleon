@@ -1,5 +1,6 @@
+import 'dart:typed_data';
+
 import 'package:material_ui/material_ui.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshchameleon/app_route_observer.dart';
 import 'package:meshchameleon/app_view_state.dart';
@@ -75,27 +76,6 @@ void _setTallView(WidgetTester tester) => _setView(
       const Size(1200, 3000),
     );
 
-/// Captures Clipboard.setData payloads sent through the platform channel.
-class _ClipboardSpy {
-  String? text;
-
-  void install(WidgetTester tester) {
-    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      SystemChannels.platform,
-      (call) async {
-        if (call.method == 'Clipboard.setData') {
-          text = (call.arguments as Map)['text'] as String?;
-        }
-        return null;
-      },
-    );
-    addTearDown(() {
-      tester.binding.defaultBinaryMessenger
-          .setMockMethodCallHandler(SystemChannels.platform, null);
-    });
-  }
-}
-
 void main() {
   testWidgets('home exposes labeled Android-sized touch targets',
       (tester) async {
@@ -134,7 +114,7 @@ void main() {
       find.text('Home Identity'),
       find.text('Device link'),
       find.text('Proxy server'),
-      find.byTooltip('Copy endpoint'),
+      find.text('Port: 5000'),
     ]) {
       expect(finder, findsOneWidget);
       expect(tester.getTopLeft(finder).dy, lessThan(bottom),
@@ -174,11 +154,11 @@ void main() {
     expect(find.textContaining('Not received yet'), findsWidgets);
 
     await tester.scrollUntilVisible(
-      find.byTooltip('Copy endpoint'),
+      find.text('Port: 5000'),
       -200,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.byTooltip('Copy endpoint'), findsOneWidget);
+    expect(find.text('Port: 5000'), findsOneWidget);
   });
 
   testWidgets('loading state shows a placeholder, never an empty state',
@@ -434,9 +414,8 @@ void main() {
     expect(find.text('Disconnect'), findsNothing);
   });
 
-  testWidgets('Copy endpoint copies the configured host:port', (tester) async {
+  testWidgets('MeshCore app section shows the configured port', (tester) async {
     _setTallView(tester);
-    final spy = _ClipboardSpy()..install(tester);
     final summary = _homeSummary();
     final app = FakeAppState()
       ..summaries = [summary]
@@ -446,11 +425,9 @@ void main() {
     await _pumpHome(tester, app);
     await tester.pump();
 
-    await tester.tap(find.byTooltip('Copy endpoint'));
-    await tester.pump();
-
-    expect(spy.text, '127.0.0.1:8123');
-    expect(find.text('Endpoint copied'), findsOneWidget);
+    expect(find.text('Port: 8123'), findsOneWidget);
+    expect(find.text('On this phone'), findsNothing);
+    expect(find.byTooltip('Copy endpoint'), findsNothing);
   });
 
   testWidgets('client row distinguishes stopped, waiting, and connected',
@@ -477,18 +454,15 @@ void main() {
         find.textContaining('Client address: 10.0.0.9:41234'), findsOneWidget);
   });
 
-  testWidgets('proxy stopped reports Server stopped, endpoint stays copyable',
+  testWidgets('proxy stopped reports Server stopped and keeps the port visible',
       (tester) async {
     _setTallView(tester);
-    final spy = _ClipboardSpy()..install(tester);
     final app = FakeAppState()..port = 5000;
     await _pumpHome(tester, app);
     await tester.pump();
 
     expect(find.text('Server stopped'), findsOneWidget);
-    await tester.tap(find.byTooltip('Copy endpoint'));
-    await tester.pump();
-    expect(spy.text, '127.0.0.1:5000');
+    expect(find.text('Port: 5000'), findsOneWidget);
   });
 
   testWidgets('radio activity expands to show signal and sample age',

@@ -57,9 +57,8 @@ void main() {
     await tester.tap(find.widgetWithText(SwitchListTile, 'Resume on launch'));
     await tester.pump();
     expect(app.autoResume, isTrue);
-    await tester.scrollUntilVisible(find.text('Use phone GPS'), 200);
-    expect(find.textContaining('Unavailable while this identity is offline'),
-        findsOneWidget);
+    await tester.scrollUntilVisible(find.text('GPS interval'), 200);
+    expect(find.text('Use phone GPS'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -117,7 +116,8 @@ void main() {
     expect(app.port, 5000);
   });
 
-  testWidgets('GPS editor reads active scope rather than shared demand',
+  testWidgets(
+      'GPS interval editor reads active scope rather than shared demand',
       (tester) async {
     final app = FakeAppState()
       ..phoneGpsRequested = true
@@ -134,13 +134,8 @@ void main() {
           theme: MeshChameleonTheme.dark(), home: const SettingsScreen()),
     ));
     await tester.pump();
-    await tester.scrollUntilVisible(find.text('Use phone GPS'), 200);
-    expect(
-        tester
-            .widget<SwitchListTile>(
-                find.widgetWithText(SwitchListTile, 'Use phone GPS'))
-            .value,
-        isFalse);
+    await tester.scrollUntilVisible(find.text('GPS interval'), 200);
+    expect(find.text('Use phone GPS'), findsNothing);
     expect(find.text('Every 900 s'), findsOneWidget);
     await tester.tap(find.text('Edit'));
     await tester.pumpAndSettle();
@@ -170,16 +165,6 @@ void main() {
         '123');
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    app.gpsSaveResult = false;
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Use phone GPS'));
-    await tester.pump();
-    expect(find.text('Could not change phone GPS. Try again.'), findsOneWidget);
-    expect(app.gpsScope!.requested, isTrue);
-    app.gpsSaveResult = true;
-    await tester.tap(find.widgetWithText(SwitchListTile, 'Use phone GPS'));
-    await tester.pump();
-    expect(find.text('Could not change phone GPS. Try again.'), findsNothing);
-    expect(app.gpsScope!.requested, isFalse);
   });
 
   testWidgets('closing a pending port save does not pop Settings',

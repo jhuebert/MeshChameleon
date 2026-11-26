@@ -332,14 +332,15 @@ before publish. Quota failures are reported as storage/table-full errors; the ap
 does not delete broad directories or physical radio state to recover. See
 `SECURITY.md` for at-rest storage.
 
-## Linux desktop and headless proxy
+## Desktop targets and headless proxy
 
-Two hardware-free targets share the pure-Dart core:
+The desktop runners share the pure-Dart core with the phone app:
 
-- **Linux desktop** (`app/linux/`) — the real UI. BLE is hidden off mobile
-  because there is no desktop `flutter_blue_plus` implementation; the
-  **Simulated** tab drives the real `MeshNode` and `CompanionServer` from an
-  in-memory `FakeDeviceLink`.
+- **Linux, macOS and Windows desktop** (`app/linux/`, `app/macos/`,
+  `app/windows/`) — the real UI. BLE works on Linux and macOS through
+  `flutter_blue_plus`; Windows has no BLE backend and offers network and
+  simulated links only. The **Simulated** tab drives the real `MeshNode` and
+  `CompanionServer` from an in-memory `FakeDeviceLink` on every desktop.
 - **Headless CLI** (`packages/mesh_node/tool/proxy_cli.dart`) — no Flutter, no
   GUI, TCP device link only.
 
@@ -374,9 +375,42 @@ a new `SELF_INFO` public key.
 0600**. Use it only for development; the phone app's Keystore-backed storage is
 the real model (see `SECURITY.md`).
 
-Desktop builds have no BLE device link and no background service — desktop has
-no process suspension to defend against, so the link simply stays up while the
-app runs. None of this is hardware-validated.
+Desktop builds have no foreground service — desktop has no process suspension
+to defend against, so the link simply stays up while the app runs. Linux needs
+`bluez` at runtime for BLE; macOS needs the Bluetooth permission. None of this
+is hardware-validated.
+
+Phone GPS is demand-driven from MeshChameleon's own `gps`/`gps_interval` custom
+vars, but whether coordinates are sent is the client's choice: telemetry is a
+client request (`CMD_SEND_TELEMETRY_REQ`), and a fresh fix is only visible on the
+next request or a freshly requested `SELF_INFO`. There is no unsolicited
+telemetry push, matching stock firmware. Settings exposes only the sampling
+interval and permission controls, not a "Use phone GPS" toggle. The macOS runner
+declares `NSLocationUsageDescription` and
+`com.apple.security.personal-information.location` so permission can be granted.
+The macOS build prints a deprecation warning from `geolocator_apple` 2.4.3
+(`+[CLLocationManager authorizationStatus]`, deprecated in macOS 11). It is
+upstream plugin code, the published package is the latest version, and Xcode
+build settings do not reach SwiftPM package targets, so the warning is left as-is
+rather than vendoring a patched plugin.
+
+`BleScanSession` waits for `FlutterBluePlus.adapterState` to settle before
+calling `startScan`. CoreBluetooth reaches `on` asynchronously on macOS, so a
+first scan issued during startup was rejected and needed a retry. The manual
+`app/integration_test/ble_scan_smoke_test.dart` checks this on a real adapter.
+
+macOS ControlCenter (AirPlay Receiver) listens on `*:5000` by default, so the
+proxy cannot bind there until AirPlay Receiver is turned off in System Settings
+→ General → AirDrop & Handoff, or the proxy port is changed in Settings. The
+failure message now explains this.
+
+On macOS, identity keys use the legacy login keychain
+(`MacOsOptions(usesDataProtectionKeychain: false)`). The data-protection
+keychain requires a `keychain-access-groups` entitlement and a provisioning
+profile, which unsigned/ad-hoc desktop builds do not have; without this option
+the keys fail with `errSecMissingEntitlement` (-34018) and the identity database
+looks unavailable. `app/integration_test/secure_storage_smoke_test.dart` runs on
+both Linux and macOS to guard this.
 
 ## Connecting a real client
 
@@ -783,10 +817,12 @@ scripts/build.sh apk --debug
 adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
 ```
 
-Desktop:
+Desktop (build each target on that operating system):
 
 ```sh
 scripts/build.sh linux --debug
+scripts/build.sh macos --release
+scripts/build.sh windows --release
 ```
 
 `scripts/run.sh -d <device>` is the equivalent for `flutter run`. The wrappers

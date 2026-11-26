@@ -1,6 +1,6 @@
 # MeshChameleon User Guide
 
-Version 1.0.0 · Android
+Version 1.0.0 · Android and desktop (Linux, macOS, Windows)
 
 MeshChameleon makes an Android phone act as a MeshCore companion while using an
 ordinary MeshCore radio for the actual sending and receiving. You keep using
@@ -36,10 +36,11 @@ identities, background operation, backups, and troubleshooting.
 
 ## What you need
 
-- An Android phone running Android 7.0 or newer. iOS is not supported yet.
-- A normal MeshCore companion radio, reachable over Bluetooth or Wi-Fi/Ethernet.
-  For a network-connected radio, the phone and radio must be on the same network.
-  You can switch between radios at any time.
+- An Android phone running Android 7.0 or newer, or a desktop build on Linux,
+  macOS, or Windows. iOS is not supported yet.
+- A normal MeshCore companion radio, reachable over Bluetooth (Android, macOS,
+  Linux) or Wi-Fi/Ethernet (all platforms). For a network-connected radio, the
+  host and radio must be on the same network. You can switch radios at any time.
 - A MeshCore client app that can connect to a **TCP/network** companion — for
   example the official MeshCore app, MeshCore Open, or another TCP-capable
   client. MeshChameleon does not expose a Bluetooth companion to the client app;
@@ -87,9 +88,10 @@ held on your phone, not on the radio. Tap **Switch** to choose another identity;
 
 **Device link** connects MeshChameleon to the radio. **Proxy server** serves a
 separate connection to your MeshCore app. The MeshCore app section shows whether
-that client is connected, waiting, or the server is stopped. The copy icon copies
-`127.0.0.1:<port>` for a client on this phone. A client on another device must use
-the phone's local network address instead.
+that client is connected, waiting, or the server is stopped. It also shows the
+port the proxy is listening on. A client on this host connects to
+`127.0.0.1:<port>`; a client on another device must use the host's local network
+address instead.
 
 The identity's waiting count is received direct and channel messages awaiting
 client sync, not unread messages or unsent messages. **Radio activity** shows
@@ -279,8 +281,7 @@ there updates the identity's stored name.
 ### Switch the active identity
 
 Tap **Switch** on Home and select an available identity. MeshChameleon closes
-the current client connection and serves the new identity. Reconnect your
-MeshCore app if it does not reconnect automatically.
+the current client connection and serves the new identity.
 
 The currently active identity is marked in the switch sheet. Tapping it again does
 nothing.
@@ -309,13 +310,14 @@ synced or the identity is enabled again.
 
 ### Phone GPS
 
-In **Settings → Phone telemetry**, **Use phone GPS** and the GPS interval
-apply to the active live identity. Shared phone status reports whether any
-identity requests GPS and the effective shared cadence. The default interval is
-900 seconds; a stored value of 0 requests a 1-second cadence and can consume
-more battery. Permission requests are explicit. Location exposure also depends
-on telemetry permissions and advert policy. Turning GPS off does not erase saved
-coordinates or stop another identity from requesting GPS.
+In **Settings → Phone telemetry**, the GPS interval sets how often
+MeshChameleon samples the host's location for the active live identity. The
+default interval is 900 seconds; a value of 0 requests a 1-second cadence and
+can consume more battery. Location permission requests are explicit. Whether
+coordinates are exposed depends on the client's telemetry permission and advert
+policy: telemetry is client-driven, so a new fix appears on the client's next
+telemetry request (or in a freshly requested `SELF_INFO`), not as an unsolicited
+push.
 
 ### Queued messages
 
@@ -334,8 +336,7 @@ If messages show as queued but do not appear in the client:
 Open the three-dot menu on an identity and choose **Clear local data**.
 
 This keeps the identity key and its current name, but removes its contacts,
-channels, queued messages, advert paths, and preferences. If the identity is
-active, reconnect the MeshCore app if it does not reconnect automatically.
+channels, queued messages, advert paths, and preferences.
 
 ### Delete an identity
 
@@ -620,9 +621,10 @@ only the key, not contacts, channels, messages, or settings.
 
 ## Limits and compatibility
 
-- Android only; iOS is not supported yet.
-- No Play Store release yet; signed test builds are on GitHub Releases. Debug
-  builds cannot update to release or Play builds.
+- Android and Linux/macOS/Windows desktop builds; iOS is not supported yet.
+  Desktop builds are unsigned; confirm the first launch with your OS.
+- No Play Store release yet; signed APKs and desktop bundles are on GitHub
+  Releases. Debug builds cannot update to release or Play builds.
 - One radio link and one MeshCore client at a time.
 - The MeshCore client must support a network/TCP companion and normally runs on
   the same phone.

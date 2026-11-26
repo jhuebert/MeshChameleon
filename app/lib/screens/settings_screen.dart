@@ -25,7 +25,6 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen>
     with WidgetsBindingObserver {
-  String? _gpsFailureIdentity;
   @override
   void initState() {
     super.initState();
@@ -99,16 +98,6 @@ class _SettingsScreenState extends State<SettingsScreen>
       onSave: app.setPhoneGpsInterval,
       failureMessage: 'Could not save the GPS interval. Try again.',
     );
-  }
-
-  Future<void> _toggleGps(bool enabled) async {
-    final app = context.read<AppViewState>();
-    final id = app.activeGpsScope?.identityId;
-    setState(() => _gpsFailureIdentity = null);
-    final ok = await app.setPhoneGpsEnabled(enabled);
-    if (!ok && mounted) {
-      setState(() => _gpsFailureIdentity = id);
-    }
   }
 
   Future<void> _requestLocation() async {
@@ -205,30 +194,6 @@ class _SettingsScreenState extends State<SettingsScreen>
                                 'this identity’s own settings',
                       ),
                     ),
-                    SwitchListTile(
-                      secondary: const Icon(Icons.gps_fixed),
-                      title: const Text('Use phone GPS'),
-                      subtitle: Text(
-                        scope == null
-                            ? 'Unavailable while this identity is offline.'
-                            : scope.requested
-                                ? 'Use coordinates for this identity.'
-                                : 'Other identities may still use GPS.',
-                      ),
-                      value: scope?.requested ?? false,
-                      onChanged: scope == null || app.busy ? null : _toggleGps,
-                    ),
-                    if (scope != null &&
-                        _gpsFailureIdentity == scope.identityId)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Text(
-                          'Could not change phone GPS. Try again.',
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
                     ListTile(
                       leading: const Icon(Icons.timer_outlined),
                       title: const Text('GPS interval'),
