@@ -876,8 +876,8 @@ analysis/tests and builds the APKs without signing secrets. The sign job then
 requests the `release` environment and waits for the required reviewer before
 decoding the app signing key.
 
-Download the `MeshChameleon-test-...` artifact from the run, unzip it, and
-install the APK that matches the current install:
+Download the `MeshChameleon-test-...-android` artifact from the run, unzip it,
+and install the APK that matches the current install:
 
 - `...-<base>-universal-test.apk` for a universal install;
 - `...-<base+2000>-arm64-v8a-test.apk` for an arm64-v8a split install;

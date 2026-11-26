@@ -374,7 +374,7 @@ jobs:
       - name: Upload signed test APKs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: MeshChameleon-test-${{ needs.build.outputs.version_name }}-${{ needs.build.outputs.build_number }}-${{ needs.build.outputs.short_commit }}
+          name: MeshChameleon-test-${{ needs.build.outputs.version_name }}-${{ needs.build.outputs.build_number }}-${{ needs.build.outputs.short_commit }}-android
           path: dist-test/final
           if-no-files-found: error
           retention-days: 14
